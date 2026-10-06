@@ -3,11 +3,7 @@ import { spawn } from 'child_process'
 import fs from 'fs'
 import path from 'path'
 import os from 'os'
-import { suspendProcess, resumeProcess, clipProvenanceComment } from '../services/ffmpegService'
-
-function fixAsarPath(p: string): string {
-  return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
-}
+import { suspendProcess, resumeProcess, clipProvenanceComment, requireFfmpegBin } from '../services/ffmpegService'
 
 // Single-slot active run — the Combine page runs one job at a time. Lets
 // combine:cancel kill the ffmpeg child, combine:pause/resume suspend it
@@ -45,8 +41,7 @@ export function registerCombineIPC(): void {
       outputPath: string,
       totalDurationSec: number
     ): Promise<void> => {
-      const { default: ffmpegStatic } = await import('ffmpeg-static')
-      if (!ffmpegStatic) throw new Error('ffmpeg binary not found')
+      const ffmpegBin = requireFfmpegBin()
 
       // Guard rails: the output must be a NEW file that isn't also an input.
       // Overwriting is never right here — the concat starts by truncating the
@@ -97,7 +92,7 @@ export function registerCombineIPC(): void {
           outputPath
         ]
 
-        const proc = spawn(fixAsarPath(ffmpegStatic as string), args)
+        const proc = spawn(ffmpegBin, args)
         proc.stdin?.end()
         const runState = {
           cancelled: false,

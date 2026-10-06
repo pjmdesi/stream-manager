@@ -19,7 +19,15 @@ import path from 'path'
 //      streamed the full file local.
 
 const REPARSE_POINT = 0x400
-const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
+/** Windows attribute flags that mean the file's data is not resident locally:
+ *  0x1000 FILE_ATTRIBUTE_OFFLINE (data physically offline), 0x40000
+ *  FILE_ATTRIBUTE_RECALL_ON_OPEN (opening triggers recall), 0x400000
+ *  FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (reading triggers recall).
+ *  REPARSE_POINT (0x400) is intentionally NOT in the mask: Synology Drive
+ *  (and similar) put reparse points on EVERY file in the synced folder,
+ *  placeholders and locally-resident files alike, so it cannot tell the two
+ *  apart. The file-local checks in ipc/files.ts test against this mask. */
+export const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
 
 // Per-direction concurrency. Each unit is one PowerShell process running one
 // CFAPI call; provider contention (Synology Drive / OneDrive / etc.) caps

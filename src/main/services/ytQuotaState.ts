@@ -16,7 +16,7 @@
  * disappears the moment it resets.
  */
 
-import { BrowserWindow } from 'electron'
+import { broadcast } from './broadcast'
 import { getStore } from '../ipc/store'
 
 /** YouTube Data API default daily quota (units). */
@@ -172,7 +172,5 @@ function emitChange(): void {
   // in one place — guarantees the pushed shape always matches what a
   // fresh read would return.
   const state = getQuotaState()
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('youtube:quota-changed', state)
-  }
+  broadcast('youtube:quota-changed', state)
 }

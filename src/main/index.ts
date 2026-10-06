@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell, ipcMain, screen, Tray, Menu, MenuItem, nativ
 import { join } from 'path'
 import fs from 'fs'
 import Store from 'electron-store'
+import { isDev, iconPath } from './env'
 
 // ── Diagnostic: trace every mkdir of a date-pattern folder ───────────────
 // A phantom "2024-06-18" stream folder keeps reappearing without explicit
@@ -26,8 +27,6 @@ const __origMkdirP = fs.promises.mkdir.bind(fs.promises)
   }
   return __origMkdirP(p, opts as fs.MakeDirectoryOptions)
 }) as typeof fs.promises.mkdir
-
-const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
 
 // x/y are optional: absent means "no saved position" (first run) and lets
 // Electron center the window. They must NOT default to 0,0 — a genuine save
@@ -69,10 +68,6 @@ function saveWindowState(win: BrowserWindow): void {
   windowStateStore.set('windowState', { x, y, width, height, maximized: false })
 }
 
-// Resolve the app icon — dev: project root resources/, prod: electron resourcesPath
-const iconPath = is.dev
-  ? join(__dirname, '../../resources/icon.png')
-  : join(process.resourcesPath, 'icon.png')
 const electronApp = { setAppUserModelId: (id: string) => app.setAppUserModelId(id) }
 const optimizer = { watchWindowShortcuts: (_win: BrowserWindow) => {} }
 
@@ -255,7 +250,7 @@ function createWindow(): BrowserWindow {
     menu.popup({ window: mainWindow })
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
     mainWindow.webContents.openDevTools({ mode: 'detach' })
   } else {
@@ -473,13 +468,13 @@ app.whenReady().then(() => {
   // hook has no perceptible effect on animation smoothness — the dev-build
   // sidebar-slide hitch is identical with and without it, so this stays
   // unconditional rather than behind an opt-in flag.) The dynamic import +
-  // is.dev guard keep this devDependency out of packaged builds (it's never
+  // isDev guard keep this devDependency out of packaged builds (it's never
   // required in prod). Electron registers extension content scripts
   // asynchronously, so the first page load always races the install and misses
   // the DevTools hook (the tabs only worked after a manual Ctrl+R) — installing
   // before createWindow doesn't help and broke the DevTools auto-open. Instead,
   // once the install resolves, reload the page one time to automate that Ctrl+R.
-  if (is.dev) {
+  if (isDev) {
     void import('electron-devtools-installer')
       .then((mod) => {
         // CJS interop varies by how electron-vite emits the externalized import

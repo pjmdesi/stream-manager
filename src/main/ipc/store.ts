@@ -3,6 +3,7 @@ import Store from 'electron-store'
 import { app } from 'electron'
 import path from 'path'
 import { canEncryptSecrets, encryptSecret, isEncryptedSecret, readSecretOrEmpty } from '../services/secretStorage'
+import { broadcast } from '../services/broadcast'
 
 export interface YTTitleTemplate { id: string; name: string; template: string }
 export interface YTDescriptionTemplate { id: string; name: string; description: string }
@@ -313,9 +314,7 @@ export function setConfigPartial(partial: Partial<AppConfig>): void {
     if (typeof secured[key] === 'string') secured[key] = encryptSecret(secured[key] as string)
   }
   s.set('config', { ...current, ...secured })
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('config:changed')
-  }
+  broadcast('config:changed')
 }
 
 /** The config with defaults merged, legacy shapes migrated, and secret
@@ -343,6 +342,17 @@ export function getConfigDecrypted(): AppConfig {
     stored[key] = readSecretOrEmpty(stored[key], `config.${key}`)
   }
   return stored
+}
+
+/** The configured streams directory, '' before onboarding. Main-side
+ *  readers use this instead of their own cast of the stored config. */
+export function getStreamsDir(): string {
+  return getStore().get('config', getDefaultConfig()).streamsDir || ''
+}
+
+/** The configured stream layout, '' before onboarding. */
+export function getStreamMode(): StreamMode {
+  return getStore().get('config', getDefaultConfig()).streamMode || ''
 }
 
 /** One-time (idempotent) migration of plaintext config secrets to

@@ -2,7 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
-import { getStore } from './store'
+import { getStore, getStreamsDir, getStreamMode } from './store'
 import { metaKey } from './streams'
 import { checkLocalFiles } from './files'
 import { expectSelfWrite } from '../services/selfWrites'
@@ -226,9 +226,9 @@ export function registerThumbnailIPC(): void {
     // folder mode so only its row reloads.
     const win = BrowserWindow.fromWebContents(event.sender)
     if (win && !win.isDestroyed()) {
-      const config = getStore().get('config') as { streamsDir?: string; streamMode?: string }
-      const scoped = config.streamMode !== 'dump-folder' && config.streamsDir
-        ? { streamKeys: [metaKey(config.streamsDir, folderPath)] }
+      const streamsDir = getStreamsDir()
+      const scoped = getStreamMode() !== 'dump-folder' && streamsDir
+        ? { streamKeys: [metaKey(streamsDir, folderPath)] }
         : undefined
       win.webContents.send('streams:changed', scoped)
     }

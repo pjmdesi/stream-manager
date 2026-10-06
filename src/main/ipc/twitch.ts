@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
+import { broadcast } from '../services/broadcast'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected } from '../services/twitchAuth'
 import { getChannelInfo, updateChannelInfo } from '../services/twitchApi'
 import { getConfigDecrypted } from './store'
@@ -26,18 +27,14 @@ export function registerTwitchIPC(): void {
     // Tell every window the connection is live — mirrors youtube:connected.
     // Persistent pages (StreamsPage) fetch Twitch status on mount only, so
     // without this a reconnect left "Push to Twitch" disabled until restart.
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('twitch:connected')
-    }
+    broadcast('twitch:connected')
   })
 
   ipcMain.handle('twitch:disconnect', () => {
     clearTokens()
     // Mirror of twitch:connected — mounted pages disable their push
     // controls immediately instead of failing on the next push attempt.
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('twitch:disconnected')
-    }
+    broadcast('twitch:disconnected')
   })
 
   ipcMain.handle('twitch:updateChannel', async (

@@ -4,29 +4,27 @@ import ffprobeStatic from 'ffprobe-static'
 import { spawn } from 'child_process'
 import { app } from 'electron'
 import path from 'path'
-import fs from 'fs'
+import { unlinkWithRetry } from './unlinkWithRetry'
 
-// When running from a packaged asar, binaries are unpacked to app.asar.unpacked
+// In a packaged build ffmpeg-static and ffprobe-static resolve to paths inside
+// app.asar/. asarUnpack copies the binaries out to app.asar.unpacked/, but the
+// path strings still point at the asar one, and spawning that errors with
+// ENOENT since asar contents are not executable.
 function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
 
-/** Remove a partially-written extraction output. The just-killed ffmpeg can
- *  hold its Windows file handle for a moment, so failed unlinks retry. */
-async function removePartialOpus(p: string, attempts = 3): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      await fs.promises.unlink(p)
-      return
-    } catch (err: any) {
-      if (err.code === 'ENOENT') return
-      await new Promise(r => setTimeout(r, 300))
-    }
-  }
-}
-
-const ffmpegBin = ffmpegStatic ? fixAsarPath(ffmpegStatic) : null
+/** Absolute path of the bundled ffmpeg with the asar fix applied, or null
+ *  when ffmpeg-static resolved nothing. The one place the fix is applied;
+ *  the combine handler and the relay manager spawn from this. */
+export const ffmpegBin: string | null = ffmpegStatic ? fixAsarPath(ffmpegStatic) : null
 const ffprobeBin = fixAsarPath(ffprobeStatic.path)
+
+/** `ffmpegBin`, or a thrown Error for callers that cannot proceed without it. */
+export function requireFfmpegBin(): string {
+  if (!ffmpegBin) throw new Error('ffmpeg binary not found')
+  return ffmpegBin
+}
 
 // Set binary paths
 if (ffmpegBin) {
@@ -284,7 +282,7 @@ export async function extractAudioTracks(
         // that nothing reclaims (only COMPLETED extractions get indexed, and
         // the cache's clear/evict walk only indexed files). The dead process
         // can hold its handle for a beat on Windows — retry briefly.
-        void removePartialOpus(outputPath)
+        void unlinkWithRetry(outputPath)
         throw err
       }
       currentKill = null

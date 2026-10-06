@@ -5,11 +5,12 @@ import path from 'path'
 import crypto from 'crypto'
 import { spawnSync } from 'child_process'
 import { startStreamsWatcher, type StreamsWatcher } from '../services/streamsWatcher'
-import { getStore } from './store'
+import { getStore, getStreamsDir } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
 import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
+import { broadcast } from '../services/broadcast'
 import { consumeSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
@@ -391,10 +392,6 @@ export function streamKeyForPath(streamsDir: string, p: string): string | null {
 
 /** Resolve the streams root from app config — used by IPC handlers that only
  *  receive a folderPath but need to compute its key relative to the root. */
-function getStreamsDir(): string {
-  return ((getStore().get('config') as any)?.streamsDir as string) ?? ''
-}
-
 // ── _meta.json health ─────────────────────────────────────────────────────
 // When a read of an EXISTING _meta.json fails (locked or unparseable), the
 // store enters a failed state: readAllMeta throws instead of returning {},
@@ -415,9 +412,7 @@ function setMetaHealth(next: MetaHealth): void {
   const changed = JSON.stringify(metaHealth) !== JSON.stringify(next)
   metaHealth = next
   if (!changed) return
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send('streams:metaHealth', metaHealth)
-  }
+  broadcast('streams:metaHealth', metaHealth)
 }
 
 export function readAllMeta(streamsDir: string): Record<string, StreamMeta> {
@@ -1535,9 +1530,7 @@ export function registerStreamsIPC(): void {
       clipDraftNotifyTimers.delete(key)
       // Meta self-writes are invisible to the watcher (expectSelfWrite),
       // so out-of-watcher writers announce their own scoped change.
-      for (const w of BrowserWindow.getAllWindows()) {
-        if (!w.isDestroyed()) w.webContents.send('streams:changed', { streamKeys: [key] })
-      }
+      broadcast('streams:changed', { streamKeys: [key] })
     }, 1000))
   }
 
@@ -1631,9 +1624,7 @@ export function registerStreamsIPC(): void {
           // stream key); dump mode has no per-stream key, so a full reload.
           const cfg = getStore().get('config') as { streamMode?: string }
           const payload = cfg.streamMode !== 'dump-folder' ? { streamKeys: [key] } : undefined
-          for (const w of BrowserWindow.getAllWindows()) {
-            if (!w.isDestroyed()) w.webContents.send('streams:changed', payload)
-          }
+          broadcast('streams:changed', payload)
         }
       }
     } catch (err) {

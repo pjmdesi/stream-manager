@@ -5,16 +5,8 @@ import { spawnSync, spawn, ChildProcess } from 'child_process'
 import { fileWatcher, WatchRule, WatchEvent } from '../services/fileWatcher'
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { registerRowThumbIPC } from '../services/rowThumbs'
-import { getStore } from './store'
-
-// Windows attribute flags that indicate the file's data is not resident locally:
-//   0x1000   = FILE_ATTRIBUTE_OFFLINE              (data physically offline)
-//   0x40000  = FILE_ATTRIBUTE_RECALL_ON_OPEN       (opening triggers recall)
-//   0x400000 = FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS (reading triggers recall)
-// REPARSE_POINT (0x400) is intentionally NOT here — Synology Drive (and
-// similar) use reparse points on EVERY file in the synced folder for both
-// placeholders and locally-resident files, so it doesn't distinguish the two.
-const OFFLINE_MASK = 0x1000 | 0x40000 | 0x400000
+import { getStreamsDir } from './store'
+import { OFFLINE_MASK } from '../services/cfapi'
 
 const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
 
@@ -28,8 +20,7 @@ function existingDir(p: string | undefined): string | undefined {
  *  root, then the user's Videos folder. Shared by the open-file and
  *  open-directory dialogs (see the Electron 43 note on openFileDialog). */
 function defaultDialogDir(): string {
-  const streamsDir = (getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir
-  return existingDir(streamsDir) ?? app.getPath('videos')
+  return existingDir(getStreamsDir()) ?? app.getPath('videos')
 }
 
 /**

@@ -1,4 +1,5 @@
-import { BrowserWindow, ipcMain, nativeImage } from 'electron'
+import { ipcMain, nativeImage } from 'electron'
+import { broadcast } from './broadcast'
 import fs from 'fs'
 import { thumbnailCacheManager, ROW_THUMB_WIDTH } from './thumbnailCacheManager'
 import { scheduleCacheEnforcement } from './cacheLimit'
@@ -35,12 +36,6 @@ let pumping = false
 
 function sourceMtime(filePath: string): number | null {
   try { return Math.floor(fs.statSync(filePath).mtimeMs) } catch { return null }
-}
-
-function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload)
-  }
 }
 
 async function generate(filePath: string): Promise<void> {

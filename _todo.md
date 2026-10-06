@@ -5,43 +5,44 @@
 1. APP-43
 2. APP-41
 3. APP-21
-4. APP-38
-5. APP-19
-6. APP-39
-7. CONV-13
-8. CONV-15
-9. CONV-17
-10. NAV-1
-11. COMB-6
-12. PLR-30
-13. STR-36
-14. STR-31
-15. STR-32
-16. STR-30
-17. STR-11
-18. STR-25
-19. STR-26
-20. STR-29
-21. PLR-31
-22. PLR-17
-23. PLR-25
-24. PLR-26
-25. PLR-32
-26. THU-38
-27. THU-35
-28. THU-36
-29. THU-37
-30. THU-39
-31. INTG-1
-32. APP-25
-33. APP-26
-34. APP-28
-35. APP-31
-36. APP-34
-37. APP-35
-38. CONV-14
-39. CONV-16
-40. SYNC-7
+4. CONV-4
+5. APP-38
+6. APP-19
+7. APP-39
+8. CONV-13
+9. CONV-15
+10. CONV-17
+11. NAV-1
+12. COMB-6
+13. PLR-30
+14. STR-36
+15. STR-31
+16. STR-32
+17. STR-30
+18. STR-11
+19. STR-25
+20. STR-26
+21. STR-29
+22. PLR-31
+23. PLR-17
+24. PLR-25
+25. PLR-26
+26. PLR-32
+27. THU-38
+28. THU-35
+29. THU-36
+30. THU-37
+31. THU-39
+32. INTG-1
+33. APP-25
+34. APP-26
+35. APP-28
+36. APP-31
+37. APP-34
+38. APP-35
+39. CONV-14
+40. CONV-16
+41. SYNC-7
 
 ## Next up
 
@@ -296,8 +297,8 @@
 - **CONV-3** [perf] [investigate]
   While conversions are running, the app gets slower and less responsive. Need to investigate to see if there's any way to prevent the conversions from affecting the app. No other apps on my machine seem to run slower while multiple conversions are happening, so it may be something in SM itself that is causing the slowness (maybe a background process that is continuously checking something while conversions run, like maybe the ETA calculations?).
 
-- **CONV-4**
-  Implement a log system for conversions, combines, and exports. This will be a log file stored on the user's machine (possibly the user appdata folder). This will store all the relevant information for past conversions which could help the user find old files, understand which encoding options are best for their workflow, and provide data for other diagnoses. This log file could also be used for in-app tools such as a history panel for the converter/combine pages and a more accurate ETA estimation for conversion processes (these are separated into their own todo items below). This should log basically all actually started conversion processes (so it would exclude anything added to the queue, but then removed. Since no actual conversion happened, it would not be useful to record). Logging should include: stream item, file info (filename, metadata), encoding preset and the specifics thereof (if it was a default OOTB preset or a custom one and what the actual encoding settings were), the ETA of the conversion, whether it was cancelled or errored out (I don't believe we need to record if the user pauses and for how long, but it may be helpful in determining some statistics like)
+- **CONV-4** [impact:3]
+  Implement a log system for conversions, combines, and exports. This will be a log file stored on the user's machine (possibly the user appdata folder). This will store all the relevant information for past conversions which could help the user find old files, understand which encoding options are best for their workflow, and provide data for other diagnoses. This log file could also be used for in-app tools such as a history panel for the converter/combine pages and a more accurate ETA estimation for conversion processes (these are separated into their own todo items below). This should log basically all actually started conversion processes (so it would exclude anything added to the queue, but then removed. Since no actual conversion happened, it would not be useful to record). Logging should include: stream item, file info (filename, metadata), encoding preset and the specifics thereof (if it was a default OOTB preset or a custom one and what the actual encoding settings were), the ETA of the conversion, whether it was cancelled or errored out (I don't believe we need to record if the user pauses and for how long, but it may be helpful in determining some statistics like), and all the relevant dates/times.
   Note (2026-09-03): this log lives in the shared logs location and uses the shared rotation helper, APP-20, like every other SM log.
 
 - **CONV-5** [investigate] [blocked:CONV-4]
@@ -539,6 +540,7 @@
   Duplicate review 2026-10-06, four commits decided: (1) renderer helpers, (2) the row-action button chrome, (3) main helpers, (4) a `src/shared/` folder for the values main and renderer both need (the video extension list and `AppConfig` with its defaults, which are declared twice today and differ in three keys), plus the dead keys `defaultOutputDir` and `presetsDir`. Decisions: path identity for the in-use and open-item checks is case-insensitive (Windows volumes are; the Streams Directory field accepts typed text, so a file opened from an Explorer drop could compare unequal to the same file in the grid and read as not in use); one 21-entry extension list for every video dropzone, the open dialogs and the Player's sibling list, the files grid staying unrestricted; the row-action chrome goes to `text-gray-200` at rest on all four surfaces (sidebar Archive/Delete, Converter rows, Combine rows, file-card and grid-toolbar actions) with the disabled styling in the base. Left alone: name-only collisions (`getCreds`, `BASE`, `listeners`, `frameOf`, `Section`, `FilterToggle`, `TOPIC_CHIP`), the arrow and polygon corner tracing (different clamps on purpose), `TogglePill` and `Kbd` (one user each). Leftover for its own ticket: the two YouTube modals' native `<select>` with `appearance-none` (`SELECT_CLS`, drifted) should become `SelectMenu`, a visible change.
   Built 2026-10-06, awaiting review (commit 1 of 4, renderer helpers; no visible change intended). New homes in `lib/`: `formatTimecode` (replaces nine copies: three identical `formatTimecode`, the Converter's ms variant, Combine's `formatDur`, the YouTube import's `fmtDuration`, the relay widget's `formatDurationSec`, the Player's `formatTime` now builds on it, and a dead legacy copy; the shared one returns `0:00` for a duration that is not a positive finite number, where four of the copies printed `NaN:NaN`), `localDate` (`localDateString`, `localTimeString`, `localDateFromIso`; replaces two `localDateFromIso` declarations, `todayStr`'s body, the legacy page's unguarded `utcToLocalDate`, and eleven inline `YYYY-MM-DD` / `HH:MM` constructions in StreamsPage and broadcastMismatch), `formatScheduledTime` (relay widget, broadcast picker), `pathKey` (`pathKey` for in-memory identity, now lowercased, used by `useInUse` and `OpenItemsContext`; `relativeKey` for persisted keys, used by `videoMapKey` and by `streamMetaKey`, which moved from its two page copies into `lib/videoMapKey.ts`), `lucideIcon` (`toPascal` and `lucideIcon`, replacing three copies; `ui/GroupIcon` replaces the two `GroupIcon` components in App and the launcher page), `webrtc` (`injectSdpBandwidth` with the Player's bitrate guard, which the popup copy lacked, and `waitForIceComplete`). `lib/streamTitle.ts` gained `normalizeStreamTypes` (three copies) and the StreamsPage doc comments for `isStandalone` and `resolvePrimaryGame`; StreamsPage, ManageTagsModal and the legacy file import these and `applyMergeFields` instead of declaring them; the legacy file's dead `formatDuration` and `formatBytes` (the last 1000-based one) are deleted. The style guide's "How to use this" section has the one-home rule with the list of shared homes. Verify on a `_DEV` dist that nothing looks different: durations in the files grid, video rows, Send to Converter, the Combine and Converter pages (elapsed and ETA), the YouTube import list and the relay widget; the Player clock with and without a frame counter; Today/Tomorrow labels in the broadcast picker and the relay widget; launcher group icons in the launcher page and the nav row, and the icon picker's grid; the popout player still connects; a stream's thumbnail saved from the editor still lands on the right stream in `_meta.json` (dump mode and folder mode); Push to YouTube still reports in sync after a no-op edit and the scheduled time still round-trips. The in-use fix: open a video in the Player by dragging it from Explorer, then on the Streams page the same file's Delete is disabled with "open in the player", with the Streams Directory setting typed in a different letter case than Explorer shows.
   Built 2026-10-06, awaiting review (commit 2 of 4, row-action button chrome; visible change). `components/ui/rowAction.ts` exports `rowActionClass(tone, size?)` and replaces the four private families: Converter `ROW_ACTION_*`, Combine `ROW_ACTION_*`, StreamsPage `PANEL_ACTION_BUTTON_*`, StreamFilesGrid `ACTION_*` (the legacy file's icon-only `PANEL_ACTION_BUTTON_*` stays with the parked page). Resting text is `gray-200` on every surface by decision; the Converter, Combine and files-grid buttons were `gray-400`. Disabled styling (`opacity-40`, `cursor-not-allowed`, hover suppressed) is in the base, so the seven grid buttons that appended it per call site and the sidebar's Delete no longer do; the grid's two tone-less disabled buttons (the spinner while syncing and the blocked cloud) move from `opacity-60` to the shared `opacity-40`. The grid's `gray` tone hovers to white now that its rest color is the old hover color. Size `sm` keeps the grid's tighter padding. Style guide: a "Row action chrome" section under Components. Verify on a `_DEV` dist: Converter job rows (Start, Pause/Resume, Cancel, Requeue, Remove) and input list (Convert now, Remove) read brighter at rest and still color on hover; Combine rows the same; the sidebar's Archive and Delete unchanged; file cards' hover actions and the grid toolbar (Offload, Pin local, Open folder, Select, and the select-mode row) brighter at rest, with disabled ones visibly dimmer than before next to them; the blocked-cloud and syncing spinner buttons dimmed to the same degree as other disabled buttons; labels still collapse to icons as rows narrow, with no label spilling outside a button.
+  Built 2026-10-06, awaiting review (commit 3 of 4, main helpers; no visible change intended). New: `services/broadcast.ts` (`broadcast(channel, ...args)`, replacing the two named copies in `streamRelay` and `rowThumbs`, the converter's three `notifyAll` definitions and `broadcastJobAdded`'s body, and twelve inline send loops across converter, streams, store, youtube, twitch and ytQuotaState; every loop already checked `isDestroyed`, so the earlier note that some did not was wrong; the zoom loop in `store.ts` does more than send and stays), `services/unlinkWithRetry.ts` (the retrying unlink from `ffmpegService` and `fileWatcher`), `env.ts` (`isDev`, `iconPath`, from `index.ts` and `videoPopup.ts`). `ffmpegService` exports `ffmpegBin` and `requireFfmpegBin()`, and the combine handler and the relay manager spawn from those instead of applying their own asar fix (the relay's inline copy was the third); combine no longer dynamic-imports ffmpeg-static. `store.ts` exports `getStreamsDir()` and `getStreamMode()`, replacing the two named `getStreamsDir` copies (streams, cloudSync) and the private config casts in `fileWatcher`, `files`, `converter` (three) and `thumbnail`. `cfapi` exports `OFFLINE_MASK` (its comment moved there) and `files.ts` and `converter.ts` import it and `HYDRATE_CONCURRENCY` instead of redeclaring. Two renderer stragglers fixed in passing: `IconPickerModal` lost its now-unused React import, and a dead `norm` path helper in StreamsPage's archive flow is deleted. Found while checking: neither typecheck nor lint reports unused imports or locals (the lint config is app rules only, and `noUnusedLocals` is off), and a one-off `tsc --noUnusedLocals` run lists about 25 pre-existing ones (`electronApp` in index.ts, `ChildProcess` in files.ts, `ConversionPreset` and `isFileConfirmedLocal` in streams.ts, `app` and `GPU_ENCODER_CANDIDATES` in ffmpegService, `cancelExtraction`, `streamNavTip` and two session constants in PlayerPage, unused icon imports in several files, the legacy file's `VIDEO_EXTS_RENDERER` and others); cleaning those and turning the flag on in both tsconfigs is a small follow-up for a ticket. Also seen: `index.ts` still carries the date-folder mkdir monkey-patch marked "remove once the source is identified". Verify on a `_DEV` dist: a conversion job's status, progress and completion still reach the page and the stream row refreshes when its output lands; archive and cancel still refresh the stream; the relay widget still receives status and stats; connecting and disconnecting YouTube and Twitch still flips their buttons without a restart; the quota banner still updates; row thumbnails still appear; a Combine run still starts (ffmpeg path) and the relay still starts; an auto-rule firing on a dropped recording still lands the file in the right stream folder and a cancelled copy leaves no partial; the app icon shows on the main window, the tray and the popout.
 
 - **APP-43** [cleanup] [impact:3] [done]
   Dependency update round, early in the cycle after v2.7.0 (filed 2026-10-02 from the `npm ci` report in the v2.7.0 release build: 19 vulnerabilities, 17 high). Only 3 of the 19 touch what ships; the rest sit in build-time tooling (electron-builder's updater and XML libraries, browserslist, postcss, brace-expansion), which never runs on a user's machine, so the headline number overstates the exposure. The shipped three are all `image-size` (infinite loops in its JXL, HEIF, and ICNS parsers, fixed in 2.0.4); the app feeds it only YouTube's own thumbnail bytes in `services/youtubeApi.ts`, so the risk was small, and it is a patch bump. Steps, in order, each with a `_DEV` dist and the core regression list: (1) `npm audit fix` without `--force`, which covers all 19 through in-range updates; (2) the in-range "Wanted" column from `npm outdated`: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.0, react-konva 18.2.16, lucide-react 1.50.0, motion 12.43, eslint and typescript-eslint, autoprefixer, postcss, @types/node 24.19; the electron-builder bump needs the portable launcher pre-check re-verified (APP-32 patches its template and fails loudly if the template moved) and the two-launch test; (3) decide, separately and not in this round unless trivial: the majors held back on purpose, React 19 with react-konva 19, Tailwind 4, Vite 8 with plugin-react 6, TypeScript 7, chokidar 5 (the streams watcher no longer uses it; only the recording-rule watcher does), electron-store 11, glob 13, uuid 14, motion 14. Each major gets its own ticket when picked up. Also make the audit summary part of the release checklist's docs section so the number is read at every sweep rather than noticed in a build log.

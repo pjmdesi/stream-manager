@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Search, X } from 'lucide-react'
 import { Modal } from './Modal'
 import { Tooltip } from './Tooltip'

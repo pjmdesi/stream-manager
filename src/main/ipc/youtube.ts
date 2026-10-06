@@ -1,4 +1,5 @@
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
+import { broadcast } from '../services/broadcast'
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
@@ -68,9 +69,7 @@ export function registerYouTubeIPC(): void {
     // Tell every window the connection is live — pages bootstrap their
     // YouTube data on mount only, so without this a first-time connect
     // needed an app restart before statuses/broadcasts appeared.
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('youtube:connected')
-    }
+    broadcast('youtube:connected')
     // An enabled-but-down relay gets restarted now that YouTube is back
     // (it may have failed its boot auto-start while disconnected).
     try {
@@ -88,9 +87,7 @@ export function registerYouTubeIPC(): void {
     try { ytStatusCache.set('statuses', {}) } catch { /* best-effort */ }
     // Mirror of youtube:connected — lets the nav alert (and anything else
     // watching) react immediately instead of on the next page visit.
-    for (const win of BrowserWindow.getAllWindows()) {
-      if (!win.isDestroyed()) win.webContents.send('youtube:disconnected')
-    }
+    broadcast('youtube:disconnected')
   })
 
   ipcMain.handle('youtube:getChannelId', async () => {

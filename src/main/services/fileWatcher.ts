@@ -5,8 +5,9 @@ import fs from 'fs'
 import { pipeline } from 'stream/promises'
 import { createReadStream, createWriteStream } from 'fs'
 import { Transform } from 'stream'
-import { getStore } from '../ipc/store'
+import { getStreamsDir, getStreamMode } from '../ipc/store'
 import { isInFlightWrite } from './inFlightWrites'
+import { unlinkWithRetry } from './unlinkWithRetry'
 
 const PROGRESS_THROTTLE_MS = 250
 
@@ -35,21 +36,6 @@ async function copyWithProgress(
   onProgress(0)
   await pipeline(createReadStream(src), tracker, createWriteStream(dest), { signal })
   onProgress(100)
-}
-
-/** Remove a partially-written destination file. The just-aborted write
- *  stream can hold its Windows handle for a moment, so failed unlinks retry
- *  briefly rather than silently leaving a corrupt partial in the library. */
-async function removePartialWithRetry(p: string, attempts = 3): Promise<void> {
-  for (let i = 0; i < attempts; i++) {
-    try {
-      await fs.promises.unlink(p)
-      return
-    } catch (err: any) {
-      if (err.code === 'ENOENT') return
-      await new Promise(r => setTimeout(r, 300))
-    }
-  }
 }
 
 /** Walk streamsDir recursively (capped depth) and return the absolute path
@@ -187,12 +173,8 @@ class FileWatcher {
   // rather than caching them at start() time. Without this, changing the
   // streams root in Settings while the watcher was running left the
   // 'auto' destinationMode targeting the previous root.
-  private get streamsDir(): string {
-    return ((getStore().get('config') as { streamsDir?: string } | undefined)?.streamsDir) ?? ''
-  }
-  private get streamMode(): string {
-    return ((getStore().get('config') as { streamMode?: string } | undefined)?.streamMode) ?? ''
-  }
+  private get streamsDir(): string { return getStreamsDir() }
+  private get streamMode(): string { return getStreamMode() }
 
   start(rules: WatchRule[]): void {
     this.stop()
@@ -483,7 +465,7 @@ class FileWatcher {
     try {
       await copyWithProgress(src, dest, onProgress ?? (() => {}), op?.controller.signal)
     } catch (err) {
-      await removePartialWithRetry(dest)
+      await unlinkWithRetry(dest)
       if (op) op.destPath = null
       throw err
     }
@@ -501,7 +483,7 @@ class FileWatcher {
     await this.runTrackedCopy(src, dest, onProgress, op)
     const [srcStat, destStat] = await Promise.all([fs.promises.stat(src), fs.promises.stat(dest)])
     if (op?.cancelled || destStat.size !== srcStat.size) {
-      await removePartialWithRetry(dest)
+      await unlinkWithRetry(dest)
       if (op) op.destPath = null
       throw op?.cancelled
         ? new Error('Cancelled')
@@ -559,7 +541,7 @@ class FileWatcher {
       } else {
         await this.runTrackedCopy(filePath, destPath, onProgress, op)
         if (op?.cancelled) {
-          await removePartialWithRetry(destPath)
+          await unlinkWithRetry(destPath)
           op.destPath = null
           throw new Error('Cancelled')
         }

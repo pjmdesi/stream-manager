@@ -1784,7 +1784,6 @@ export function StreamsPage({
   // skip them. Otherwise queue jobs directly. Mirrors StreamsPage's
   // startArchive / executeArchive / handleArchiveDecision triple verbatim
   // so behavior is identical across the two pages.
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '')
   const fullVideos = (f: StreamFolder): string[] => {
     const map = f.meta?.videoMap
     if (!map) return []

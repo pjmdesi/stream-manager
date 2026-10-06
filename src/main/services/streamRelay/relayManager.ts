@@ -20,15 +20,7 @@
 import { ChildProcess, spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import os from 'os'
-import ffmpegStatic from 'ffmpeg-static'
-
-// In a packaged Electron build, ffmpeg-static resolves to a path inside
-// app.asar/. asarUnpack pulls the binary out to app.asar.unpacked/, but the
-// raw path string still points at the asar one — spawning that path errors
-// with ENOENT since asar contents aren't directly executable. Same fix is
-// applied in ffmpegService.ts and ipc/combine.ts.
-const FFMPEG_PATH = (ffmpegStatic as unknown as string)
-  ?.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
+import { requireFfmpegBin } from '../ffmpegService'
 
 export interface RelayConfig {
   port: number
@@ -185,7 +177,7 @@ export class RelayManager extends EventEmitter {
 
     this.updateStatus({ state: 'starting' })
 
-    const child = spawn(FFMPEG_PATH, this.buildArgs(cfg), {
+    const child = spawn(requireFfmpegBin(), this.buildArgs(cfg), {
       stdio: ['ignore', 'pipe', 'pipe'],
       // Detach=false (default) so SIGTERM from main can take it down cleanly
     })

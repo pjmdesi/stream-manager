@@ -9,8 +9,9 @@
  * we auto-start the manager so the relay is up as soon as the app is. The
  * renderer can later call `relay:enable`/`relay:disable` to toggle.
  */
-import { ipcMain, BrowserWindow } from 'electron'
+import { ipcMain } from 'electron'
 import { getStore } from './store'
+import { broadcast } from '../services/broadcast'
 import { relayManager, RelayConfig, RelayStatus, RelayStats } from '../services/streamRelay/relayManager'
 import { activeBroadcastService, ActivePickResult } from '../services/streamRelay/activeBroadcast'
 import { relayOrchestrator, OrchestratorEvent } from '../services/streamRelay/relayOrchestrator'
@@ -30,12 +31,6 @@ function buildConfigFromStore(): RelayConfig | null {
 
 /** Broadcast a payload to every open BrowserWindow. Mirrors how the converter
  *  and watcher fan out their events. */
-function broadcast(channel: string, payload: unknown): void {
-  for (const win of BrowserWindow.getAllWindows()) {
-    if (!win.isDestroyed()) win.webContents.send(channel, payload)
-  }
-}
-
 export function registerStreamRelayIPC(): void {
   // ─── Event fan-out from manager → all renderer windows ─────────────────
   relayManager.on('status-change', (status: RelayStatus) => {

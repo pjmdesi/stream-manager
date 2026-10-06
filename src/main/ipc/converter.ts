@@ -3,10 +3,12 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
-import { getStore } from './store'
+import { getStore, getStreamsDir, getStreamMode } from './store'
 import { readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
+import { HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 import { expectSelfWrite } from '../services/selfWrites'
+import { broadcast } from '../services/broadcast'
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -197,11 +199,11 @@ const downloadCancelFlags = new Map<string, { cancelled: boolean }>()
 // background later gets picked up by startConversionJob's inline hydrate.
 const hydrateInFlight = new Set<string>()
 
-// Cap how many cloud-hydrate probes run at once. Without this, bulk-archiving
-// many cloud-synced folders fires an ensureHydrated() for every file at the
-// same instant — a storm of PowerShell checkLocalFiles calls + file touches
-// that contributes to the start-up freeze.
-const HYDRATE_CONCURRENCY = 4
+// Cap how many cloud-hydrate probes run at once (the provider-wide limit from
+// cfapi). Without this, bulk-archiving many cloud-synced folders fires an
+// ensureHydrated() for every file at the same instant: a storm of PowerShell
+// checkLocalFiles calls and file touches that contributes to the start-up
+// freeze.
 const hydrateQueue: string[] = []
 let hydrateActive = 0
 function pumpHydrate(): void {
@@ -220,12 +222,6 @@ function enqueueHydrate(jobId: string): void {
 
 /** Broadcast an IPC event to every renderer window. Module-scoped so
  *  helpers outside startConversionJob can notify status changes too. */
-function notifyAll(channel: string, data: unknown): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send(channel, data)
-  }
-}
-
 /** Update a job's status in the registry and notify renderers. No-op when
  *  the job has been removed from the registry (e.g. cancelled + cleared). */
 function setJobStatus(jobId: string, status: ConversionJob['status']): void {
@@ -237,7 +233,7 @@ function setJobStatus(jobId: string, status: ConversionJob['status']): void {
   // leave its stale snapshot in the store, which resurrected removed jobs
   // after a restart.
   if (cur.status === 'queued' || status === 'queued') persistPendingJobs()
-  notifyAll('converter:jobStatus', { jobId, status })
+  broadcast('converter:jobStatus', { jobId, status })
 }
 
 /** Statuses that occupy an encode slot. 'downloading' deliberately does
@@ -299,23 +295,23 @@ function settleJobError(id: string, err: Error): void {
 function converterHydrateEvents(jobId: string, filePath: string, size?: number) {
   const batchId = `converter-${jobId}-${Date.now().toString(36)}`
   const base = { direction: 'hydrate' as const, batchId }
-  notifyAll('cloud-sync:progress', {
+  broadcast('cloud-sync:progress', {
     type: 'init', ...base, eligible: [filePath], skippedProtected: [],
     external: { source: 'converter', files: [{ path: filePath, size: size ?? 0 }] },
   })
-  notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'running' })
+  broadcast('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'running' })
   return {
     done() {
-      notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'done' })
-      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 1, failed: 0, alreadyLocal: 0, cancelled: false })
-      notifyAll('files:cloudDownloadDone', filePath)
+      broadcast('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'done' })
+      broadcast('cloud-sync:progress', { type: 'complete', ...base, ok: 1, failed: 0, alreadyLocal: 0, cancelled: false })
+      broadcast('files:cloudDownloadDone', filePath)
     },
     cancelled() {
-      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 0, alreadyLocal: 0, cancelled: true })
+      broadcast('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 0, alreadyLocal: 0, cancelled: true })
     },
     failed(reason: string) {
-      notifyAll('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'failed', reason })
-      notifyAll('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 1, alreadyLocal: 0, cancelled: false })
+      broadcast('cloud-sync:progress', { type: 'item', ...base, path: filePath, status: 'failed', reason })
+      broadcast('cloud-sync:progress', { type: 'complete', ...base, ok: 0, failed: 1, alreadyLocal: 0, cancelled: false })
     },
   }
 }
@@ -378,7 +374,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
       const cur2 = jobs.get(jobId)
       if (cur2) {
         jobs.set(jobId, { ...cur2, status: 'error', error: `Cloud download failed: ${waited.reason}` })
-        notifyAll('converter:jobError', { jobId, error: `Cloud download failed: ${waited.reason}` })
+        broadcast('converter:jobError', { jobId, error: `Cloud download failed: ${waited.reason}` })
       }
       hydEv.failed(waited.reason)
       maybeFireGroupHook(jobId)
@@ -393,7 +389,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
       const cur2 = jobs.get(jobId)
       if (cur2) {
         jobs.set(jobId, { ...cur2, status: 'cancelled' })
-        notifyAll('converter:jobStatus', { jobId, status: 'cancelled' })
+        broadcast('converter:jobStatus', { jobId, status: 'cancelled' })
         // NO jobError here — cancelling is a user action, and the error
         // event overwrote the row's 'cancelled' state with a red error,
         // losing the Requeue affordance.
@@ -671,9 +667,7 @@ function getPresetsDir(): string {
 
 /** Broadcast a job-added event so any renderer window (e.g. ConverterPage) appends it to local state. */
 function broadcastJobAdded(job: ConversionJob): void {
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('converter:jobAdded', job)
-  }
+  broadcast('converter:jobAdded', job)
 }
 
 /** Add a job in the queued state WITHOUT running it. Used by auto-rules when the user has
@@ -875,23 +869,18 @@ export async function startConversionJob(
   // If this job was previously queued, drop it from the persisted queue now that it's running.
   persistPendingJobs()
 
-  const notifyAll = (channel: string, data: any) => {
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send(channel, data)
-    }
-  }
   const setStatus = (status: ConversionJob['status']) => {
     const cur = jobs.get(id)
     if (!cur) return
     jobs.set(id, { ...cur, status })
-    notifyAll('converter:jobStatus', { jobId: id, status })
+    broadcast('converter:jobStatus', { jobId: id, status })
   }
-  notifyAll('converter:jobProgress', { jobId: id, percent: 0 })
+  broadcast('converter:jobProgress', { jobId: id, percent: 0 })
 
   const handleProgress = (percent: number) => {
     const j = jobs.get(id)
     if (j) jobs.set(id, { ...j, progress: percent })
-    notifyAll('converter:jobProgress', { jobId: id, percent })
+    broadcast('converter:jobProgress', { jobId: id, percent })
     notifyJobProgress(id, percent)
   }
 
@@ -984,7 +973,7 @@ export async function startConversionJob(
       pausers.delete(id)
       resumers.delete(id)
       downloadCancelFlags.delete(id)
-      notifyAll('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      broadcast('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
       // Replace-in-place jobs land on the ORIGINAL path; everything else on
       // the output path.
       notifyStreamOutput(job.replaceInput ? job.inputFile : job.outputFile)
@@ -1001,7 +990,7 @@ export async function startConversionJob(
       pausers.delete(id)
       resumers.delete(id)
       downloadCancelFlags.delete(id)
-      notifyAll('converter:jobError', { jobId: id, error: err.message })
+      broadcast('converter:jobError', { jobId: id, error: err.message })
       // For replaceInput jobs, clean up the temp output that ffmpeg wrote
       // before failing — otherwise __arc_tmp.* files accumulate. Swap
       // failures pass keepOutput: their encode FINISHED and the output was
@@ -1058,7 +1047,7 @@ export async function startConversionJob(
             cancellers.delete(id)
             pausers.delete(id)
             resumers.delete(id)
-            notifyAll('converter:jobStatus', { jobId: id, status: 'cancelled' })
+            broadcast('converter:jobStatus', { jobId: id, status: 'cancelled' })
             // Abort the OS-level recall too — a dehydrate command cancels
             // an in-progress hydration (the only control CFAPI offers;
             // there is no pause). The streams watcher MUST be paused
@@ -1106,7 +1095,7 @@ export async function startConversionJob(
             if (cur) {
               jobs.set(id, { ...cur, status: 'queued', autoStart: true })
               persistPendingJobs()
-              notifyAll('converter:jobStatus', { jobId: id, status: 'queued', autoStart: true })
+              broadcast('converter:jobStatus', { jobId: id, status: 'queued', autoStart: true })
             }
             cancellers.delete(id)
             scheduleNext()
@@ -1197,13 +1186,10 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
     // announced the final file via expectSelfWrite when the job
     // completed. Scoped to the archived stream in folder mode — the
     // hook's metaKey IS the stream key.
-    const cfg = getStore().get('config') as { streamMode?: string }
-    const scoped = cfg.streamMode !== 'dump-folder' && hook.metaKey
+    const scoped = getStreamMode() !== 'dump-folder' && hook.metaKey
       ? { streamKeys: [hook.metaKey] }
       : undefined
-    for (const w of BrowserWindow.getAllWindows()) {
-      if (!w.isDestroyed()) w.webContents.send('streams:changed', scoped)
-    }
+    broadcast('streams:changed', scoped)
   }
 }
 
@@ -1217,16 +1203,13 @@ async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void>
  */
 function notifyStreamOutput(finalPath: string): void {
   if (!finalPath) return
-  const config = getStore().get('config') as { streamsDir?: string; streamMode?: string }
-  const dir = config.streamsDir
+  const dir = getStreamsDir()
   if (!dir) return
   const rel = path.relative(path.resolve(dir), path.resolve(finalPath))
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return
   expectSelfWrite(finalPath)
-  const key = config.streamMode !== 'dump-folder' ? streamKeyForPath(dir, finalPath) : null
-  for (const w of BrowserWindow.getAllWindows()) {
-    if (!w.isDestroyed()) w.webContents.send('streams:changed', key ? { streamKeys: [key] } : undefined)
-  }
+  const key = getStreamMode() !== 'dump-folder' ? streamKeyForPath(dir, finalPath) : null
+  broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
 }
 
 export function getConverterStatus(): { active: boolean; percent: number; label: string } {
@@ -1444,7 +1427,7 @@ export function registerConverterIPC(): void {
     // renderer row from its Start button to the waiting state.
     jobs.set(jobId, { ...existing, autoStart: true })
     persistPendingJobs()
-    notifyAll('converter:jobStatus', { jobId, status: 'queued', autoStart: true })
+    broadcast('converter:jobStatus', { jobId, status: 'queued', autoStart: true })
     enqueueHydrate(jobId)
     scheduleNext()
   })
@@ -1625,7 +1608,7 @@ export function registerConverterIPC(): void {
     const atStart = jobs.get(id)
     if (!atStart || atStart.status !== 'queued') return
     jobs.set(id, { ...atStart, status: 'running' })
-    notifyAll('converter:jobStatus', { jobId: id, status: 'running' })
+    broadcast('converter:jobStatus', { jobId: id, status: 'running' })
     win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
 
     // Temp directory — one MKV per segment will be stream-copied here
@@ -1819,13 +1802,11 @@ export function registerConverterIPC(): void {
       // listing the dead partial. Scoped to the owning stream when the
       // output lives inside one.
       const notifyStreamsChanged = () => {
-        const cfg = getStore().get('config') as { streamsDir?: string; streamMode?: string }
-        const key = cfg.streamsDir && cfg.streamMode !== 'dump-folder' && j.outputFile
-          ? streamKeyForPath(cfg.streamsDir, j.outputFile)
+        const streamsDir = getStreamsDir()
+        const key = streamsDir && getStreamMode() !== 'dump-folder' && j.outputFile
+          ? streamKeyForPath(streamsDir, j.outputFile)
           : null
-        for (const w of BrowserWindow.getAllWindows()) {
-          if (!w.isDestroyed()) w.webContents.send('streams:changed', key ? { streamKeys: [key] } : undefined)
-        }
+        broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
       }
       // For replaceInput jobs the temp output is internal — clean it up
       // unconditionally so we don't leave __arc_tmp.* files behind.
@@ -1863,12 +1844,7 @@ export function registerConverterIPC(): void {
       if (j.replaceInput && j.outputFile) {
         deleteWithRetry(j.outputFile, 'archive temp file (cancel-group)')
       }
-      const notifyAll = (channel: string, data: any) => {
-        for (const w of BrowserWindow.getAllWindows()) {
-          if (!w.isDestroyed()) w.webContents.send(channel, data)
-        }
-      }
-      notifyAll('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
+      broadcast('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
     }
     // Cancelling a whole group frees slots — backfill from any other group.
     scheduleNext()
@@ -1882,7 +1858,7 @@ export function registerConverterIPC(): void {
       // Broadcast the change — "Pause all" loops this IPC with no local
       // state update of its own, so without the event nothing in the UI
       // moved even though the jobs were genuinely suspended.
-      notifyAll('converter:jobStatus', { jobId, status: 'paused' })
+      broadcast('converter:jobStatus', { jobId, status: 'paused' })
     }
   })
 
@@ -1891,7 +1867,7 @@ export function registerConverterIPC(): void {
     const j = jobs.get(jobId)
     if (j) {
       jobs.set(jobId, { ...j, status: 'running' })
-      notifyAll('converter:jobStatus', { jobId, status: 'running' })
+      broadcast('converter:jobStatus', { jobId, status: 'running' })
     }
   })
 

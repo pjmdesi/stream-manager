@@ -1,17 +1,12 @@
 import { ipcMain, WebContents } from 'electron'
 import { dehydrateOnePath, hydrateOnePath, isCfApiSyncRoot, DEHYDRATE_CONCURRENCY, HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { getProtectedPaths, pauseStreamsWatcher } from './streams'
-import { getStore } from './store'
+import { getStreamsDir } from './store'
 
 // Cached after first probe. Recomputed when streamsDir changes via the
 // invalidate hook. The probe walks up to depth 3 of the streams root, which is
 // cheap once but worth memoizing across the session.
 let cachedActive: { dir: string; active: boolean } | null = null
-
-function getStreamsDir(): string {
-  const config = getStore().get('config') as { streamsDir?: string } | undefined
-  return config?.streamsDir ?? ''
-}
 
 // `dirOverride` lets the renderer probe the directory it is CURRENTLY
 // showing rather than whatever the store holds. During first-run setup the

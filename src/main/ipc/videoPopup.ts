@@ -1,11 +1,7 @@
 import { app, ipcMain, BrowserWindow, screen } from 'electron'
 import { join } from 'path'
 import Store from 'electron-store'
-
-const is = { dev: process.env['NODE_ENV'] === 'development' || !!process.env['ELECTRON_RENDERER_URL'] }
-const iconPath = is.dev
-  ? join(__dirname, '../../resources/icon.png')
-  : join(process.resourcesPath, 'icon.png')
+import { isDev, iconPath } from '../env'
 
 // ── Popup window state persistence ───────────────────────────────────────────
 interface PopupState { x: number; y: number; width: number; height: number }
@@ -154,7 +150,7 @@ function getOrCreatePopup(): BrowserWindow {
     },
   })
 
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
+  if (isDev && process.env['ELECTRON_RENDERER_URL']) {
     popupWindow.loadURL(`${process.env['ELECTRON_RENDERER_URL']}/popup.html`)
   } else {
     popupWindow.loadFile(join(__dirname, '../renderer/popup.html'))
@@ -162,7 +158,7 @@ function getOrCreatePopup(): BrowserWindow {
 
   popupWindow.webContents.once('did-finish-load', () => {
     popupPageReady = true
-    if (is.dev) popupWindow?.webContents.openDevTools({ mode: 'detach' })
+    if (isDev) popupWindow?.webContents.openDevTools({ mode: 'detach' })
   })
 
   // Debounced position/size save on every move or resize
