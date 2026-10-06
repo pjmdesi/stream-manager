@@ -4,17 +4,7 @@ import { VideoThumb } from './VideoThumb'
 import { Tooltip } from './Tooltip'
 import type { VideoEntry, VideoInfo } from '../../types'
 import { formatBytes } from '../../lib/formatBytes'
-
-
-function formatTimecode(seconds: number): string {
-  if (!isFinite(seconds) || seconds <= 0) return '0:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`
-}
+import { formatTimecode } from '../../lib/formatTimecode'
 
 // Module-level probe memo: the video-count tooltip remounts its rows on every
 // hover, and each remount re-spawned ffprobe for entries with no duration.

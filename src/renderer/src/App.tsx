@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useLayoutEffect, useCallback, useRef, Component } from 'react'
-import * as LucideIcons from 'lucide-react'
 import { version as appVersion } from '../../../package.json'
 import { Film, Shuffle, Zap, Settings, Minus, Square, Minimize2, X, Radio, Combine, Plug, Play, AlertTriangle, ArrowDownToDot, AlertCircle, CheckCircle, Loader2, RefreshCw, Pause, Rocket, Image as ImageIcon, Cloud, Star, GitBranch } from 'lucide-react'
 import { Youtube as BrandYoutube, Twitch as BrandTwitch, Claude as BrandClaude } from './components/ui/BrandIcons'
@@ -7,6 +6,7 @@ import { SlideOpen, SlideBlock } from './components/ui/Slide'
 import { Button } from './components/ui/Button'
 import { Modal } from './components/ui/Modal'
 import { Tooltip } from './components/ui/Tooltip'
+import { GroupIcon } from './components/ui/GroupIcon'
 import logoUrl from './assets/stream-manager-logo.svg'
 import type { Page, LauncherGroup } from './types'
 import { StreamsPage } from './components/pages/StreamsPage'
@@ -551,16 +551,6 @@ function NavSublineReveal({ show, durationMs, children }: { show: boolean; durat
   )
 }
 
-/** Resolve a launch group's chosen icon name (kebab-case, as the launcher
- *  page stores it) to its Lucide component; falls back to Rocket when the
- *  group has no icon set or the name doesn't resolve. */
-function GroupIcon({ name, size = 16 }: { name?: string; size?: number }) {
-  const pascal = (n: string) => n.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
-  const Icon = name
-    ? (((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[pascal(name)] ?? Rocket)
-    : Rocket
-  return <Icon size={size} />
-}
 
 /** Quick-launch control for the Launcher nav item (nav redesign Pass B).
  *  Launching is an ACTION, not passive status, so — unlike the converter's

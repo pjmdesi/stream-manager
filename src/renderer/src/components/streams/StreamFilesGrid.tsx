@@ -12,18 +12,8 @@ import { formatBytes } from '../../lib/formatBytes'
 import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import { videoMapKey } from '../../lib/videoMapKey'
+import { formatTimecode } from '../../lib/formatTimecode'
 import type { ClipDraft, StreamFolder, VideoEntry, VideoInfo } from '../../types'
-
-
-function formatTimecode(seconds: number): string {
-  if (!isFinite(seconds) || seconds <= 0) return '0:00'
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-    : `${m}:${String(s).padStart(2, '0')}`
-}
 
 function extOf(name: string): string {
   const e = name.includes('.') ? name.split('.').pop() ?? '' : ''

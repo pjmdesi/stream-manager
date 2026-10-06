@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { pathKey as norm } from '../lib/pathKey'
 
 /** Which surface currently holds a file open. Used as the reason a delete is
  *  blocked, so the disabled control can explain itself. */
@@ -13,8 +14,6 @@ interface OpenItemsValue {
   /** Which surface has any file under this stream folder open, or null. */
   folderOpenReason: (folderPath: string) => OpenSource | null
 }
-
-const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
 
 const OpenItemsContext = createContext<OpenItemsValue>({
   setOpen: () => {},

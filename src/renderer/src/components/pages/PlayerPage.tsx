@@ -28,6 +28,8 @@ import { Checkbox } from '../ui/Checkbox'
 import { VideoRow } from '../ui/VideoRow'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { renderStreamTitle } from '../../lib/streamTitle'
+import { formatTimecode } from '../../lib/formatTimecode'
+import { injectSdpBandwidth, waitForIceComplete } from '../../lib/webrtc'
 import { seriesNavFor, EMPTY_SERIES_NAV, type SeriesNav } from '../../lib/seriesNav'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
 import { resolveTrackName } from '../../lib/trackNames'
@@ -108,13 +110,11 @@ function frameOf(seconds: number, fps: number): number {
   return Math.min(Math.max(0, Math.ceil(fps) - 1), Math.floor((seconds % 1) * fps + 1e-4))
 }
 
+/** The shared timecode plus a `:FF` frame segment when the fps is known. */
 function formatTime(seconds: number, fps?: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  const frameStr = fps != null ? ':' + String(frameOf(seconds, fps)).padStart(2, '0') : ''
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}${frameStr}`
-  return `${m}:${String(s).padStart(2, '0')}${frameStr}`
+  const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
+  const frameStr = fps != null ? ':' + String(frameOf(safe, fps)).padStart(2, '0') : ''
+  return formatTimecode(safe) + frameStr
 }
 
 function segmentStep(segIndexFromRight: number, fps?: number): number {
@@ -1041,33 +1041,6 @@ function ExportClipDialog({ defaultPresetId, defaultSuffix, filePath, hasBleepsO
       </div>
     </Modal>
   )
-}
-
-// Inject b=AS and b=TIAS bandwidth lines into every m=video section of an SDP.
-// This bypasses Chrome's congestion controller, which otherwise starts at
-// ~300 kbps and ramps up slowly even on a loopback connection.
-function injectSdpBandwidth(sdp: string, bitsPerSec: number): string {
-  if (!isFinite(bitsPerSec) || bitsPerSec <= 0) return sdp
-  const kbps = Math.floor(bitsPerSec / 1000)
-  return sdp.replace(
-    /(m=video[^\r\n]*\r?\n)/g,
-    `$1b=AS:${kbps}\r\nb=TIAS:${bitsPerSec}\r\n`,
-  )
-}
-
-function waitForIceComplete(pc: RTCPeerConnection): Promise<void> {
-  return new Promise((resolve) => {
-    if (pc.iceGatheringState === 'complete') { resolve(); return }
-    const onStateChange = () => {
-      if (pc.iceGatheringState === 'complete') {
-        pc.removeEventListener('icegatheringstatechange', onStateChange)
-        resolve()
-      }
-    }
-    pc.addEventListener('icegatheringstatechange', onStateChange)
-    // Safety timeout: 2 s max wait; local connections gather in < 100 ms
-    setTimeout(() => { pc.removeEventListener('icegatheringstatechange', onStateChange); resolve() }, 2000)
-  })
 }
 
 interface PendingFile { path: string; token: number }

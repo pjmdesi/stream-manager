@@ -26,6 +26,8 @@ import { Youtube as LucideYoutube, Twitch as LucideTwitch } from '../ui/BrandIco
 import { VideoRow } from '../ui/VideoRow'
 import { getCachedHydration, rememberHydration, stalePaths, subscribeHydration } from '../../lib/hydrationCache'
 import { videoMapKey } from '../../lib/videoMapKey'
+import { normalizeStreamTypes, applyMergeFields } from '../../lib/streamTitle'
+import { localDateFromIso } from '../../lib/localDate'
 import { v4 as uuidv4 } from 'uuid'
 import type { StreamFolder, StreamMeta, ConversionPreset, ConversionJob, YTTitleTemplate, YTDescriptionTemplate, YTTagTemplate, TwitchTagTemplate, LiveBroadcast, ThumbnailTemplate } from '../../types'
 import { useStore } from '../../hooks/useStore'
@@ -324,27 +326,7 @@ function streamIndex(folderName: string): number {
   return m ? parseInt(m[1], 10) : 1
 }
 
-// Normalize legacy string streamType values from stored JSON to the new string[] format
-function normalizeStreamTypes(v: string | string[] | undefined): string[] {
-  if (!v) return []
-  return Array.isArray(v) ? v : [v]
-}
-
 // ─── Video count tooltip ─────────────────────────────────────────────────────
-
-function formatDuration(seconds: number): string {
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = Math.floor(seconds % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  return `${m}:${String(s).padStart(2, '0')}`
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes >= 1e9) return `${(bytes / 1e9).toFixed(1)} GB`
-  if (bytes >= 1e6) return `${(bytes / 1e6).toFixed(0)} MB`
-  return `${(bytes / 1e3).toFixed(0)} KB`
-}
 
 const CATEGORY_LABEL: Record<string, string> = { full: 'vid', short: 'short', clip: 'clip' }
 const CATEGORY_STYLES: Record<string, string> = {
@@ -1279,10 +1261,6 @@ interface MetaModalProps {
   onDraftClear?: () => void
 }
 
-function applyMergeFields(template: string, fields: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
-}
-
 /**
  * Compute the value for the `{season_links}` description merge field. Returns
  * a multi-line string of links to previous episodes in the same series+season,
@@ -1842,10 +1820,7 @@ function MetaModal({ mode, initialMeta, folderDate, sourceFolder, detectedGames 
     return null
   }
 
-  const utcToLocalDate = (isoString: string): string => {
-    const d = new Date(isoString)
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }
+  const utcToLocalDate = localDateFromIso
 
   const handleManualUrlChange = async (value: string) => {
     setYtManualUrl(value)

@@ -4,7 +4,7 @@
 // this window just renders the stream it sends, so there is no independent
 // disk I/O, hardware-decoder cold-start, or seek lag here.
 
-export {}
+import { injectSdpBandwidth, waitForIceComplete } from './lib/webrtc'
 
 declare global {
   interface Window {
@@ -94,26 +94,3 @@ window.popupApi.onCommand((cmd, ...args) => {
     }
   }
 })
-
-function injectSdpBandwidth(sdp: string, bitsPerSec: number): string {
-  const kbps = Math.floor(bitsPerSec / 1000)
-  return sdp.replace(
-    /(m=video[^\r\n]*\r?\n)/g,
-    `$1b=AS:${kbps}\r\nb=TIAS:${bitsPerSec}\r\n`,
-  )
-}
-
-function waitForIceComplete(peerConnection: RTCPeerConnection): Promise<void> {
-  return new Promise((resolve) => {
-    if (peerConnection.iceGatheringState === 'complete') { resolve(); return }
-    const onStateChange = () => {
-      if (peerConnection.iceGatheringState === 'complete') {
-        peerConnection.removeEventListener('icegatheringstatechange', onStateChange)
-        resolve()
-      }
-    }
-    peerConnection.addEventListener('icegatheringstatechange', onStateChange)
-    // Safety timeout: don't wait forever — if we have at least some candidates, proceed
-    setTimeout(() => { peerConnection.removeEventListener('icegatheringstatechange', onStateChange); resolve() }, 2000)
-  })
-}

@@ -42,7 +42,8 @@ import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
-import { videoMapKey } from '../../lib/videoMapKey'
+import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
+import { localDateString, localTimeString, localDateFromIso } from '../../lib/localDate'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
 import { SendToConverterModal } from '../streams/SendToConverterModal'
 import { isAnyModalOpen, isTypingTarget } from '../../lib/shortcuts'
@@ -50,7 +51,7 @@ import { releaseThumbDecodes } from '../ui/VideoThumb'
 import { StreamFilesGrid, parseSmThumbnailOrdinal, type FilesGridHandle } from '../streams/StreamFilesGrid'
 import { toTwitchCompatibleTags, TWITCH_TAG_MAX_COUNT } from '../../lib/twitchTags'
 import { YT_TAG_CHAR_LIMIT } from '../../lib/ytTagCount'
-import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber, TITLE_MERGE_KEYS, TITLE_KNOWN_KEYS } from '../../lib/streamTitle'
+import { renderStreamTitle, displayWrapTitle, isPrimaryGameOf, detectTotalEpisodes, highestEpisodeNumber, TITLE_MERGE_KEYS, TITLE_KNOWN_KEYS, isStandalone, resolvePrimaryGame, applyMergeFields, normalizeStreamTypes } from '../../lib/streamTitle'
 import { computeBroadcastMismatch, classifyMismatch, buildPullUpdate, outOfSyncSignature, type OutOfSyncItem } from '../../lib/broadcastMismatch'
 import { OutOfSyncPanel } from '../streams/OutOfSyncPanel'
 import { TwitchChannelPanel } from '../streams/TwitchChannelPanel'
@@ -151,18 +152,6 @@ const AI_REJECT_ENTRY_MAX_CHARS = 400
  *  forever). Applied on title save and by the load-time cleanup sweep. */
 const sanitizeTitleBody = (s: string): string => s.replace(/^[ \t\r\n]+|[ \t\r\n]+$/g, '')
 
-/** Canonical _meta.json key for a stream. Mirrors the helper in
- *  ThumbnailPage; replicated here to avoid cross-page coupling while the
- *  new page is being built. Will consolidate to a shared util once the old
- *  streams page is gone. */
-function streamMetaKey(folderPath: string, date: string, streamsDir: string | undefined): string {
-  const root = (streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
-  const fp = folderPath.replace(/\\/g, '/').replace(/\/$/, '')
-  if (root && fp === root) return date
-  if (root && fp.startsWith(root + '/')) return fp.slice(root.length + 1)
-  return fp.split('/').pop() ?? fp
-}
-
 /** The stream item's "main" thumbnail (what a YT push uploads): preferred
  *  thumbnail basename → matching path → first thumbnail. Mirrors the sidebar's
  *  resolvedStreamItemThumb. */
@@ -174,43 +163,6 @@ function resolveStreamThumb(folder: StreamFolder): string | null {
     if (match) return match
   }
   return folder.thumbnails[0]
-}
-
-/** Tolerates the legacy single-string streamType from old meta files —
- *  same helper StreamsPage uses. Once the old page is gone we can centralise. */
-function normalizeStreamTypes(v: string | string[] | undefined): string[] {
-  if (!v) return []
-  return Array.isArray(v) ? v : [v]
-}
-
-/** Single source of truth for "is this stream explicitly NOT part of a
- *  series." Drives the sidebar UI (hide season/episode inputs, disable
- *  series-nav + New Episode controls), the merge-field substitutions
- *  (`{season}`, `{episode}`, `{total_episodes}` resolve to '' for
- *  standalone), and every series-math helper (filter the candidate
- *  pool). Legacy `undefined` is intentionally NOT standalone — keeps
- *  existing thumbnails / saved files working as series like they did
- *  before this flag existed. */
-function isStandalone(meta: StreamMeta | null | undefined): boolean {
-  return meta?.isSeries === false
-}
-
-/** Effective "primary" topic/game for a stream — drives both the Twitch
- *  category push and the `{game}` merge field in YouTube title templates.
- *  Single source of truth so the sidebar's "selected chip" indicator, the
- *  push handlers, and the in-sync comparisons all agree on which entry
- *  is active. Resolution:
- *    1. `meta.primaryGame` if set AND still present in `games[]`.
- *    2. `games[0]` otherwise.
- *    3. `''` when neither is available.
- *  Returning `''` (not undefined) so callers can do `?? ''` without an
- *  extra branch — the empty case is functionally equivalent to "no game
- *  to push" in every consumer.
- */
-function resolvePrimaryGame(meta: StreamMeta | null | undefined): string {
-  const games = meta?.games ?? []
-  if (meta?.primaryGame && games.includes(meta.primaryGame)) return meta.primaryGame
-  return games[0] ?? ''
 }
 
 /** Twitch category for a stream. In "Pick Topic / Game tag" mode it's the
@@ -229,17 +181,7 @@ function resolveTwitchGame(meta: StreamMeta | null | undefined): string {
 
 /** Today's date in local YYYY-MM-DD form. */
 function todayStr(): string {
-  const d = new Date()
-  const yyyy = d.getFullYear()
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const dd = String(d.getDate()).padStart(2, '0')
-  return `${yyyy}-${mm}-${dd}`
-}
-
-/** `{key}` → fields[key], leaving unknown placeholders untouched. Mirrors
- *  the helper StreamsPage uses for title/description/tag templates. */
-function applyMergeFields(template: string, fields: Record<string, string>): string {
-  return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
+  return localDateString(new Date())
 }
 
 /** Known YouTube-title merge fields, shared with the Templates modal through
@@ -1324,7 +1266,7 @@ export function StreamsPage({
     // out. A far-future stream starts getting checked once it enters the window.
     const t = new Date(`${today}T00:00:00`)
     t.setDate(t.getDate() + 1)
-    const tomorrow = `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`
+    const tomorrow = localDateString(t)
     return folders
       .filter(f => isPendingStream(f, today) && !!f.meta?.ytVideoId && (f.date === today || f.date === tomorrow))
       .map(f => f.meta!.ytVideoId!)
@@ -2212,7 +2154,7 @@ export function StreamsPage({
           if (scheduleApplied && newScheduledStartTime) {
             const sent = new Date(newScheduledStartTime)
             if (!isNaN(sent.getTime())) {
-              snapshot.ytLastPushedScheduledTime = `${String(sent.getHours()).padStart(2, '0')}:${String(sent.getMinutes()).padStart(2, '0')}`
+              snapshot.ytLastPushedScheduledTime = localTimeString(sent)
             }
           }
           await updateMeta(folder.relativePath, snapshot)
@@ -7442,7 +7384,7 @@ function SidebarDetail({
     if (!iso) return ''
     const d = new Date(iso)
     if (isNaN(d.getTime())) return ''
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    return localTimeString(d)
   }, [selectedBroadcast?.snippet.scheduledStartTime])
   const isUpcomingBroadcast = !!(
     selectedBroadcast?.snippet.scheduledStartTime &&
@@ -7461,8 +7403,8 @@ function SidebarDetail({
     if (!selectedBroadcast?.snippet.scheduledStartTime || selectedBroadcast.snippet.actualStartTime) return null
     const existing = new Date(selectedBroadcast.snippet.scheduledStartTime)
     if (isNaN(existing.getTime())) return null
-    const remoteLocalDate = `${existing.getFullYear()}-${String(existing.getMonth() + 1).padStart(2, '0')}-${String(existing.getDate()).padStart(2, '0')}`
-    const remoteLocalTime = `${String(existing.getHours()).padStart(2, '0')}:${String(existing.getMinutes()).padStart(2, '0')}`
+    const remoteLocalDate = localDateString(existing)
+    const remoteLocalTime = localTimeString(existing)
     const wantedDate = folder.date
     const wantedTime = meta?.scheduledTime ?? remoteLocalTime
     if (remoteLocalDate === wantedDate && remoteLocalTime === wantedTime) return null
@@ -7693,17 +7635,8 @@ function SidebarDetail({
   // at a glance whether YT is in sync with the sidebar. Trimming +
   // normalizing line endings + folding tags to a sorted lowercase set
   // matches the old metamodal's mismatch logic exactly, so a no-op edit
-  // doesn't falsely flag as pending.
-  // Extracts the LOCAL calendar date (YYYY-MM-DD) from a broadcast's
-  // scheduledStartTime ISO string. We compare against `folder.date`
-  // which is also a local YYYY-MM-DD string; doing the comparison in
-  // UTC would misclassify any broadcast whose scheduled time straddles
-  // midnight in the user's timezone.
-  const localDateFromIso = useCallback((iso: string): string => {
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return ''
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-  }, [])
+  // doesn't falsely flag as pending. Dates compare as LOCAL calendar days
+  // (lib/localDate), the same form as `folder.date`.
 
   // Per-field mismatch map — each key is a field id, each value is the
   // direction of the divergence:
@@ -10114,7 +10047,7 @@ function DateTooltipCalendar({ streamDate }: { streamDate: string }) {
   const cells: Array<{ iso: string; day: number; inMonth: boolean }> = []
   for (let i = 0; i < 42; i++) {
     const d = new Date(y, m, 1 - startDow + i)
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const iso = localDateString(d)
     cells.push({ iso, day: d.getDate(), inMonth: d.getMonth() === m })
   }
   // Drop trailing all-out-of-month weeks so short months don't pad to six rows.
@@ -10401,10 +10334,7 @@ function RescheduleModal({
     if (!id) return ''
     const b = ytBroadcasts.find(x => x.id === id)
     const iso = b?.snippet.scheduledStartTime
-    if (!iso) return ''
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return ''
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return iso ? localDateFromIso(iso) : ''
   }, [target.meta?.ytVideoId, ytBroadcasts])
   const pullMode = dateDirection === 'remote'
   const conflictMode = dateDirection === 'both'
@@ -10418,7 +10348,7 @@ function RescheduleModal({
     if (!iso) return ''
     const d = new Date(iso)
     if (isNaN(d.getTime())) return ''
-    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+    return localTimeString(d)
   }, [target.meta?.ytVideoId, ytBroadcasts])
   const [step, setStep] = useState<'date' | 'platforms'>('date')
   // In pull / conflict modes we seed newDate from YouTube's value so
@@ -10481,7 +10411,7 @@ function RescheduleModal({
     if (iso) {
       const d = new Date(iso)
       if (!isNaN(d.getTime())) {
-        setPushTime(`${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`)
+        setPushTime(localTimeString(d))
       }
     }
     const p = linkedBroadcast.status?.privacyStatus

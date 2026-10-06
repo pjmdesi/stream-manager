@@ -2,6 +2,7 @@ import React, { useState, useRef, useMemo } from 'react'
 import ReactDOM from 'react-dom'
 import { ChevronDown, Loader2, AlertTriangle, Link2, Radio } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { formatScheduledTime } from '../../lib/formatScheduledTime'
 import type { LiveBroadcast } from '../../types'
 
 /** Cross-link map entry — surfaced under any broadcast in the dropdown that
@@ -269,20 +270,6 @@ function isLikelyDefaultBroadcast(b: LiveBroadcast): boolean {
 }
 
 /** "Today 7:00 PM" / "Tomorrow 8:30 PM" / "Jun 17 7:00 PM". */
-function formatScheduledTime(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const now = new Date()
-  const sameDay = d.toDateString() === now.toDateString()
-  const tomorrow = new Date(now)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const isTomorrow = d.toDateString() === tomorrow.toDateString()
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  if (sameDay) return `Today ${time}`
-  if (isTomorrow) return `Tomorrow ${time}`
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + time
-}
-
 /** Date only, for past streams where the time isn't meaningful. */
 function formatDateOnly(iso: string): string {
   const d = new Date(iso)

@@ -9,10 +9,9 @@ import type { StreamMeta, StreamFolder } from '../types'
 //
 // This module is the single source of truth for that resolution so the
 // streams list, the sidebar header, the thumbnail editor (toolbar / recents
-// / asset panel) and the player recents all agree. The lower-level helpers
-// mirror their counterparts in StreamsPage.tsx — kept pure and dependency-free
-// here so display code outside the streams page can render titles without
-// importing that 6k-line module.
+// / asset panel) and the player recents all agree. The lower-level meta
+// readers (standalone flag, primary topic, stream types) live here too, pure
+// and dependency-free, so no page keeps a private copy of them.
 
 /** The merge fields offered in every title and description picker: the
  *  keys `assembleFields` resolves, minus the legacy aliases. One list for
@@ -34,19 +33,39 @@ export function applyMergeFields(template: string, fields: Record<string, string
   return template.replace(/\{(\w+)\}/g, (_, key) => fields[key] ?? `{${key}}`)
 }
 
-/** A stream is "standalone" (not part of a series) only when explicitly
- *  flagged. Legacy `undefined` stays a series so older files keep their
- *  season/episode merge fields. */
+/** Single source of truth for "is this stream explicitly NOT part of a
+ *  series." Drives the sidebar UI (hide season/episode inputs, disable
+ *  series-nav + New Episode controls), the merge-field substitutions
+ *  (`{season}`, `{episode}`, `{total_episodes}` resolve to '' for
+ *  standalone), and every series-math helper (filter the candidate
+ *  pool). Legacy `undefined` is intentionally NOT standalone, so existing
+ *  thumbnails and saved files keep working as series like they did
+ *  before this flag existed. */
 export function isStandalone(meta: StreamMeta | null | undefined): boolean {
   return meta?.isSeries === false
 }
 
-/** Effective primary topic/game: `meta.primaryGame` when still present in
- *  `games[]`, else `games[0]`, else ''. */
+/** Effective "primary" topic/game for a stream. Drives both the Twitch
+ *  category push and the `{game}` merge field in YouTube title templates.
+ *  Single source of truth so the sidebar's "selected chip" indicator, the
+ *  push handlers, and the in-sync comparisons all agree on which entry
+ *  is active. Resolution:
+ *    1. `meta.primaryGame` if set AND still present in `games[]`.
+ *    2. `games[0]` otherwise.
+ *    3. `''` when neither is available.
+ *  Returning `''` (not undefined) so callers can do `?? ''` without an
+ *  extra branch; the empty case is functionally equivalent to "no game
+ *  to push" in every consumer. */
 export function resolvePrimaryGame(meta: StreamMeta | null | undefined): string {
   const games = meta?.games ?? []
   if (meta?.primaryGame && games.includes(meta.primaryGame)) return meta.primaryGame
   return games[0] ?? ''
+}
+
+/** `meta.streamTypes` as an array. Older files stored a single string. */
+export function normalizeStreamTypes(v: string | string[] | undefined): string[] {
+  if (!v) return []
+  return Array.isArray(v) ? v : [v]
 }
 
 /** True when `gameName` is the folder's PRIMARY topic/game (case-insensitive).

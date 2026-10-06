@@ -10,6 +10,7 @@ import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { formatBytes } from '../../lib/formatBytes'
+import { formatTimecode } from '../../lib/formatTimecode'
 import { PresetsModal } from '../preset-editor/PresetsModal'
 import { CollapsibleLabel } from '../ui/CollapsibleLabel'
 import { VideoThumb } from '../ui/VideoThumb'
@@ -28,15 +29,6 @@ const ROW_ACTION_GREEN = `${ROW_ACTION_BASE} hover:text-green-400 hover:bg-green
 const ROW_ACTION_RED = `${ROW_ACTION_BASE} hover:text-red-400 hover:bg-red-500/10`
 const ROW_ACTION_YELLOW = `${ROW_ACTION_BASE} hover:text-yellow-400 hover:bg-yellow-500/10`
 const ROW_ACTION_BLUE = `${ROW_ACTION_BASE} hover:text-blue-400 hover:bg-blue-500/10`
-
-function formatDuration(ms: number): string {
-  const s = Math.floor(ms / 1000)
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = s % 60
-  if (h > 0) return `${h}:${String(m).padStart(2,'0')}:${String(sec).padStart(2,'0')}`
-  return `${m}:${String(sec).padStart(2,'0')}`
-}
 
 /** Shorten an output directory for the per-file dropdown so the drive letter
  *  and the final directory stay visible (native selects clip the END, hiding
@@ -882,7 +874,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           {isReplacing && (
             <div className="flex items-center gap-3 text-xs text-accent-200 tabular-nums">
               <span>Replacing original…</span>
-              {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatDuration(elapsed)}</span>}
+              {elapsed > 0 && <span className="text-gray-400">Elapsed: {formatTimecode(elapsed / 1000)}</span>}
             </div>
           )}
 
@@ -891,11 +883,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               {/* Guard: ffmpeg's first progress events can carry NaN before
                   a real timemark lands — show 0% instead of "NaN%". */}
               <span className="whitespace-nowrap">{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
-              {elapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatDuration(elapsed)}</span>}
+              {elapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsed / 1000)}</span>}
               <span className="whitespace-nowrap">
                 {job.progress === 0
                   ? 'Starting…'
-                  : `ETA: ${eta !== null && eta > 0 ? formatDuration(eta) : 'Estimating…'}`}
+                  : `ETA: ${eta !== null && eta > 0 ? formatTimecode(eta / 1000) : 'Estimating…'}`}
               </span>
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
@@ -913,7 +905,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           {isDone && (
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span className="whitespace-nowrap">100%</span>
-              {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatDuration(finalElapsed)}</span>}
+              {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(finalElapsed / 1000)}</span>}
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button

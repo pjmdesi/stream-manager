@@ -5,14 +5,10 @@ import { Modal } from './Modal'
 import { Button } from './Button'
 import { Tooltip } from './Tooltip'
 import { TAG_COLORS, getTagColor, pickColorForNewTag, TAG_TEXTURES, getTagTextureStyle, pickTextureForNewTag, DEFAULT_TAG_TEXTURE } from '../../constants/tagColors'
+import { normalizeStreamTypes } from '../../lib/streamTitle'
 import type { StreamFolder } from '../../types'
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function normalizeStreamTypes(v: string | string[] | undefined): string[] {
-  if (!v) return []
-  return Array.isArray(v) ? v : [v]
-}
 
 const TOPIC_CHIP = 'bg-accent-900/40 text-accent-300 border-accent-300/40'
 

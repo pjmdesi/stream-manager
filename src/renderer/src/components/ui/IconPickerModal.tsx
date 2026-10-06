@@ -1,20 +1,16 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react'
-import * as LucideIcons from 'lucide-react'
 import { Search, X } from 'lucide-react'
 import { Modal } from './Modal'
 import { Tooltip } from './Tooltip'
+import { lucideIcon, type LucideIconComponent } from '../../lib/lucideIcon'
 import tagsRaw from '../../assets/lucide-tags.json'
 
 const tags = tagsRaw as Record<string, string[]>
 
-function toPascal(name: string): string {
-  return name.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
-}
-
-// Build the full searchable icon list once at module load
-const ALL_ICONS: { name: string; pascal: string }[] = Object.keys(tags)
-  .map(name => ({ name, pascal: toPascal(name) }))
-  .filter(({ pascal }) => typeof (LucideIcons as Record<string, unknown>)[pascal] === 'object')
+// Build the full searchable icon list once at module load. Tag entries the
+// installed Lucide no longer exports are dropped rather than shown blank.
+const ALL_ICONS: { name: string; Icon: LucideIconComponent }[] = Object.keys(tags)
+  .flatMap(name => { const Icon = lucideIcon(name); return Icon ? [{ name, Icon }] : [] })
 
 interface IconPickerModalProps {
   isOpen: boolean
@@ -80,8 +76,7 @@ export function IconPickerModal({ isOpen, onClose, value, onChange }: IconPicker
           ) : (
             <>
               <div className="grid grid-cols-[repeat(auto-fill,minmax(52px,1fr))] gap-1">
-                {filtered.map(({ name, pascal }) => {
-                  const Icon = ((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[pascal]
+                {filtered.map(({ name, Icon }) => {
                   const isSelected = value === name
                   return (
                     <Tooltip key={name} content={name} triggerClassName="block">

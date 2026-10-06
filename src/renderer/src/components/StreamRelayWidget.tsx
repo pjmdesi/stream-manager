@@ -7,6 +7,8 @@ import { useAnimationConfig } from '../hooks/useAnimationConfig'
 import { Tooltip } from './ui/Tooltip'
 import { SlideOpen } from './ui/Slide'
 import { TruncatedText } from './ui/TruncatedText'
+import { formatTimecode } from '../lib/formatTimecode'
+import { formatScheduledTime } from '../lib/formatScheduledTime'
 import type { RelayStatus, RelayStats, ActivePickResult, OrchestratorEvent, LiveBroadcast, Page } from '../types'
 
 /**
@@ -374,7 +376,7 @@ export function StreamRelayWidget({
           <div className="px-2 pt-1 flex items-center gap-2 text-[10px] text-gray-400 tabular-nums">
             <span>{Math.round(stats.kbps)} kbps</span>
             <span>·</span>
-            <span>{formatDurationSec(stats.durationSec)}</span>
+            <span>{formatTimecode(stats.durationSec)}</span>
             {stats.speed < 0.97 && (
               <span className="text-amber-400">· {stats.speed.toFixed(2)}x</span>
             )}
@@ -440,27 +442,3 @@ export function StreamRelayWidget({
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 /** "Today 7:00 PM" / "Tomorrow 8:30 PM" / "Jun 17 7:00 PM" — short, human. */
-function formatScheduledTime(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  const now = new Date()
-  const sameDay = d.toDateString() === now.toDateString()
-  const tomorrow = new Date(now)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const isTomorrow = d.toDateString() === tomorrow.toDateString()
-  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-  if (sameDay) return `Today ${time}`
-  if (isTomorrow) return `Tomorrow ${time}`
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) + ' ' + time
-}
-
-/** HH:MM:SS — drops the hours segment when zero. */
-function formatDurationSec(s: number): string {
-  if (!Number.isFinite(s) || s < 0) return '0:00'
-  const h = Math.floor(s / 3600)
-  const m = Math.floor((s % 3600) / 60)
-  const sec = Math.floor(s % 60)
-  const mm = String(m).padStart(2, '0')
-  const ss = String(sec).padStart(2, '0')
-  return h > 0 ? `${h}:${mm}:${ss}` : `${m}:${ss}`
-}

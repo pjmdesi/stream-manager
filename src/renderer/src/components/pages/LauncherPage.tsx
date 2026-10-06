@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import ReactDOM from 'react-dom'
-import * as LucideIcons from 'lucide-react'
 import { Plus, Trash2, FolderOpen, Rocket, Pencil, Check, X, GripVertical, ChevronDown, Upload, Star, Play, Globe, Copy } from 'lucide-react'
+import { GroupIcon } from '../ui/GroupIcon'
 import { v4 as uuidv4 } from 'uuid'
 import type { LauncherGroup, LauncherApp } from '../../types'
 import { Button } from '../ui/Button'
@@ -17,17 +17,6 @@ import { useAnimationConfig } from '../../hooks/useAnimationConfig'
 // thumbnail/counter/title. Shared by the rows and the sidebar's width so the
 // boundary lines up exactly.
 const GROUP_ROW_WIDTH = 280
-
-function toPascal(name: string) {
-  return name.split('-').map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('')
-}
-
-function GroupIcon({ name, size = 14 }: { name?: string; size?: number }) {
-  const Icon = name
-    ? (((LucideIcons as unknown) as Record<string, React.ComponentType<{ size?: number }>>)[toPascal(name)] ?? Rocket)
-    : Rocket
-  return <Icon size={size} />
-}
 
 // ── Inline editable label ─────────────────────────────────────────────────────
 

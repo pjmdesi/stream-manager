@@ -1,10 +1,10 @@
 import { useCallback, useMemo } from 'react'
 import { useOpenItems, blockReasonText } from '../context/OpenItemsContext'
 import { useConversionJobs } from '../context/ConversionContext'
+import { pathKey as norm } from '../lib/pathKey'
 
 // Job statuses that still hold the input file (mirrors the main-process guard).
 const CONVERTER_IN_USE = new Set(['queued', 'downloading', 'running', 'replacing', 'paused'])
-const norm = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '')
 
 /**
  * Combined "can't delete, it's in use" check across all sources: a running

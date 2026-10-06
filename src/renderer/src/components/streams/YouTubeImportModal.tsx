@@ -6,14 +6,7 @@ import { Button } from '../ui/Button'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { useStore } from '../../hooks/useStore'
-
-function fmtDuration(s?: number): string {
-  if (!s || s <= 0) return ''
-  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = Math.floor(s % 60)
-  return h > 0
-    ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-    : `${m}:${String(sec).padStart(2, '0')}`
-}
+import { formatTimecode } from '../../lib/formatTimecode'
 
 // Matches YouTube Studio / the streams list: Globe = public, Link = unlisted,
 // Lock = private.
@@ -298,7 +291,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
                       : <span className="inline-flex items-center gap-1"><Film size={10} /> Video</span>}
                     <span className="text-gray-600">·</span>
                     <span className="tabular-nums">{v.date || '—'}</span>
-                    {v.durationSeconds ? <><span className="text-gray-600">·</span><span className="tabular-nums">{fmtDuration(v.durationSeconds)}</span></> : null}
+                    {v.durationSeconds ? <><span className="text-gray-600">·</span><span className="tabular-nums">{formatTimecode(v.durationSeconds)}</span></> : null}
                     {p
                       ? <span className={`px-1.5 rounded border inline-flex items-center gap-1 ${p.cls}`}><p.Icon size={9} /> {p.label}</span>
                       : <span className="px-1.5 rounded border border-white/20 text-gray-400">{v.privacyStatus}</span>}

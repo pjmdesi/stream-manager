@@ -12,6 +12,7 @@ import { FileDropZone } from '../ui/FileDropZone'
 import { useOpenItems } from '../../context/OpenItemsContext'
 import { displayPath } from '../../lib/displayPath'
 import { formatBytes } from '../../lib/formatBytes'
+import { formatTimecode } from '../../lib/formatTimecode'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
@@ -86,14 +87,6 @@ interface PendingFiles {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function formatDur(sec: number): string {
-  const h = Math.floor(sec / 3600)
-  const m = Math.floor((sec % 3600) / 60)
-  const s = Math.floor(sec % 60)
-  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
-  return `${m}:${String(s).padStart(2, '0')}`
-}
 
 function parseTimestamp(filename: string): Date | null {
   const m = filename.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2})-(\d{2})-(\d{2})/)
@@ -249,7 +242,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
     outInfo?.codec ?? undefined,
     outInfo?.width != null && outInfo?.height != null ? `${outInfo.width}×${outInfo.height}` : undefined,
     outInfo?.fps != null ? `${Math.round(outInfo.fps * 100) / 100} fps` : undefined,
-    outInfo?.duration != null ? formatDur(outInfo.duration) : undefined,
+    outInfo?.duration != null ? formatTimecode(outInfo.duration) : undefined,
     outInfo?.size != null ? formatBytes(outInfo.size) : undefined,
   ].filter(Boolean).join(' · ')
 
@@ -292,7 +285,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
             here after the row-background-fill redesign). */}
         <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
           <span className="whitespace-nowrap">100%</span>
-          <span className="whitespace-nowrap">Elapsed: {formatDur(elapsedMs / 1000)}</span>
+          <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsedMs / 1000)}</span>
           <Tooltip content={`Open output folder: ${displayPath(outDir)}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
             <button
               onClick={() => window.api.openInExplorer(outDir)}
@@ -778,7 +771,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
             const outDur = outInfo.duration ?? 0
             const tolerance = Math.max(5, totalDur * 0.02)
             if (Math.abs(outDur - totalDur) > tolerance) {
-              verifyProblem = `its duration is ${formatDur(outDur)} but the inputs total ${formatDur(totalDur)}`
+              verifyProblem = `its duration is ${formatTimecode(outDur)} but the inputs total ${formatTimecode(totalDur)}`
             }
           } catch {
             verifyProblem = 'the combined file could not be read back'
@@ -884,7 +877,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                 )}
                 {g.stream?.date && <span className="text-[11px] text-gray-400 shrink-0">· {g.stream.date}</span>}
                 <span className="text-[11px] text-gray-400 shrink-0 tabular-nums">
-                  {`· ${g.files.length} file${g.files.length === 1 ? '' : 's'}${totalDur > 0 ? ` · ${formatDur(totalDur)}` : ''}`}{g.completed ? ' · done' : ''}
+                  {`· ${g.files.length} file${g.files.length === 1 ? '' : 's'}${totalDur > 0 ? ` · ${formatTimecode(totalDur)}` : ''}`}{g.completed ? ' · done' : ''}
                 </span>
                 <div className="ml-auto flex items-center gap-1 shrink-0">
                   {!g.completed && (
@@ -1094,7 +1087,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                           <span className="text-[9px] uppercase tracking-wider text-gray-400">Duration</span>
                           <span className="text-xs text-gray-400 font-mono">
                             {f.duration !== null
-                              ? formatDur(f.duration)
+                              ? formatTimecode(f.duration)
                               : f.local === false
                                 ? <Cloud size={11} className="inline text-blue-300/70" />
                                 : <Loader2 size={11} className="animate-spin inline" />}
@@ -1216,7 +1209,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               : (
                                 <>
                                   <span className="whitespace-nowrap">{runProgress}%</span>
-                                  {elapsedMs > 0 && <span className="whitespace-nowrap">Elapsed: {formatDur(elapsedMs / 1000)}</span>}
+                                  {elapsedMs > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsedMs / 1000)}</span>}
                                   <span className={runProgress === 0 && elapsedMs >= 15000 ? 'text-amber-300' : undefined}>
                                     {paused
                                       ? 'Paused'
@@ -1226,7 +1219,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                         // silent 0% names itself instead of
                                         // pretending to start forever.
                                         ? (elapsedMs >= 15000 ? 'No progress from ffmpeg yet — it may be stuck reading an input' : 'Starting…')
-                                        : `ETA: ${elapsedMs > 0 ? formatDur((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
+                                        : `ETA: ${elapsedMs > 0 ? formatTimecode((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
                                   </span>
                                 </>
                               )}

@@ -57,6 +57,7 @@ import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { formatBytes } from '../../lib/formatBytes'
 import { theme, rgba } from '../../theme'
 import { renderStreamTitle, renderTitleFromMeta, resolvePrimaryGame, detectTotalEpisodes } from '../../lib/streamTitle'
+import { streamMetaKey } from '../../lib/videoMapKey'
 import { Modal } from '../ui/Modal'
 import type { ThumbnailLayer, ThumbnailShadow, ThumbnailTemplate, ThumbnailCanvasFile, ThumbnailRecentEntry, StreamMeta, StreamFolder, PaletteSwatch, GradientSwatchData } from '../../types'
 
@@ -67,18 +68,6 @@ const CANVAS_H = 720
 type AlignOp =
   | 'left' | 'h-center' | 'right'
   | 'top'  | 'v-center' | 'bottom'
-
-/** Canonical _meta.json key for a stream the thumbnail editor is editing.
- *  In folder-per-stream mode the key is the relative path from streamsDir.
- *  In dump mode folderPath collapses to streamsDir, so fall back to date —
- *  the dump-mode key in `_meta.json`. */
-function streamMetaKey(folderPath: string, date: string, streamsDir: string | undefined): string {
-  const root = (streamsDir || '').replace(/\\/g, '/').replace(/\/$/, '')
-  const fp = folderPath.replace(/\\/g, '/').replace(/\/$/, '')
-  if (root && fp === root) return date
-  if (root && fp.startsWith(root + '/')) return fp.slice(root.length + 1)
-  return fp.split('/').pop() ?? fp
-}
 
 // ── Pan / zoom ────────────────────────────────────────────────────────────────
 const SNAP_ZOOM_THRESHOLD = 0.05 // 5% — snap to 100% or fit

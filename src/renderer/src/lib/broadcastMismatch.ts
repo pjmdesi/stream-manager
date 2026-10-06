@@ -1,5 +1,6 @@
 import type { StreamMeta, StreamFolder, LiveBroadcast } from '../types'
 import { applyMergeFields, buildStreamMergeFields, resolvePrimaryGame } from './streamTitle'
+import { localDateFromIso, localTimeString } from './localDate'
 
 // ─── Local ↔ YouTube metadata mismatch ──────────────────────────────────────
 // Single source of truth for "does this stream's local meta differ from the
@@ -44,15 +45,6 @@ export const MISMATCH_FIELD_LABELS: Record<MismatchField, string> = {
   scheduledTime: 'Time',
   privacy: 'Privacy',
   thumbnail: 'Thumbnail',
-}
-
-/** Local YYYY-MM-DD from a broadcast's scheduledStartTime ISO. Compared against
- *  `folder.date` (also local) — a UTC comparison would misclassify broadcasts
- *  whose scheduled time straddles midnight in the user's timezone. */
-function localDateFromIso(iso: string): string {
-  const d = new Date(iso)
-  if (isNaN(d.getTime())) return ''
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 /** Compare a stream's local meta against its linked YouTube broadcast/video.
@@ -160,7 +152,7 @@ export function computeBroadcastMismatch(
     }
     const remoteIso = new Date(broadcast.snippet.scheduledStartTime)
     if (!isNaN(remoteIso.getTime())) {
-      const remoteTime = `${String(remoteIso.getHours()).padStart(2, '0')}:${String(remoteIso.getMinutes()).padStart(2, '0')}`
+      const remoteTime = localTimeString(remoteIso)
       // Local time only counts as intent when explicitly set; otherwise the
       // displayed value falls back to the broadcast's own time.
       const localTime = meta?.scheduledTime
@@ -236,7 +228,7 @@ export function buildPullUpdate(broadcast: LiveBroadcast): Partial<StreamMeta> {
     const remote = new Date(broadcast.snippet.scheduledStartTime)
     if (!isNaN(remote.getTime())) {
       update.scheduledTime = undefined
-      update.ytLastPushedScheduledTime = `${String(remote.getHours()).padStart(2, '0')}:${String(remote.getMinutes()).padStart(2, '0')}`
+      update.ytLastPushedScheduledTime = localTimeString(remote)
     }
   }
   return update
