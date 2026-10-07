@@ -6,7 +6,11 @@ import { getStore, getConfig } from '../ipc/store'
 const REPO_OWNER = 'pjmdesi'
 const REPO_NAME = 'stream-manager'
 const RELEASE_API = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/releases/latest`
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000 // 6 hours
+/** Every launch asks GitHub (that is what the setting promises); a result
+ *  this fresh is reused only to absorb back-to-back calls, such as the dev
+ *  server mounting the renderer twice. The stored result otherwise serves
+ *  as the fallback when GitHub cannot be reached. */
+const DEDUPE_MS = 60 * 1000
 const STORE_KEY = 'updateCheckCache'
 
 export interface UpdateCheckResult {
@@ -58,33 +62,49 @@ async function fetchLatestRelease(): Promise<{ tag: string; url: string; notes: 
   }
 }
 
-/** Resolve the cached or fresh latest-release info. Cache hit when within
- *  TTL. Cache miss / expired runs the network call and refreshes the store.
- *  Network failures silently fall back to cached data when present, or return
- *  null. The check itself never throws — callers can ignore failures. */
+/** Resolve the latest-release info: a network call, with the stored result
+ *  as the fallback when GitHub does not answer (and as the answer for a
+ *  repeat call within DEDUPE_MS). The check itself never throws; callers
+ *  can ignore failures. */
+let inFlight: Promise<CacheEntry | null> | null = null
+
 async function getLatestRelease(force = false): Promise<CacheEntry | null> {
   const store = getStore() as unknown as { get: (k: string, d?: CacheEntry | null) => CacheEntry | null; set: (k: string, v: CacheEntry) => void }
   const cached = store.get(STORE_KEY, null)
   const now = Date.now()
-  if (!force && cached && (now - cached.checkedAt) < CACHE_TTL_MS) {
-    console.log(`[updateCheck] using the result cached at ${new Date(cached.checkedAt).toLocaleTimeString()} (latest ${cached.latest}); next request after the 6 h cache expires`)
+  if (!force && cached && (now - cached.checkedAt) < DEDUPE_MS) {
+    console.log(`[updateCheck] repeat call within a minute; reusing the result from ${new Date(cached.checkedAt).toLocaleTimeString()} (latest ${cached.latest})`)
     return cached
   }
+  // Callers that arrive while a request is out share its answer (React's
+  // development double-mount sends two at once; in production the nav and
+  // a manual check can coincide).
+  if (inFlight) {
+    console.log('[updateCheck] a request is already out; waiting for its answer')
+    return inFlight
+  }
   console.log(`[updateCheck] asking GitHub for the latest release${force ? ' (manual check)' : ''}`)
-  const fresh = await fetchLatestRelease()
-  if (!fresh) {
-    console.log('[updateCheck] no answer from GitHub; keeping the cached result' + (cached ? '' : ' (none)'))
-    return cached // stay with stale cache on transient failures
+  inFlight = (async () => {
+    const fresh = await fetchLatestRelease()
+    if (!fresh) {
+      console.log('[updateCheck] no answer from GitHub; using the last stored result' + (cached ? ` (latest ${cached.latest})` : ' (none)'))
+      return cached // stay with the stored result on transient failures
+    }
+    console.log(`[updateCheck] latest release is ${fresh.tag}`)
+    const entry: CacheEntry = {
+      checkedAt: now,
+      latest: fresh.tag,
+      releaseUrl: fresh.url,
+      releaseNotes: fresh.notes,
+    }
+    store.set(STORE_KEY, entry)
+    return entry
+  })()
+  try {
+    return await inFlight
+  } finally {
+    inFlight = null
   }
-  console.log(`[updateCheck] latest release is ${fresh.tag}`)
-  const entry: CacheEntry = {
-    checkedAt: now,
-    latest: fresh.tag,
-    releaseUrl: fresh.url,
-    releaseNotes: fresh.notes,
-  }
-  store.set(STORE_KEY, entry)
-  return entry
 }
 
 export async function checkForUpdate(force = false): Promise<UpdateCheckResult> {

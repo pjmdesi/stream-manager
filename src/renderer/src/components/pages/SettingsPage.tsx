@@ -879,7 +879,7 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           <Checkbox
             checked={local.checkForUpdates ?? true}
             onChange={v => set('checkForUpdates', v)}
-            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates {dirtyDot('checkForUpdates')}</div><div className="text-xs text-gray-400">On launch, check the GitHub releases page for a newer version of Stream Manager. An indicator appears next to the version label in the sidebar when an update is available. No data is sent — only a public API call.</div></div>}
+            label={<div><div className="text-sm font-medium text-gray-200">Check for app updates {dirtyDot('checkForUpdates')}</div><div className="text-xs text-gray-400">On launch and every six hours after, check the GitHub releases page for a newer version of Stream Manager.</div></div>}
           />
           <Checkbox
             checked={!!local.startWithWindows}

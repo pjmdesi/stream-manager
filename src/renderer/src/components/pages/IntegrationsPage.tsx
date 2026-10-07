@@ -160,6 +160,16 @@ export function IntegrationsPage({ initialStatus }: {
       await window.api.streamRelayReapplyConfig()
     }
   }
+  // Apply the port 600 ms after it last changed, typed or spun, so the
+  // relay visibly restarts on the new port without the user leaving the
+  // field (2026-10-07: the save-on-blur made the change look ignored).
+  useEffect(() => {
+    const n = parseInt(srPort, 10)
+    if (!Number.isFinite(n) || n < 1 || n > 65535) return
+    if (n === (config.streamRelayPort ?? 1935)) return
+    const t = setTimeout(() => { void srSavePort() }, 600)
+    return () => clearTimeout(t)
+  }, [srPort]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const srToggleEnabled = async (next: boolean) => {
     if (next) {
@@ -758,24 +768,21 @@ export function IntegrationsPage({ initialStatus }: {
                 {srUseCustomPort && (
                   <div className="flex flex-col gap-1 pl-6">
                     {/* NumberInput (app-wide number-field convention). The
-                        save stays on focus LEAVING the field group —
-                        srSavePort reapplies the relay config (bouncing the
-                        ffmpeg child when enabled), so committing per
-                        spinner click would rebind the port repeatedly. The
-                        focusout guard ignores focus hopping between the
-                        input and its own spinner buttons. */}
-                    <div onBlur={e => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) void srSavePort() }}>
-                      <NumberInput
-                        value={parseInt(srPort, 10) || 1935}
-                        onChange={v => setSrPort(String(v))}
-                        min={1}
-                        max={65535}
-                        disabled={srFieldsLocked}
-                        disableShiftStep
-                        className="w-24"
-                        aria-label="Relay RTMP port"
-                      />
-                    </div>
+                        value applies shortly after it stops changing (the
+                        debounce effect by srSavePort): committing per
+                        keystroke or spinner click would rebind the ffmpeg
+                        child on every digit, and committing only when focus
+                        left the field read as nothing happening. */}
+                    <NumberInput
+                      value={parseInt(srPort, 10) || 1935}
+                      onChange={v => setSrPort(String(v))}
+                      min={1}
+                      max={65535}
+                      disabled={srFieldsLocked}
+                      disableShiftStep
+                      className="w-24"
+                      aria-label="Relay RTMP port"
+                    />
                     <p className="text-xs text-gray-400">RTMP's default is 1935. Change only if it conflicts with something else on your machine.</p>
                   </div>
                 )}

@@ -6,6 +6,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 ## Under the hood
 
+- The download is about a third smaller. The packaged app carried ffprobe builds for macOS and Linux and a 32-bit Windows one that could never run; only the one for your machine ships now.
 - Routine dependency update: Electron 44.5.1 and current versions of the build and UI libraries, which clears every known advisory in the packages the app ships except one in the auto-rules file watcher that only a rule pattern you write yourself could trigger.
 
 ## Fixes

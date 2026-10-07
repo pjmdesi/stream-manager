@@ -803,10 +803,10 @@ function AppInner() {
   // Update detection: fires on mount, then re-checks every 6 hours for as
   // long as the app stays up. SM is a tray app that can run for days, and
   // a launch-only check meant a long-lived instance never learned about a
-  // release until restarted. The interval matches the store cache's 6h
-  // TTL, so each re-check lands just as the cache expires and the extra
-  // API traffic rounds to zero. Honors the `checkForUpdates` config
-  // opt-out (in main). Failures are silent.
+  // release until restarted. Each call asks GitHub (main dedupes calls
+  // within a minute and keeps the last answer as the offline fallback).
+  // Honors the `checkForUpdates` config opt-out (in main). Failures are
+  // silent.
   const [updateInfo, setUpdateInfo] = useState<{ latest: string; releaseUrl: string; releaseNotes: string } | null>(null)
   useEffect(() => {
     let cancelled = false

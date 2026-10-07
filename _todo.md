@@ -7,52 +7,54 @@
 3. CONV-18
 4. APP-21
 5. APP-49
-6. APP-51
-7. APP-48
-8. CONV-17
-9. CONV-13
-10. STR-37
-11. CONV-15
-12. CONV-16
-13. SYNC-8
-14. PLR-31
-15. COMB-6
-16. CONV-4
-17. CONV-14
+6. SYNC-9
+7. APP-51
+8. APP-48
+9. CONV-17
+10. CONV-13
+11. STR-37
+12. CONV-15
+13. CONV-16
+14. SYNC-8
+15. PLR-31
+16. COMB-6
+17. CONV-4
+18. CONV-14
 
 ## Next up
 
 1. STR-34
-2. STR-32
-3. APP-38
-4. APP-19
-5. APP-39
-6. NAV-1
-7. PLR-30
-8. STR-36
-9. STR-31
-10. STR-30
-11. STR-11
-12. STR-25
-13. STR-26
-14. STR-29
-15. PLR-17
-16. PLR-25
-17. PLR-26
-18. PLR-32
-19. THU-38
-20. THU-35
-21. THU-36
-22. THU-37
-23. THU-39
-24. INTG-1
-25. APP-25
-26. APP-26
-27. APP-28
-28. APP-31
-29. APP-34
-30. APP-35
-31. SYNC-7
+2. SYNC-10
+3. STR-32
+4. APP-38
+5. APP-19
+6. APP-39
+7. NAV-1
+8. PLR-30
+9. STR-36
+10. STR-31
+11. STR-30
+12. STR-11
+13. STR-25
+14. STR-26
+15. STR-29
+16. PLR-17
+17. PLR-25
+18. PLR-26
+19. PLR-32
+20. THU-38
+21. THU-35
+22. THU-36
+23. THU-37
+24. THU-39
+25. INTG-1
+26. APP-25
+27. APP-26
+28. APP-28
+29. APP-31
+30. APP-34
+31. APP-35
+32. SYNC-7
 
 ## Improvement ideas
 
@@ -175,6 +177,11 @@
   Just off the top of my head, there should be a few ways to know which videos match with which files. File name first of all. If the user doesn't change it, it shoud be the same, it's automatically set as the YouTube title of new uploads. In the perfect workflow, the user wouldn't change this, but in the case that they do, we can also use duration. This also isn't perfect since 2 videos could have the same exact length (down to the frame), and the user may be one of those who does that on purpose, and we should account for that. Timing is another soft correlation that we could check against. For instance the new YouTube upload would most likely be created after the stream item date (although again not perfect, but very leikely to be accurate). Whether the upload date is NEAR the stream itm date is another story and likey not a good determining factor (I've uploaded "highlights" versions of videos months after the actual stream).
 
   This will require a redesign of several areas of the streams page, most especially the footer.
+
+  Direction settled 2026-10-07 (from the YouTube upload investigation; facts checked against Google's `videos.insert` reference the same day):
+  - Direct upload is off the table under bring-your-own credentials. Every video uploaded through `videos.insert` from an unverified API project created after 28 July 2020 is locked to private, the lock attaches to the API project (so to every SM user's own project), it cannot be lifted afterward, and the only remedy is a re-upload through an audited project or by hand. Per-user audits take months; an audited SM-owned client used only for uploads is possible later, with a user base behind the application, and would need a second OAuth connection. Shorts are ordinary uploads classified by aspect ratio and duration, so they are locked the same way (and custom thumbnails are not settable on Shorts). Quota figures conflict between sources (1,600 units per upload on the calculator page, a separate 100-per-day upload bucket per others); irrelevant while the lock stands, verify in the Cloud Console if the audit path is ever taken. SYNC-4 (Shorts upload) is blocked by the same fact.
+  - What to build instead is automatic link-back. The real loss was never the upload click; it is that a manual upload leaves SM without the video id, so sync, metadata and thumbnail pushes and series tracking all stop for exactly the content this workflow produces. The channel scan, manual link and bulk link exist; the gap is making the association automatic and confident: record title, duration, size and export time for every clip or video SM exports; when the scan finds a new video, match it against recent unlinked exports on those signals plus upload-time proximity; on a confident match either link silently with an undo or offer a one-click confirm (decision pending); fall back to manual or bulk link when confidence is low or several candidates match. Several YouTube items per stream item (the VOD, an edited VOD, clips and Shorts), with SM-created clip files linked individually.
+  - Workflow framing: SM was built around simulcasting to YouTube and Twitch with little secondary content; the common target workflow is stream to Twitch, then post VODs or clips to YouTube afterward, and the people who do that save recordings, which is what gates most of the app. The checkpoint before promotion (Reddit, tutorials) is a release with in-app bug reporting (APP-45), this link-back, and the improved clips and Shorts workflow. Running the project's own streams in the Twitch-to-YouTube pattern for a while is part of the plan, so the feature set is built against the workflow most users have.
 
 - **STR-35** [impact:2]
   Add a new icon item to the video counter column which roughly indicates the cloud status of the files within the stream item. For instance, if all items are hydrated, we should show a solid cloud with check icon, like the one for individual files in the files grid. If there's a mix of hydrated and dehydrated files, we should show the same icon with a dashed check (or maybe something else... not sure). If all files (exluding the perminently pinned-local thumnail image file) are dehydrated we show a muted cloud, again, just like individual files.
@@ -404,7 +411,7 @@
   Maybe allow "reuploaded" livestreams (YouTube videos that were originally livestreams but have since been uploaded as regular videos) to be marked as such in the stream item details and then have the option to link that stream item to the original livestream SM stream item (if it exists in SM) so that the details can be shared between them and it can be easily navigated between the two. This would be useful for users who want to keep their livestreams and uploaded videos organized together, and it would also allow for some interesting features like automatically updating the uploaded video's details based on changes made to the original livestream item (like if they update the title or tags for the livestream, it could prompt them to update the uploaded video as well since it's now linked). This can happen if a livestream gets taken down for some reason (like copyright issues) or edited using tools not available directly in YouTube Studio and then the user reuploads it as a regular video. Maybe we do this by expanding the "linked broadcast" functionality. We can already link to livestreams and regular videos, so this would be adding the ability to link to both a livestream and a regular video. Maybe this exists in the header as a dropdown next to the archived checkbox?
 
 - **SYNC-4** [needs-design]
-  Add shorts upload functionality. Needs to be able to upload to YouTube.
+  Add shorts upload functionality. Needs to be able to upload to YouTube. Blocked by the finding in STR-34 (2026-10-07): uploads from a user's own unverified API project are locked private, and Shorts are ordinary uploads. The link-back direction in STR-34 covers Shorts; this item only becomes possible with an audited SM-owned upload client.
 
 - **SYNC-5** [maybe]
   Add "clip on twitch" functionality. This is a bit more complex than the YouTube one, because Twitch clips are created through an API call that takes a start and end time, and then Twitch processes the clip and makes it available after a few minutes. We would need to have some kind of system for checking the status of the clip creation and updating the app when it's ready. We also need to make sure the user knows the limitations of twitch clips.
@@ -415,8 +422,14 @@
 - **SYNC-7** [impact:2]
   Investigate if there are any parts of the YouTube or Twitch APIs that are not being utilized bout could be and list them as part of this ticket.
 
+- **SYNC-9** [bug] [impact:4]
+  In dump mode, Offload and Pin local on one stream act on the entire library. Found 2026-10-07: the sidebar's Offload on a single stream queued all twelve files of the dump folder (every stream's recordings and thumbnails). Cause: `handleOffload` and `handlePinLocal` in `StreamsPage.tsx` both call `collectFolderFiles(folder)`, which lists `folder.folderPath` recursively, and in dump mode every stream's `folderPath` is the dump root. The delete path already handles this (`useInUse.streamReason` takes the stream's own files in dump mode); offload and pin need the same: in dump mode the file set is the stream's videos, thumbnails and its `_sm-thumbnail` json and png, in folder mode the recursive listing as today. The bulk Offload all and Pin all local in the files grid go through the same two handlers and inherit the fix.
+
+- **SYNC-10** [impact:3]
+  Offload must skip files SM itself has in use, app-wide, instead of asking Windows and reporting the refusal as a failure. Seen 2026-10-07: a recording being archived by the converter showed "Failed, the cloud provider could not complete the operation, the file may be in use (0x80070187)" in the cloud sync panel, when SM knew it was reading that file. The panel should list such a file as "In use" (or pinned-style, like the displayed thumbnail) with the reason in the tooltip (open in the player, being converted, being combined, open in the thumbnail editor, being copied by an auto-rule) and not issue the dehydrate. The pieces exist: the renderer's `useInUse` (converter jobs plus open items, used to block deletes) and main's `getProtectedPaths` (displayed thumbnails) and `isConverterWritingPath`; the offload queue needs one check that consults them, in main, so every entry point (sidebar, grid, bulk) gets it.
+
 - **SYNC-8** [investigate] [impact:4]
-  Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window.
+  Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. (Seen 2026-10-07: dehydrating files the client was still uploading fails outright, so the gate holds when the client's bookkeeping is right; this check is for when it is not.) SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window.
 
 ### Auto-rules
 
@@ -580,7 +593,7 @@
 - **APP-48** [cleanup] [impact:3]
   One module for the stream folder convention and stream keys. Four functions answer "which stream owns this path and what is its `_meta.json` key": `metaKey` and `streamKeyForPath` in `main/ipc/streams.ts`, `streamMetaKey` in `renderer/lib/videoMapKey.ts`, and the key half of `resolveStreamContext` in `PlayerPage.tsx`; the `YYYY-MM-DD(-N)` folder pattern and the date-in-filename pattern are declared about twelve times across `streams.ts`, `fileWatcher.ts`, `main/index.ts`, `PlayerPage`, `StreamsPage` and `CombinePage` (APP-21 scan, 2026-10-07). They agree on the common layouts and differ at the edges: in dump mode main's `metaKey(root, root)` returns the root folder's name where the renderer returns the stream date, which is masked today by a `streamMode` guard at each call site, the same class of divergence that produced the phantom entry noted in `fireGroupCompletionHook`. Proposal: `src/shared/streamKey.ts` (pure path logic, both processes compile it, like `shared/videoExts.ts`): `STREAM_FOLDER_RE`, `isStreamFolderName`, `streamFolderDate`, `streamFolderSuffix`, `dateInFileName`, `streamKeyOfFolder(root, folderPath, date)`, `streamKeyOfFile(root, filePath)`; the four functions and the regex sites route through it, with one test file of layouts (flat, year/month nesting, same-day suffixes, dump mode) that pins the agreed answers.
 
-- **APP-49** [cleanup] [impact:2]
+- **APP-49** [cleanup] [impact:2] [done]
   Typed config reads in main. Sixteen sites read the raw stored config through a private cast (`getStore().get('config') as { key?: T }`, eight of them `as any`): `main/index.ts` five, `streamRelay.ts` three, `relayOrchestrator.ts`, `activeBroadcast.ts`, `cacheLimit.ts`, `updateCheck.ts`, `converter.ts`, `youtube.ts`, and two `streamMode` reads in `streams.ts` that APP-41 missed and that default to `'folder-per-stream'` where `getStreamMode()` defaults to `''` (APP-21 scan, 2026-10-07). The raw read skips the defaults merge, so each site invents its own fallback for a key an older config file may lack. Proposal: `getConfig(): AppConfig` in `store.ts` (the defaults merge and legacy migrations of `getConfigDecrypted`, without decrypting secrets) and the casts replaced; `getStreamsDir` and `getStreamMode` become thin reads of it. Also found: `app:setStartupSettings` (`store.ts`) writes the config object directly and skips `setConfigPartial`'s `config:changed` broadcast; the Settings page already saves `startWithWindows` and `startMinimized` through `updateConfig`, so the handler should only register the login item, or route its write through `setConfigPartial`. Built 2026-10-07, awaiting review.
 
 - **APP-50** [cleanup] [impact:1]
@@ -595,7 +608,7 @@
   Submit
 
 - **APP-51** [impact:1]
-  Explore ways to make dist creation process faster, maybe limit compression algorithm? It doesn't really need any compression for the dist version. It just takes too much time now that it's the more common version being used in the testing phase of updates.
+  Explore ways to make dist creation process faster, maybe limit compression algorithm? It doesn't really need any compression for the dist version. It just takes too much time now that it's the more common version being used in the testing phase of updates. Built 2026-10-07, awaiting review.
 
 ### Onboarding & Setup
 
@@ -737,6 +750,9 @@
   Some ideas:
   * A quick navigator of some sort, swithcing between the different app pages without having to use the sideabar? Would that really be helpful?
   * Maybe it replaces the awkward nav buttons in the navigation sidebar (like the launch button and the auto-rules start/stop buttons). That would make them less traditionally accesible... and there's only the two right now.
+
+- **BIG-7** [big] [differentiator] [blocked:STR-34]
+  A browser extension that pairs YouTube Studio with Stream Manager. Direct upload through the API is closed to bring-your-own credentials (STR-34), so the upload stays in Studio; an extension on `studio.youtube.com` closes the gap from Studio's side, the way TubeBuddy and vidIQ add panels to the same pages. Phase 1: a "Link to Stream Manager" panel on the video page that picks the stream item or the clip file and sends the video id (read from the page URL, which is stable) to the running app, giving certainty where STR-34's automatic matching gives confidence. Phase 2: prefill title, description and tags from the stream item into the upload form (DOM-dependent, the fragile part). Transport is a loopback socket with a pairing token, like the relay listener; the extension talks only to the app on the same machine, no server, in keeping with the principles. Driving the file upload itself from the extension is possible in theory and left out. Costs: two store listings to publish and maintain, Studio's DOM shifting under the prefill selectors, one more thing for the user to install. Builds on the export records STR-34 introduces (the heuristic matcher and the extension's picker read the same list). Filed 2026-10-07; a long way off by decision.
 
 ## Archive
 

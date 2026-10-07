@@ -136,6 +136,18 @@ if (isDevBuild) {
     { from: 'resources/icon-dev.png', to: 'icon.png' },
     { from: branchMarkerPath, to: 'dev-branch.txt' },
   ]
+  // Dev builds skip the archive compression (APP-51, measured 2026-10-07):
+  // LZMA was 117 s of a 131 s build for an exe nobody downloads, and
+  // "store" takes 16 s. The exe is about four times larger (549 MB) and
+  // the portable launcher's first-launch extraction becomes a plain copy.
+  // Release builds keep electron-builder's default. SM_DIST_COMPRESSION
+  // (store | normal | maximum) and SM_DIST_OUTPUT (folder, default dist)
+  // override either for timing experiments.
+  config.compression = process.env.SM_DIST_COMPRESSION || 'store'
+  if (process.env.SM_DIST_OUTPUT) config.directories = { ...(config.directories ?? {}), output: process.env.SM_DIST_OUTPUT }
+  // SM_DIST_TARGET=dir: the packaged app as a folder (win-unpacked), no
+  // portable launcher and no archive step.
+  if (process.env.SM_DIST_TARGET === 'dir') config.win.target = [{ target: 'dir', arch: ['x64'] }]
   const cfgPath = path.join(os.tmpdir(), 'stream-manager-electron-builder-dev.json')
   fs.writeFileSync(cfgPath, JSON.stringify(config, null, 2))
   cmd = `npx electron-builder --config "${cfgPath}"`

@@ -22,7 +22,10 @@
         "appId": "com.streammanager",
         "productName": "Stream Manager",
         "files": [
-            "out/**/*"
+            "out/**/*",
+            "!node_modules/ffprobe-static/bin/darwin/**",
+            "!node_modules/ffprobe-static/bin/linux/**",
+            "!node_modules/ffprobe-static/bin/win32/ia32/**"
         ],
         "win": {
             "icon": "resources/icon.png",
