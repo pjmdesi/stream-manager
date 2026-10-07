@@ -71,6 +71,31 @@ export interface ChapterInfo {
   title?: string
 }
 
+/** Durations for an output check, in seconds: the longest audio or video
+ *  stream's (`media`) and the container's (`container`), null where ffprobe
+ *  reports none. Data tracks are left out on purpose: the mp4 muxer adds a
+ *  timecode track that runs the whole source length even when the media
+ *  was cut short, and the container duration follows it. Matroska keeps
+ *  duration only at container level, so `media` is null there. */
+export function probeMediaDurations(filePath: string): Promise<{ media: number | null; container: number | null }> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) { reject(new Error(`FFprobe error: ${err.message}`)); return }
+      const positive = (v: unknown): number | null => {
+        const n = Number(v)
+        return Number.isFinite(n) && n > 0 ? n : null
+      }
+      let media: number | null = null
+      for (const s of metadata.streams) {
+        if (s.codec_type !== 'video' && s.codec_type !== 'audio') continue
+        const d = positive(s.duration)
+        if (d !== null && (media === null || d > media)) media = d
+      }
+      resolve({ media, container: positive(metadata.format.duration) })
+    })
+  })
+}
+
 export async function probeFile(filePath: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
     // -show_chapters on top of the default streams+format sections —

@@ -5,45 +5,46 @@
 1. APP-43
 2. APP-41
 3. APP-21
-4. CONV-18
-5. CONV-4
-6. CONV-17
-7. APP-38
-8. APP-19
-9. APP-39
-10. CONV-13
-11. CONV-15
-12. NAV-1
-13. COMB-6
-14. PLR-30
-15. STR-36
-16. STR-31
-17. STR-32
-18. STR-30
-19. STR-11
-20. STR-25
-21. STR-26
-22. STR-29
-23. PLR-31
-24. PLR-17
-25. PLR-25
-26. PLR-26
-27. PLR-32
-28. THU-38
-29. THU-35
-30. THU-36
-31. THU-37
-32. THU-39
-33. INTG-1
-34. APP-25
-35. APP-26
-36. APP-28
-37. APP-31
-38. APP-34
-39. APP-35
-40. CONV-14
-41. CONV-16
-42. SYNC-7
+4. STR-37
+5. CONV-18
+6. CONV-4
+7. CONV-17
+8. APP-38
+9. APP-19
+10. APP-39
+11. CONV-13
+12. CONV-15
+13. NAV-1
+14. COMB-6
+15. PLR-30
+16. STR-36
+17. STR-31
+18. STR-32
+19. STR-30
+20. STR-11
+21. STR-25
+22. STR-26
+23. STR-29
+24. PLR-31
+25. PLR-17
+26. PLR-25
+27. PLR-26
+28. PLR-32
+29. THU-38
+30. THU-35
+31. THU-36
+32. THU-37
+33. THU-39
+34. INTG-1
+35. APP-25
+36. APP-26
+37. APP-28
+38. APP-31
+39. APP-34
+40. APP-35
+41. CONV-14
+42. CONV-16
+43. SYNC-7
 
 ## Next up
 
@@ -176,6 +177,9 @@
 
 - **STR-36** [impact:2] [bug]
   I recently changed the privacy status of several streams to unlisted. For some reason. 2 stream items keep appearing in the out of sync panel on the streams page. The privacy status for both of them have been pushed and pulled multiple times and ive check and double checked that their privacystatus matches on YouTube. When I manually run a refresh, the items disappear, but they keep coming back both on app startup and seemingly after every automatic check.
+
+- **STR-37** [ui]
+  Confirm before deleting a single file from the files grid. The per-file trash button on a file card deletes on one click; a misclick on 2026-10-06 deleted a dehydrated file and getting it back was painful. The confirmation applies to hydrated and dehydrated files alike (a dehydrated file is harder to recover, since the local placeholder goes and the cloud copy follows). A confirmation modal like the stream-level `DeleteModal`, naming the file and its size, with the same recycle-bin wording; the files grid lives on the page, not in a modal, so the no-secondary-modals rule does not come into it. The bulk select-mode delete already confirms and stays as it is. Filed 2026-10-06.
 
 ### Player
 
@@ -348,7 +352,17 @@
 
 - **CONV-18** [bug] [impact:5]
   Long ffmpeg writes were exposed to the sync client while in progress, and a result was trusted on ffmpeg's exit code alone. Found 2026-10-06: two cloud-offloaded archives failed to hydrate (HRESULT 0x80070185). The NAS copy of `SCP - Secret Laboratory 3_archive-av1.mkv` was exactly 1,310,720 bytes with a Matroska header still in ffmpeg's in-progress state (segment size "unknown", no duration, no cues), so it was a snapshot of the file while it was being written; the Synology log shows the client "added" it eight seconds after creation and never registered the ninety minutes of writes that followed, then called it in sync, and the later offload discarded the only complete copy. That file was a manual conversion written straight to its final name, so the archive button's rename swap was not the trigger here, but both paths share the condition: a file that takes an hour or more to write sits in the sync root the whole time and the client may snapshot it half-built. The originals came back from the Windows Recycle Bin because they had been deleted by hand.
-  Built 2026-10-06, awaiting review. New `services/mediaOutput.ts`: every long write into a user folder (converter jobs, the archive swap, clip exports, Combine) goes to `<final name>.tmp` with the container passed explicitly (`-f matroska` and so on, since ffmpeg cannot read it from the name); Synology Drive and OneDrive skip `*.tmp` by their default filters, so nothing half-built is ever uploaded and there is no upload for a rename to interrupt. On a clean exit the file is read back (`verifyFinishedOutput`: exists, has bytes, parses, has a finite duration, which the unfinished Matroska lacks, and matches the input's or the expected duration within 1% or 2 s unless the preset trims) and only then renamed to its final name in one step (`commitOutput`, retrying over about 13 s for transient handles; regular conversions and clip exports replace an existing file of the same name as the old `-y` write did, Combine refuses). A failed check or rename leaves the `.tmp` in place, out of the library and out of the sync, and the job reports why with the file's name. The archive swap is unchanged in order (original to `.smbak`, verified temp to the final name, `.smbak` deleted) but now runs only after the verification; the permanent delete stays by decision, since a kept original would double the disk use and a sync-side failure needs an offload-time check instead (SYNC-8). Failed encodes delete their `.tmp` (before, a failed plain conversion left its partial under the final name); cancelled jobs delete it or, with "keep partial on cancel", rename it to the output name as before; quit-stranded partials and the in-flight registry use the `.tmp` path; the streams watcher ignores `*.tmp`. Also fixed in passing: the archive provenance tag carried a stray opening quote (`"Archived Stream ...`) because only a token's outer quotes are stripped; the whole `key=value` is quoted now. Verify on a `_DEV` dist with a short recording: a plain conversion, an archive from the button (one stream, folder mode and dump mode), a clip export, and a Combine each write `<name>.tmp` while running (visible in Explorer, not in the files grid, not uploaded by the sync client), then the finished file appears under its final name and plays; the archive's original is gone and `_meta.json` marks it archived; re-exporting a clip under the same name replaces the previous one; cancelling mid-run deletes the `.tmp` (or renames it to the output name with the keep setting on); a job killed by quitting the app leaves no `.tmp` after the next launch; an mp3 preset still produces a playable file (muxer map); `ffprobe` on a new archive shows `encoded_by=Archived Stream ...` without a leading quote. To exercise the check itself, temporarily point a preset at a `-t 10` trim without the trim detector and confirm the row reports "Output check failed ... runs 10.0 s where ... was expected" with the `.tmp` kept.
+  Built 2026-10-06, awaiting review. New `services/mediaOutput.ts`: every long write into a user folder (converter jobs, the archive swap, clip exports, Combine) goes to `<final name>.tmp` with the container passed explicitly (`-f matroska` and so on, since ffmpeg cannot read it from the name); Synology Drive and OneDrive skip `*.tmp` by their default filters, so nothing half-built is ever uploaded and there is no upload for a rename to interrupt. On a clean exit the file is read back (`verifyFinishedOutput`: exists, has bytes, parses, has a finite duration, which the unfinished Matroska lacks, and matches the input's or the expected duration within 1% or 2 s unless the preset trims) and only then renamed to its final name in one step (`commitOutput`, retrying over about 13 s for transient handles; regular conversions and clip exports replace an existing file of the same name as the old `-y` write did, Combine refuses). A failed check or rename leaves the `.tmp` in place, out of the library and out of the sync, and the job reports why with the file's name. The archive swap is unchanged in order (original to `.smbak`, verified temp to the final name, `.smbak` deleted) but now runs only after the verification; the permanent delete stays by decision, since a kept original would double the disk use and a sync-side failure needs an offload-time check instead (SYNC-8). Failed encodes delete their `.tmp` (before, a failed plain conversion left its partial under the final name); cancelled jobs delete it or, with "keep partial on cancel", rename it to the output name as before; quit-stranded partials and the in-flight registry use the `.tmp` path; the streams watcher ignores `*.tmp`. Also fixed in passing: the archive provenance tag carried a stray opening quote (`"Archived Stream ...`) because only a token's outer quotes are stripped; the whole `key=value` is quoted now. Verify on a `_DEV` dist with a short recording, each path once:
+  1. Plain conversion: while it runs, `<name>.tmp` is visible in Explorer with no cloud status icon, and absent from the files grid and the sync client's panel. Confirmed 2026-10-06.
+  2. Cancel mid-run: the `.tmp` is deleted (with "keep partial on cancel" on, it takes the output name instead). Confirmed 2026-10-06.
+  3. When the conversion finishes: the file appears under its final name, plays, and the `.tmp` is gone. Confirmed 2026-10-06.
+  4. Archive from the button, one stream: the `__arc_tmp.mkv.tmp` is written, then the original's name carries the new file, the original is gone, no `.smbak` remains, and the stream reads as archived in `_meta.json`. Confirmed 2026-10-06 on an `.mp4` source, which also covered the extension change to `.mkv`.
+  5. Clip export: same `.tmp` then final-name sequence; re-exporting under the same clip name replaces the earlier file. Confirmed 2026-10-06.
+  6. Combine: same sequence; the sources are trashed only after the renderer's own check passes, as before. Confirmed 2026-10-06.
+  7. Quit the app mid-conversion: no `.tmp` is left after the next launch. Confirmed 2026-10-06.
+  8. An mp3 preset still produces a playable file (the muxer map). Confirmed 2026-10-06.
+  9. `ffprobe` on a new archive shows `encoded_by=Archived Stream ...` with no leading quote. Confirmed 2026-10-06 (`2026-10-15 12-44-23.mkv`).
+  10. The check itself, with no code change: in the preset editor, Advanced mode, make a custom preset whose args shorten the output through filters, which the trim detector (it looks for `-t`, `-to`, `-ss`, `-frames`, `-fs`) does not exempt: `-map 0:v:0 -map 0:a:0 -vf trim=duration=10,setpts=PTS-STARTPTS -af atrim=duration=10,asetpts=PTS-STARTPTS -c:v libx264 -preset ultrafast -c:a aac`, mp4 output. Convert any recording longer than a minute with it. Expected: the row turns red with "Output check failed: the output's video and audio run 10.0 s where N s was expected. The file was kept as `X.mp4.tmp` for inspection; nothing else was changed." (N the input's length, X the output name) and the `.tmp` sits in the folder (not in the files grid). Delete the `.tmp` and the test preset afterward. First run 2026-10-06 FAILED the test: the output passed as finished because the mp4 muxer had added a timecode data track running the source's full length and the check read the container duration, which follows the longest track. Fixed the same day: the check now measures the longest audio or video stream (`probeMediaDurations`) and falls back to the container only when the streams report none, as Matroska does. Re-run after rebuilding: confirmed 2026-10-06, the row reported the 10.0 s against 927.6 s and the `.tmp` was kept.
 
 ### Combine
 

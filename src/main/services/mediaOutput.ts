@@ -1,6 +1,6 @@
 import fs from 'fs'
 import path from 'path'
-import { probeFile } from './ffmpegService'
+import { probeMediaDurations } from './ffmpegService'
 
 /** Every long ffmpeg write into a user folder goes through here.
  *
@@ -54,7 +54,11 @@ export type OutputVerification =
 
 /** Read a finished output back: it exists, has bytes, parses, and carries a
  *  finite duration (a Matroska file ffmpeg never finalized reports none).
- *  With `expectedDurationSec`, the duration must also match within
+ *  The duration is the longest audio or video stream's, not the
+ *  container's: an mp4's timecode data track runs the source's full length
+ *  even when the media was cut short, and the container duration follows
+ *  it (found 2026-10-06 when a 10 s test output passed as 927 s). With
+ *  `expectedDurationSec`, the duration must also match within
  *  `toleranceSec` (default 1% or 2 seconds, whichever is larger; a stream
  *  copy concat passes a looser one for its timestamp joins), which catches
  *  an encode that stopped early with a clean exit. */
@@ -66,20 +70,20 @@ export async function verifyFinishedOutput(filePath: string, expectedDurationSec
     return { ok: false, reason: 'the output file is missing' }
   }
   if (size === 0) return { ok: false, reason: 'the output file is empty' }
-  let durationSec: number
+  let durationSec: number | null
   try {
-    const info = await probeFile(filePath)
-    durationSec = Number(info.duration)
+    const d = await probeMediaDurations(filePath)
+    durationSec = d.media ?? d.container
   } catch (err: any) {
     return { ok: false, reason: `the output could not be read back (${err?.message ?? err})` }
   }
-  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+  if (durationSec === null) {
     return { ok: false, reason: 'the output has no duration, so it was never finalized' }
   }
   if (expectedDurationSec && Number.isFinite(expectedDurationSec) && expectedDurationSec > 0) {
     const tolerance = toleranceSec ?? Math.max(2, expectedDurationSec * 0.01)
     if (Math.abs(durationSec - expectedDurationSec) > tolerance) {
-      return { ok: false, reason: `the output runs ${durationSec.toFixed(1)} s where ${expectedDurationSec.toFixed(1)} s was expected` }
+      return { ok: false, reason: `the output's video and audio run ${durationSec.toFixed(1)} s where ${expectedDurationSec.toFixed(1)} s was expected` }
     }
   }
   return { ok: true, durationSec }
