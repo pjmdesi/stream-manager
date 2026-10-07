@@ -42,7 +42,11 @@ jobs:
           node-version: 24
           cache: npm
 
+      # The postinstall fetches Electron's binary for the dev server; the
+      # packaging step downloads its own copy, so skip it here.
       - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
       # The gate: no artifact if either fails. `npm run dist` re-runs the
       # typecheck as part of the local command chain (cheap); the explicit

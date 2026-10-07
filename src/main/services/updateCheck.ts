@@ -67,10 +67,16 @@ async function getLatestRelease(force = false): Promise<CacheEntry | null> {
   const cached = store.get(STORE_KEY, null)
   const now = Date.now()
   if (!force && cached && (now - cached.checkedAt) < CACHE_TTL_MS) {
+    console.log(`[updateCheck] using the result cached at ${new Date(cached.checkedAt).toLocaleTimeString()} (latest ${cached.latest}); next request after the 6 h cache expires`)
     return cached
   }
+  console.log(`[updateCheck] asking GitHub for the latest release${force ? ' (manual check)' : ''}`)
   const fresh = await fetchLatestRelease()
-  if (!fresh) return cached // stay with stale cache on transient failures
+  if (!fresh) {
+    console.log('[updateCheck] no answer from GitHub; keeping the cached result' + (cached ? '' : ' (none)'))
+    return cached // stay with stale cache on transient failures
+  }
+  console.log(`[updateCheck] latest release is ${fresh.tag}`)
   const entry: CacheEntry = {
     checkedAt: now,
     latest: fresh.tag,
@@ -85,6 +91,7 @@ export async function checkForUpdate(force = false): Promise<UpdateCheckResult> 
   const current = app.getVersion()
   // Honor user opt-out unless force=true (manual "check now" button).
   if (!force && !getConfig().checkForUpdates) {
+    console.log('[updateCheck] skipped: "Check for app updates" is off in Settings')
     return { current, latest: null, hasUpdate: false, releaseUrl: null, releaseNotes: null }
   }
   const entry = await getLatestRelease(force)

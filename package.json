@@ -5,6 +5,7 @@
     "main": "./out/main/index.js",
     "author": "PJ Mullen <contact@pjm.design>",
     "scripts": {
+        "postinstall": "node node_modules/electron/install.js",
         "dev": "electron-vite dev",
         "build": "electron-vite build",
         "preview": "electron-vite preview",
