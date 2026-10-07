@@ -10,7 +10,7 @@
  * renderer can later call `relay:enable`/`relay:disable` to toggle.
  */
 import { ipcMain } from 'electron'
-import { getStore } from './store'
+import { getConfig } from './store'
 import { broadcast } from '../services/broadcast'
 import { relayManager, RelayConfig, RelayStatus, RelayStats } from '../services/streamRelay/relayManager'
 import { activeBroadcastService, ActivePickResult } from '../services/streamRelay/activeBroadcast'
@@ -19,8 +19,8 @@ import { relayOrchestrator, OrchestratorEvent } from '../services/streamRelay/re
 const YT_RTMP_BASE = 'rtmp://a.rtmp.youtube.com/live2'
 
 function buildConfigFromStore(): RelayConfig | null {
-  const cfg = getStore().get('config') as any
-  if (!cfg?.streamRelayOutboundKey) return null
+  const cfg = getConfig()
+  if (!cfg.streamRelayOutboundKey) return null
   return {
     port: cfg.streamRelayPort || 1935,
     inboundKey: cfg.streamRelayInboundKey || 'live',
@@ -71,8 +71,7 @@ export function registerStreamRelayIPC(): void {
   // Reapply config — used after the user updates the port/outbound key from
   // the UI. Triggers a clean restart if the relay is currently running.
   ipcMain.handle('stream-relay:reapply-config', () => {
-    const cfg = getStore().get('config') as any
-    if (!cfg?.streamRelayEnabled) return relayManager.getStatus()
+    if (!getConfig().streamRelayEnabled) return relayManager.getStatus()
     const next = buildConfigFromStore()
     if (next) relayManager.start(next)
     return relayManager.getStatus()
@@ -124,8 +123,7 @@ export function registerStreamRelayIPC(): void {
  *  waiting for an app restart or a manual toggle. Never bounces a relay
  *  that's already listening/streaming. */
 export function startRelayIfEnabled(): void {
-  const cfg = getStore().get('config') as any
-  if (!cfg?.streamRelayEnabled) return
+  if (!getConfig().streamRelayEnabled) return
   const state = relayManager.getStatus().state
   if (state !== 'idle' && state !== 'error') return
   const built = buildConfigFromStore()

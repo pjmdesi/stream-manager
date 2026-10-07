@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
-import { getStore, getStreamsDir, getStreamMode } from './store'
+import { getStore, getConfig, getStreamsDir, getStreamMode } from './store'
 import { readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
 import { HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
@@ -741,8 +741,8 @@ export function enqueueRunnableJob(
 /** Configured cap on how many conversions the auto-scheduler runs at once.
  *  Clamped to a minimum of 1. */
 function getMaxConcurrentConversions(): number {
-  const raw = (getStore().get('config') as { maxConcurrentConversions?: number } | undefined)?.maxConcurrentConversions
-  const n = typeof raw === 'number' && Number.isFinite(raw) ? Math.floor(raw) : 2
+  const raw = getConfig().maxConcurrentConversions
+  const n = Number.isFinite(raw) ? Math.floor(raw) : 2
   return Math.max(1, n)
 }
 
@@ -1870,7 +1870,7 @@ export function registerConverterIPC(): void {
       settleJobDone(jobId)
       clipRunners.delete(jobId)
       persistPendingJobs()
-      const config = getStore().get('config')
+      const config = getConfig()
       // The renderer surfaces (session videos, files grid) hide the output
       // while the job is writing — on cancel the job leaves that state, so
       // tell them to reconcile. When the partial is being auto-deleted,

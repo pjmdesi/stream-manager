@@ -4,51 +4,54 @@
 
 1. APP-43
 2. APP-41
-3. APP-21
-4. STR-37
-5. CONV-18
-6. CONV-4
+3. CONV-18
+4. APP-21
+5. APP-49
+6. APP-48
 7. CONV-17
-8. APP-38
-9. APP-19
-10. APP-39
-11. CONV-13
-12. CONV-15
-13. NAV-1
+8. CONV-13
+9. STR-37
+10. CONV-15
+11. CONV-16
+12. SYNC-8
+13. PLR-31
 14. COMB-6
-15. PLR-30
-16. STR-36
-17. STR-31
-18. STR-32
-19. STR-30
-20. STR-11
-21. STR-25
-22. STR-26
-23. STR-29
-24. PLR-31
-25. PLR-17
-26. PLR-25
-27. PLR-26
-28. PLR-32
-29. THU-38
-30. THU-35
-31. THU-36
-32. THU-37
-33. THU-39
-34. INTG-1
-35. APP-25
-36. APP-26
-37. APP-28
-38. APP-31
-39. APP-34
-40. APP-35
-41. CONV-14
-42. CONV-16
-43. SYNC-7
+15. CONV-4
+16. CONV-14
 
 ## Next up
 
 1. STR-34
+2. STR-32
+3. APP-38
+4. APP-19
+5. APP-39
+6. NAV-1
+7. PLR-30
+8. STR-36
+9. STR-31
+10. STR-30
+11. STR-11
+12. STR-25
+13. STR-26
+14. STR-29
+15. PLR-17
+16. PLR-25
+17. PLR-26
+18. PLR-32
+19. THU-38
+20. THU-35
+21. THU-36
+22. THU-37
+23. THU-39
+24. INTG-1
+25. APP-25
+26. APP-26
+27. APP-28
+28. APP-31
+29. APP-34
+30. APP-35
+31. SYNC-7
 
 ## Improvement ideas
 
@@ -251,7 +254,7 @@
   When the zoom/pan is at or near max, the zoom indicator in the clipper toolbar disappears. It should not disappear. It should stay visible regardless of the values.
 
 - **PLR-33** [bug] [ui] [investigate]
-  The Player accepts formats it cannot play. Since the shared video list (APP-41, 2026-10-06) its open dialog, dropzone and sibling list take every container a stream folder can hold, but Chromium's media element decodes only some of them: an `.mpg` opens and shows the error banner. Found 2026-10-06. The Player should only accept files it can play, and the sibling list should still show the other video files, disabled, so the user sees they exist and why they are skipped. Proposal: a `PLAYABLE_EXTENSIONS` subset in `shared/videoExts` for the open dialog and dropzone (Chromium plays ISO BMFF and Matroska families and WebM/Ogg: `mkv`, `mp4`, `m4v`, `mov`, `webm`, `ogv`, probably `3gp` and `f4v`; it does not play `avi`, `flv`, `ts`, `m2ts`, `mts`, `wmv`, `asf`, `mpg`, `mpeg`, `vob`, `divx`, `rmvb`, raw `hevc`); confirm the borderline ones with sample files before shipping, since `canPlayType` returns '' for Matroska even though it plays. In the sibling list, unplayable files render disabled with a tooltip naming the format and offering Send to Converter (the YouTube Ready preset produces a playable MP4). A container check cannot see codec problems (an MKV with a codec the machine lacks), so the existing error banner stays as the second line of defense. Not queued.
+  The Player accepts formats it cannot play. Since the shared video list (APP-41, 2026-10-06) its open dialog, dropzone and sibling list take every container a stream folder can hold, but Chromium's media element decodes only some of them: an `.mpg` opens and shows the error banner. Found 2026-10-06. The Player should only accept files it can play, and the sibling list should still show the other video files, disabled, so the user sees they exist and why they are skipped. Proposal: a `PLAYABLE_EXTENSIONS` subset in `shared/videoExts` for the open dialog and dropzone (Chromium plays ISO BMFF and Matroska families and WebM/Ogg: `mkv`, `mp4`, `m4v`, `mov`, `webm`, `ogv`, probably `3gp` and `f4v`; it does not play `avi`, `flv`, `ts`, `m2ts`, `mts`, `wmv`, `asf`, `mpg`, `mpeg`, `vob`, `divx`, `rmvb`, raw `hevc`); confirm the borderline ones with sample files before shipping, since `canPlayType` returns '' for Matroska even though it plays. In the sibling list, unplayable files render disabled with a tooltip naming the format and offering Send to Converter (the YouTube Ready preset produces a playable MP4). A container check cannot see codec problems (an MKV with a codec the machine lacks), so the existing error banner stays as the second line of defense.
 
 ### Thumbnail editor
 
@@ -349,20 +352,10 @@
 
 - **CONV-17** [bug] [impact:3]
   When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this.
+  From the APP-21 scan (2026-10-07): there is no one list of the ffmpeg children SM spawns. The converter scheduler caps conversions and clip exports (`maxConcurrentConversions`), while Combine (`ipc/combine.ts`), the player's audio extraction and waveform extraction (`ffmpegService.ts`), the GPU encoder probe and the stream relay (`relayManager.ts`) each spawn ffmpeg on their own, so the cap is not app-wide and quit-time teardown knows only the converter's jobs. The orphan half of this ticket wants a `services/ffmpegChildren.ts` registry that every spawn site goes through (pid, purpose, owner id, started at), with kill-all at quit, a sweep that kills any registered child whose owner no longer exists in SM's own state, and a count by purpose for the nav and for diagnostics; `tasklist`-style scans of the whole machine are the false-positive risk the ticket warns about and are not the mechanism. Decision for this ticket: whether Combine should take a converter slot while it runs.
 
-- **CONV-18** [bug] [impact:5]
-  Long ffmpeg writes were exposed to the sync client while in progress, and a result was trusted on ffmpeg's exit code alone. Found 2026-10-06: two cloud-offloaded archives failed to hydrate (HRESULT 0x80070185). The NAS copy of `SCP - Secret Laboratory 3_archive-av1.mkv` was exactly 1,310,720 bytes with a Matroska header still in ffmpeg's in-progress state (segment size "unknown", no duration, no cues), so it was a snapshot of the file while it was being written; the Synology log shows the client "added" it eight seconds after creation and never registered the ninety minutes of writes that followed, then called it in sync, and the later offload discarded the only complete copy. That file was a manual conversion written straight to its final name, so the archive button's rename swap was not the trigger here, but both paths share the condition: a file that takes an hour or more to write sits in the sync root the whole time and the client may snapshot it half-built. The originals came back from the Windows Recycle Bin because they had been deleted by hand.
-  Built 2026-10-06, awaiting review. New `services/mediaOutput.ts`: every long write into a user folder (converter jobs, the archive swap, clip exports, Combine) goes to `<final name>.tmp` with the container passed explicitly (`-f matroska` and so on, since ffmpeg cannot read it from the name); Synology Drive and OneDrive skip `*.tmp` by their default filters, so nothing half-built is ever uploaded and there is no upload for a rename to interrupt. On a clean exit the file is read back (`verifyFinishedOutput`: exists, has bytes, parses, has a finite duration, which the unfinished Matroska lacks, and matches the input's or the expected duration within 1% or 2 s unless the preset trims) and only then renamed to its final name in one step (`commitOutput`, retrying over about 13 s for transient handles; regular conversions and clip exports replace an existing file of the same name as the old `-y` write did, Combine refuses). A failed check or rename leaves the `.tmp` in place, out of the library and out of the sync, and the job reports why with the file's name. The archive swap is unchanged in order (original to `.smbak`, verified temp to the final name, `.smbak` deleted) but now runs only after the verification; the permanent delete stays by decision, since a kept original would double the disk use and a sync-side failure needs an offload-time check instead (SYNC-8). Failed encodes delete their `.tmp` (before, a failed plain conversion left its partial under the final name); cancelled jobs delete it or, with "keep partial on cancel", rename it to the output name as before; quit-stranded partials and the in-flight registry use the `.tmp` path; the streams watcher ignores `*.tmp`. Also fixed in passing: the archive provenance tag carried a stray opening quote (`"Archived Stream ...`) because only a token's outer quotes are stripped; the whole `key=value` is quoted now. Verify on a `_DEV` dist with a short recording, each path once:
-  1. Plain conversion: while it runs, `<name>.tmp` is visible in Explorer with no cloud status icon, and absent from the files grid and the sync client's panel. Confirmed 2026-10-06.
-  2. Cancel mid-run: the `.tmp` is deleted (with "keep partial on cancel" on, it takes the output name instead). Confirmed 2026-10-06.
-  3. When the conversion finishes: the file appears under its final name, plays, and the `.tmp` is gone. Confirmed 2026-10-06.
-  4. Archive from the button, one stream: the `__arc_tmp.mkv.tmp` is written, then the original's name carries the new file, the original is gone, no `.smbak` remains, and the stream reads as archived in `_meta.json`. Confirmed 2026-10-06 on an `.mp4` source, which also covered the extension change to `.mkv`.
-  5. Clip export: same `.tmp` then final-name sequence; re-exporting under the same clip name replaces the earlier file. Confirmed 2026-10-06.
-  6. Combine: same sequence; the sources are trashed only after the renderer's own check passes, as before. Confirmed 2026-10-06.
-  7. Quit the app mid-conversion: no `.tmp` is left after the next launch. Confirmed 2026-10-06.
-  8. An mp3 preset still produces a playable file (the muxer map). Confirmed 2026-10-06.
-  9. `ffprobe` on a new archive shows `encoded_by=Archived Stream ...` with no leading quote. Confirmed 2026-10-06 (`2026-10-15 12-44-23.mkv`).
-  10. The check itself, with no code change: in the preset editor, Advanced mode, make a custom preset whose args shorten the output through filters, which the trim detector (it looks for `-t`, `-to`, `-ss`, `-frames`, `-fs`) does not exempt: `-map 0:v:0 -map 0:a:0 -vf trim=duration=10,setpts=PTS-STARTPTS -af atrim=duration=10,asetpts=PTS-STARTPTS -c:v libx264 -preset ultrafast -c:a aac`, mp4 output. Convert any recording longer than a minute with it. Expected: the row turns red with "Output check failed: the output's video and audio run 10.0 s where N s was expected. The file was kept as `X.mp4.tmp` for inspection; nothing else was changed." (N the input's length, X the output name) and the `.tmp` sits in the folder (not in the files grid). Delete the `.tmp` and the test preset afterward. First run 2026-10-06 FAILED the test: the output passed as finished because the mp4 muxer had added a timecode data track running the source's full length and the check read the container duration, which follows the longest track. Fixed the same day: the check now measures the longest audio or video stream (`probeMediaDurations`) and falls back to the container only when the streams report none, as Matroska does. Re-run after rebuilding: confirmed 2026-10-06, the row reported the 10.0 s against 927.6 s and the `.tmp` was kept.
+- **CONV-18** [bug] [impact:5] [done]
+  Long ffmpeg writes were exposed to the sync client while in progress, and a result was trusted on ffmpeg's exit code alone. Found 2026-10-06: two cloud-offloaded archives failed to hydrate (HRESULT 0x80070185). The NAS copy of `SCP - Secret Laboratory 3_archive-av1.mkv` was exactly 1,310,720 bytes with a Matroska header still in ffmpeg's in-progress state (segment size "unknown", no duration, no cues), so it was a snapshot of the file while it was being written; the Synology log shows the client "added" it eight seconds after creation and never registered the ninety minutes of writes that followed, then called it in sync, and the later offload discarded the only complete copy. That file was a manual conversion written straight to its final name, so the archive button's rename swap was not the trigger here, but both paths share the condition: a file that takes an hour or more to write sits in the sync root the whole time and the client may snapshot it half-built. The originals came back from the Windows Recycle Bin because they had been deleted by hand. Built and verified 2026-10-06.
 
 ### Combine
 
@@ -386,7 +379,7 @@
 
 - **COMB-7** [needs-design] [blocked:CONV-14]
   Audio track management when combining (split from CONV-14, 2026-10-05). Original text: This kind of track management functionality also needs to be added to the combine functionality. Right now, I believe it keeps all audio tracks, and just appends whatever each video file has next to each other. We might need to explore a more complicated visualization which shows the different tracks in each file and what the resulting combined file would look like. Showing simple colored blocks in a gantt-style chart may work.
-  Notes for the design pass: first confirm what combine does today with sources whose track counts or layouts differ (the compatibility gate already blocks an audio-layout mismatch, so the appended-tracks case may not be reachable); the options are likely keep all tracks as they are, mix each file down to one track, or pick which tracks survive; the mix-down can reuse CONV-14's step, which is why this waits on it. Not queued.
+  Notes for the design pass: first confirm what combine does today with sources whose track counts or layouts differ (the compatibility gate already blocks an audio-layout mismatch, so the appended-tracks case may not be reachable); the options are likely keep all tracks as they are, mix each file down to one track, or pick which tracks survive; the mix-down can reuse CONV-14's step, which is why this waits on it.
 
 ### Launcher
 
@@ -422,7 +415,7 @@
   Investigate if there are any parts of the YouTube or Twitch APIs that are not being utilized bout could be and list them as part of this ticket.
 
 - **SYNC-8** [investigate] [impact:4]
-  Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window. Filed 2026-10-06 from CONV-18. Not queued.
+  Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window.
 
 ### Auto-rules
 
@@ -506,8 +499,8 @@
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
 
-- **APP-21** [investigate] [impact:4]
-  Single-authority audit: sweep the app for subsystems quietly running their own private copy of a shared concern, the pattern that has now bitten repeatedly. Known instances, all since fixed: the converter's private cloud-hydration loop that the cloud widget, files grid, and thumbnail fill-in never heard about (CONV-1); encode starts bypassing the concurrency scheduler (CONV-2); the out-of-sync panel's lazy tag-template sync (v2.4.0); the zoom shortcuts split between SM's handler and Electron's invisible default menu (APP-12). Method: inventory the cross-cutting concerns (cloud/hydration status, file-change notification, scheduling and caps, caching layers, config writes, event broadcast channels) and verify each has exactly ONE authority that every consumer routes through; anything found gets fixed inline if small or filed as its own item. Candidates to check first: ETA/elapsed calculations (converter nav extra vs converter page rows), per-page checkLocalFiles caching vs the shared hydrationCache, thumbnail generation triggers across surfaces, streams:changed emission sites, and any remaining direct getStore().set('config') writes that skip setConfigPartial's broadcast.
+- **APP-21** [investigate] [impact:4] [done]
+  Single-authority audit: sweep the app for subsystems quietly running their own private copy of a shared concern, the pattern that has now bitten repeatedly. Known instances, all since fixed: the converter's private cloud-hydration loop that the cloud widget, files grid, and thumbnail fill-in never heard about (CONV-1); encode starts bypassing the concurrency scheduler (CONV-2); the out-of-sync panel's lazy tag-template sync (v2.4.0); the zoom shortcuts split between SM's handler and Electron's invisible default menu (APP-12). Method: inventory the cross-cutting concerns (cloud/hydration status, file-change notification, scheduling and caps, caching layers, config writes, event broadcast channels) and verify each has exactly ONE authority that every consumer routes through; anything found gets fixed inline if small or filed as its own item. Candidates to check first: ETA/elapsed calculations (converter nav extra vs converter page rows), per-page checkLocalFiles caching vs the shared hydrationCache, thumbnail generation triggers across surfaces, streams:changed emission sites, and any remaining direct getStore().set('config') writes that skip setConfigPartial's broadcast. Scope decided 2026-10-07 for the concentrated release: one bounded scan session whose findings are filed as tickets, not fixed in place; the queue was cut the same day to converter and combine work plus data-safety items (CONV-17, CONV-13, STR-37, CONV-15, CONV-16, SYNC-8, PLR-31, COMB-6, CONV-4, CONV-14), everything else parked in Next up. Scan done 2026-10-07, one session as decided. Verified single already: ETA and elapsed (ConversionContext feeds the nav extra and the converter rows), the locality gate before every probe (checkAlreadyArchived included), the three caches under one limit, main-to-renderer events (broadcast), the renderer's IPC bridge (preload only, zero direct ipcRenderer use), the ffmpeg path and the video list (APP-41), row thumbnails. Not single, filed as tickets: APP-47 (twelve renderer hydration checks bypass hydrationCache), APP-48 (four stream-key functions and about twelve folder-name regexes, with a dump-mode divergence masked by guards), APP-49 (sixteen private config casts in main with their own fallbacks, two streamMode reads with a different default, one config write that skips the broadcast), APP-50 (ten streams:changed emitters, four payload shapes, two audiences). Folded into CONV-17: no registry of ffmpeg children; Combine, audio and waveform extraction and the relay spawn outside the converter cap.
 
 - **APP-25** [impact:3]
   Extend _meta.json's corruption recovery to the app-config and templates stores (from the website-side audit, 2026-09-06). Writes are already safe (electron-store 8.2.0 writes through conf 10.2.0's atomic writer) and a corrupt store correctly throws instead of silently resetting (clearInvalidConfig stays false); the gap is recovery: a damaged app-config.json has no backup to restore from, and since getStore() throws, the likely user experience is an app that will not start with no explanation.
@@ -575,10 +568,22 @@
   Built 2026-10-05, awaiting review (steps 1 and 2; lockfile only, `package.json` ranges unchanged). `npm audit fix` cleared 14 of the 19, including all three `image-size` advisories (now 2.0.4). `npm update` then took every in-range bump: Electron 44.5.1, electron-builder 26.15.3, konva 10.7.1, react-konva 18.2.16, lucide-react 1.52.0, motion 12.43.0, eslint 10.12.0, typescript-eslint 8.71.1, autoprefixer 10.6.1, postcss 8.5.29, @types/node 24.19.1. Typecheck and lint pass after each step. The portable launcher patch's anchor (`RMDir /r $INSTDIR` then `SetOutPath $INSTDIR`) is still present in the 26.15.3 template, so the build script will inject the pre-check; the two-launch test on a dist is the real proof. The release process's checklist template gained the audit line. What remains in the audit: 5 entries that are one advisory, a stack-exhaustion denial of service in `braces` (every released version, no patched one), reaching shipped code through chokidar 3 and micromatch in `services/fileWatcher.ts` (the auto-rules watcher) and build tooling through Tailwind. The input it parses there is the user's own watch-rule patterns, so the exposure is a user crashing their own watcher with a pathological pattern. Clearing it means chokidar 5 (which drops braces and globbing) and picomatch in place of micromatch for rule matching: a real change to the auto-rules watcher, so it is step 3 material and its own ticket if wanted, not part of this round. Verify on a `_DEV` dist: the core regression list; two launches (second one focuses the first, no window flash, no second tray icon); the thumbnail editor end to end, since Konva and react-konva moved (groups, masks, group effects, arrows, gradients, export); icons across the app after the Lucide bump (a renamed or redrawn glyph would show as a wrong or missing icon); nav and row animations after the motion bump; an auto-rule firing on a dropped recording.
 
 - **APP-44** [cleanup]
-  Retake the README hero on a release build. The current `resources/sm-hero.webp` (a7858f7, also serving as the website's streams screenshot) was captured on a dev build: its corner reads v2.6.0 with the branch chip, while the other site captures read v2.7.0 with no chip. Harmless at display size; the style guide's build-naming rule says release builds carry no markers, so the next shoot should use the published exe. Noted by the website instance 2026-10-02. Not queued.
+  Retake the README hero on a release build. The current `resources/sm-hero.webp` (a7858f7, also serving as the website's streams screenshot) was captured on a dev build: its corner reads v2.6.0 with the branch chip, while the other site captures read v2.7.0 with no chip. Harmless at display size; the style guide's build-naming rule says release builds carry no markers, so the next shoot should use the published exe. Noted by the website instance 2026-10-02.
 
 - **APP-46** [cleanup]
-  Unused code is invisible to the toolchain: the lint config is app rules only and `noUnusedLocals` is off in both tsconfigs, so an unused import or local is never reported (two slipped through the APP-41 commits and were caught only by a manual `tsc --noUnusedLocals` run, 2026-10-06). That run lists about 25 pre-existing ones: `electronApp` in `main/index.ts`, `ChildProcess` in `ipc/files.ts`, `ConversionPreset` and `isFileConfirmedLocal` in `ipc/streams.ts`, `app` and `GPU_ENCODER_CANDIDATES` in `ffmpegService.ts`, `ThumbImage`, `SESSION_CATEGORY_LABEL`, `SESSION_CATEGORY_STYLES`, `cancelExtraction`, `streamNavTip` and `contentH` in `PlayerPage.tsx`, `FolderOpen` in `StreamsPage.tsx`, `X` and `Loader2` in `StreamRelayWidget.tsx`, `AlertTriangle` in `BroadcastPicker.tsx`, `useCallback` in `StreamFilesGrid.tsx`, unused `React` default imports in several files, and in the legacy file `XCircle`, `CloudOff`, `CloudCheck`, `streamIndex`, `CATEGORY_LABEL` and `CATEGORY_STYLES`. The pass: delete each (a few may be half-finished work worth a look first, `cancelExtraction` and `streamNavTip` in particular), then turn `noUnusedLocals` on in `tsconfig.web.json` and `tsconfig.node.json` so typecheck holds the line. While in `main/index.ts`: the date-folder `mkdir` monkey-patch at the top of the file is marked "remove once the source is identified"; decide whether the phantom folder was traced and remove or re-justify it. Not queued; filed 2026-10-06.
+  Unused code is invisible to the toolchain: the lint config is app rules only and `noUnusedLocals` is off in both tsconfigs, so an unused import or local is never reported (two slipped through the APP-41 commits and were caught only by a manual `tsc --noUnusedLocals` run, 2026-10-06). That run lists about 25 pre-existing ones: `electronApp` in `main/index.ts`, `ChildProcess` in `ipc/files.ts`, `ConversionPreset` and `isFileConfirmedLocal` in `ipc/streams.ts`, `app` and `GPU_ENCODER_CANDIDATES` in `ffmpegService.ts`, `ThumbImage`, `SESSION_CATEGORY_LABEL`, `SESSION_CATEGORY_STYLES`, `cancelExtraction`, `streamNavTip` and `contentH` in `PlayerPage.tsx`, `FolderOpen` in `StreamsPage.tsx`, `X` and `Loader2` in `StreamRelayWidget.tsx`, `AlertTriangle` in `BroadcastPicker.tsx`, `useCallback` in `StreamFilesGrid.tsx`, unused `React` default imports in several files, and in the legacy file `XCircle`, `CloudOff`, `CloudCheck`, `streamIndex`, `CATEGORY_LABEL` and `CATEGORY_STYLES`. The pass: delete each (a few may be half-finished work worth a look first, `cancelExtraction` and `streamNavTip` in particular), then turn `noUnusedLocals` on in `tsconfig.web.json` and `tsconfig.node.json` so typecheck holds the line. While in `main/index.ts`: the date-folder `mkdir` monkey-patch at the top of the file is marked "remove once the source is identified"; decide whether the phantom folder was traced and remove or re-justify it.
+
+- **APP-47** [cleanup] [impact:3]
+  Route every renderer hydration check through `lib/hydrationCache`. The cache declares itself the surfaces' single source of truth for local-or-cloud status, with a 30 s freshness TTL and subscriptions, yet twelve direct `window.api.checkLocalFiles` calls bypass it (CombinePage three, ConverterPage, SendToConverterModal, PlayerPage four, StreamsPage three; found by the APP-21 scan 2026-10-07). None of them record what they learn, so a status one surface just verified stays stale on another until the TTL lapses, and opening a video from the grid runs two PowerShell attribute checks back to back for the same path. Proposal: `checkHydration(paths, { fresh? })` in hydrationCache that answers from the cache for paths verified within the TTL, asks main for the rest in one call, records every answer, and returns the flags in order; the sites that must decide on live data (about to open or convert a file) pass `fresh: true` and still record. Replace the twelve sites; `window.api.checkLocalFiles` then has one renderer caller.
+
+- **APP-48** [cleanup] [impact:3]
+  One module for the stream folder convention and stream keys. Four functions answer "which stream owns this path and what is its `_meta.json` key": `metaKey` and `streamKeyForPath` in `main/ipc/streams.ts`, `streamMetaKey` in `renderer/lib/videoMapKey.ts`, and the key half of `resolveStreamContext` in `PlayerPage.tsx`; the `YYYY-MM-DD(-N)` folder pattern and the date-in-filename pattern are declared about twelve times across `streams.ts`, `fileWatcher.ts`, `main/index.ts`, `PlayerPage`, `StreamsPage` and `CombinePage` (APP-21 scan, 2026-10-07). They agree on the common layouts and differ at the edges: in dump mode main's `metaKey(root, root)` returns the root folder's name where the renderer returns the stream date, which is masked today by a `streamMode` guard at each call site, the same class of divergence that produced the phantom entry noted in `fireGroupCompletionHook`. Proposal: `src/shared/streamKey.ts` (pure path logic, both processes compile it, like `shared/videoExts.ts`): `STREAM_FOLDER_RE`, `isStreamFolderName`, `streamFolderDate`, `streamFolderSuffix`, `dateInFileName`, `streamKeyOfFolder(root, folderPath, date)`, `streamKeyOfFile(root, filePath)`; the four functions and the regex sites route through it, with one test file of layouts (flat, year/month nesting, same-day suffixes, dump mode) that pins the agreed answers.
+
+- **APP-49** [cleanup] [impact:2]
+  Typed config reads in main. Sixteen sites read the raw stored config through a private cast (`getStore().get('config') as { key?: T }`, eight of them `as any`): `main/index.ts` five, `streamRelay.ts` three, `relayOrchestrator.ts`, `activeBroadcast.ts`, `cacheLimit.ts`, `updateCheck.ts`, `converter.ts`, `youtube.ts`, and two `streamMode` reads in `streams.ts` that APP-41 missed and that default to `'folder-per-stream'` where `getStreamMode()` defaults to `''` (APP-21 scan, 2026-10-07). The raw read skips the defaults merge, so each site invents its own fallback for a key an older config file may lack. Proposal: `getConfig(): AppConfig` in `store.ts` (the defaults merge and legacy migrations of `getConfigDecrypted`, without decrypting secrets) and the casts replaced; `getStreamsDir` and `getStreamMode` become thin reads of it. Also found: `app:setStartupSettings` (`store.ts`) writes the config object directly and skips `setConfigPartial`'s `config:changed` broadcast; the Settings page already saves `startWithWindows` and `startMinimized` through `updateConfig`, so the handler should only register the login item, or route its write through `setConfigPartial`. Built 2026-10-07, awaiting review.
+
+- **APP-50** [cleanup] [impact:1]
+  One announcer for `streams:changed`. Ten emitters in three files (`streams.ts` six, `converter.ts` three, `thumbnail.ts` one) build the payload by hand in four shapes (`{ streamKeys }`, `{ quiet, streamKeys }`, `{ quiet }`, none) and address two audiences: nine broadcast to every window, the thumbnail editor's save notifies only the window that saved (APP-21 scan, 2026-10-07). Proposal: `announceStreamsChanged({ streamKeys?, quiet? })` in `streams.ts`, used by all ten, broadcasting (the popout ignores the event and there is no second main window), with the payload type exported so the preload's `onStreamsChanged` signature and the six renderer listeners share it. Hygiene, not a bug.
 
 - **APP-45** [impact:3] [needs-design] [investigate]
   Add feedback path within the app. Discussion & design needed. Not sure the best place or method of ingest. It would be great if feedback could automatically produce github issues. Probably shouldn't allow image upload. Just text feedback either reviewing the app or reporting issues/bugs.

@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import { getStore, getConfigDecrypted } from './store'
+import { getConfig, getConfigDecrypted } from './store'
 
 const ANTHROPIC_API = 'https://api.anthropic.com/v1/messages'
 const ANTHROPIC_MODELS_API = 'https://api.anthropic.com/v1/models'
@@ -143,8 +143,7 @@ export function registerClaudeIPC() {
 
   ipcMain.handle('claude:testKey', async (_, apiKey: string) => {
     try {
-      const config = getStore().get('config')
-      const model = config.claudeModel?.trim() || DEFAULT_MODEL
+      const model = getConfig().claudeModel.trim() || DEFAULT_MODEL
       const res = await callAnthropic(apiKey.trim(), model, 'You are a test.', 'Reply with just "ok".', 5)
       if (res.ok) return { valid: true }
       const err = await res.json().catch(() => ({})) as { error?: { message?: string } }

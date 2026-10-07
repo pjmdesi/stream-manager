@@ -7,7 +7,7 @@ import Store from 'electron-store'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
 import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
-import { getStore, getConfigDecrypted } from './store'
+import { getConfig, getConfigDecrypted } from './store'
 
 function getCreds() {
   // getConfigDecrypted, not a raw store read — the client secret is
@@ -36,7 +36,7 @@ export function registerYouTubeIPC(): void {
   // at register time; subsequent toggles flow through the IPC handler
   // below + Settings save handler.
   try {
-    const persisted = !!(getStore().get('config') as any).devForceYouTubeQuotaExceeded
+    const persisted = getConfig().devForceYouTubeQuotaExceeded
     if (persisted) ytQuotaState.setForcedExceeded(true)
   } catch { /* startup safety — never block IPC reg on this */ }
 

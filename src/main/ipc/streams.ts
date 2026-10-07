@@ -5,7 +5,7 @@ import path from 'path'
 import crypto from 'crypto'
 import { spawnSync } from 'child_process'
 import { startStreamsWatcher, type StreamsWatcher } from '../services/streamsWatcher'
-import { getStore, getStreamsDir } from './store'
+import { getStore, getStreamsDir, getStreamMode } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
 import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '../services/ffmpegService'
@@ -676,8 +676,9 @@ export function getProtectedPaths(streamsDir: string): Set<string> {
   const protectedSet = new Set<string>()
   if (!streamsDir) return protectedSet
   const allMeta = readAllMeta(streamsDir)
-  const mode: 'folder-per-stream' | 'dump-folder' =
-    ((getStore().get('config') as { streamMode?: 'folder-per-stream' | 'dump-folder' } | undefined)?.streamMode) ?? 'folder-per-stream'
+  // '' (before onboarding) behaves as folder-per-stream, as every other
+  // reader treats it.
+  const mode = getStreamMode()
 
   const pickDisplayed = (sortedThumbs: string[], pref?: string): string | null => {
     if (sortedThumbs.length === 0) return null
@@ -1617,8 +1618,7 @@ export function registerStreamsIPC(): void {
           // otherwise every visit would find them undetermined and probe
           // again. Scoped to this stream in folder mode (the key IS the
           // stream key); dump mode has no per-stream key, so a full reload.
-          const cfg = getStore().get('config') as { streamMode?: string }
-          const payload = cfg.streamMode !== 'dump-folder' ? { streamKeys: [key] } : undefined
+          const payload = getStreamMode() !== 'dump-folder' ? { streamKeys: [key] } : undefined
           broadcast('streams:changed', payload)
         }
       }
@@ -1812,8 +1812,7 @@ export function registerStreamsIPC(): void {
     mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream',
     sourceThumbName?: string
   ): Promise<string> => {
-    const store = getStore()
-    const effectiveMode = mode || (store.get('config').streamMode) || 'folder-per-stream'
+    const effectiveMode = mode || getStreamMode() || 'folder-per-stream'
 
     if (effectiveMode === 'dump-folder') {
       // In dump mode: just write the meta entry (and carry the previous

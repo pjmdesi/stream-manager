@@ -3,8 +3,8 @@ import path from 'path'
 import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
-import { scheduleCacheEnforcement, DEFAULT_CACHE_LIMIT_BYTES } from '../services/cacheLimit'
-import { getStore } from './store'
+import { scheduleCacheEnforcement } from '../services/cacheLimit'
+import { getStore, getConfig } from './store'
 
 // In-process waveform cache. Bounded FIFO (Maps iterate in insertion order):
 // each entry is a full-length PCM envelope, so an unbounded map grew for the
@@ -81,8 +81,7 @@ export function registerVideoIPC(): void {
       // Merge: newly-extracted paths overlay onto whatever was already cached.
       const merged = cached.map((existing, i) => extracted[i] || existing)
 
-      const limitBytes = getStore().get('config').audioCacheLimit ?? DEFAULT_CACHE_LIMIT_BYTES
-      audioCacheManager.setCachedTracks(filePath, merged, limitBytes)
+      audioCacheManager.setCachedTracks(filePath, merged, getConfig().audioCacheLimit)
       // The audio cache's own pass above keeps audio under the limit on its
       // own; the shared pass counts the thumbnails and waveforms too.
       scheduleCacheEnforcement()

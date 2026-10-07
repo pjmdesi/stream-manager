@@ -1,7 +1,7 @@
 import { app, ipcMain } from 'electron'
 import fs from 'fs'
 import { join } from 'path'
-import { getStore } from '../ipc/store'
+import { getStore, getConfig } from '../ipc/store'
 
 const REPO_OWNER = 'pjmdesi'
 const REPO_NAME = 'stream-manager'
@@ -83,9 +83,8 @@ async function getLatestRelease(force = false): Promise<CacheEntry | null> {
 
 export async function checkForUpdate(force = false): Promise<UpdateCheckResult> {
   const current = app.getVersion()
-  const cfg = getStore().get('config') as { checkForUpdates?: boolean } | undefined
   // Honor user opt-out unless force=true (manual "check now" button).
-  if (!force && cfg?.checkForUpdates === false) {
+  if (!force && !getConfig().checkForUpdates) {
     return { current, latest: null, hasUpdate: false, releaseUrl: null, releaseNotes: null }
   }
   const entry = await getLatestRelease(force)

@@ -20,7 +20,7 @@
 import { EventEmitter } from 'events'
 import { getLiveBroadcasts } from '../youtubeApi'
 import type { LiveBroadcast } from '../youtubeApi'
-import { getStore, setConfigPartial, getConfigDecrypted } from '../../ipc/store'
+import { getConfig, setConfigPartial, getConfigDecrypted } from '../../ipc/store'
 
 export interface ActivePickResult {
   /** The broadcast that the relay should bind to on next stream-start. */
@@ -94,8 +94,7 @@ class ActiveBroadcastService extends EventEmitter {
     if (this.sessionBroadcast) {
       return { broadcast: this.sessionBroadcast, isManual: false, manualPickStale: false, isLiveSession: true }
     }
-    const cfg = getStore().get('config') as any
-    const manualId: string = cfg?.streamRelayActiveBroadcastId ?? ''
+    const manualId = getConfig().streamRelayActiveBroadcastId
     const upcoming = this.upcoming
 
     if (manualId) {

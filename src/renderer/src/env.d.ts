@@ -350,7 +350,7 @@ declare global {
       proceedQuit(): void
       setSettingsDirty(dirty: boolean): void
       getStartupSettings(): Promise<{ startWithWindows: boolean; startMinimized: boolean }>
-      setStartupSettings(startWithWindows: boolean, startMinimized: boolean): Promise<void>
+      setStartupSettings(startWithWindows: boolean): Promise<void>
       resetOnboarding(): Promise<void>
 
       // ── Launcher ─────────────────────────────────────────────────────────────

@@ -1,7 +1,6 @@
 import { ipcMain, BrowserWindow } from 'electron'
 import Store from 'electron-store'
 import { app } from 'electron'
-import path from 'path'
 import { canEncryptSecrets, encryptSecret, isEncryptedSecret, readSecretOrEmpty } from '../services/secretStorage'
 import { broadcast } from '../services/broadcast'
 import { CONFIG_DEFAULTS, type AppConfig, type StreamMode } from '../../shared/config'
@@ -130,7 +129,14 @@ export function setConfigPartial(partial: Partial<AppConfig>): void {
  *  secret (IPC to the renderer, getCreds in the youtube/twitch/claude/relay
  *  modules). A raw getStore().get('config') keeps working for every
  *  non-secret field but returns ciphertext for these three. */
-export function getConfigDecrypted(): AppConfig {
+/** The config as main-side code reads it: every key present (defaults
+ *  merged under the stored values) and legacy shapes migrated, with secret
+ *  fields left as stored (encrypted). The one read path for main; a private
+ *  `getStore().get('config') as {...}` cast skips the defaults merge and
+ *  makes each site invent its own fallback for a key an older config file
+ *  lacks (APP-49). Code that needs a secret's plaintext uses
+ *  `getConfigDecrypted`. */
+export function getConfig(): AppConfig {
   // Merge defaults so the returned config always has every key. Older
   // persisted configs predating a setting leave that key `undefined`,
   // which makes the Settings page's dirty-check misfire (toggling a
@@ -146,21 +152,39 @@ export function getConfigDecrypted(): AppConfig {
   if (raw === true) stored.autoUpdateTwitchAfterStream = 'always'
   else if (raw === false) stored.autoUpdateTwitchAfterStream = 'ask'
   else if (raw !== 'always' && raw !== 'ask' && raw !== 'never') stored.autoUpdateTwitchAfterStream = 'ask'
-  for (const key of SECRET_CONFIG_KEYS) {
-    stored[key] = readSecretOrEmpty(stored[key], `config.${key}`)
-  }
   return stored
 }
 
-/** The configured streams directory, '' before onboarding. Main-side
- *  readers use this instead of their own cast of the stored config. */
+/** `getConfig` with the secret fields decrypted, for the integrations. */
+export function getConfigDecrypted(): AppConfig {
+  const config = getConfig()
+  for (const key of SECRET_CONFIG_KEYS) {
+    config[key] = readSecretOrEmpty(config[key], `config.${key}`)
+  }
+  return config
+}
+
+/** The configured streams directory, '' before onboarding. */
 export function getStreamsDir(): string {
-  return getStore().get('config', getDefaultConfig()).streamsDir || ''
+  return getConfig().streamsDir || ''
 }
 
 /** The configured stream layout, '' before onboarding. */
 export function getStreamMode(): StreamMode {
-  return getStore().get('config', getDefaultConfig()).streamMode || ''
+  return getConfig().streamMode || ''
+}
+
+/** Register or clear the Windows login item for "Start with Windows". One
+ *  place for the exe path rule (portable builds: PORTABLE_EXECUTABLE_FILE
+ *  is the real .exe, not the temp-extracted copy) and the --from-autostart
+ *  marker that lets "start minimized only at startup" tell login-item
+ *  launches from manual ones (APP-9). Packaged builds only: a dev build
+ *  would register the dev Electron exe with Windows. Called from the
+ *  Settings save, the tray toggle, and the launch-time self-heal. */
+export function applyLoginItem(startWithWindows: boolean): void {
+  if (!app.isPackaged) return
+  const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
+  app.setLoginItemSettings({ openAtLogin: startWithWindows, path: exePath, args: ['--from-autostart'] })
 }
 
 /** One-time (idempotent) migration of plaintext config secrets to
@@ -223,21 +247,16 @@ export function registerStoreIPC(): void {
   ipcMain.handle('store:getStreamTypeTextures', async () => getStore().get('streamTypeTextures', {}))
   ipcMain.handle('store:setStreamTypeTextures', async (_e, v: Record<string, string>) => getStore().set('streamTypeTextures', v))
 
-  ipcMain.handle('app:setStartupSettings', (_event, startWithWindows: boolean, startMinimized: boolean) => {
-    const s = getStore()
-    const current = s.get('config', getDefaultConfig())
-    s.set('config', { ...current, startWithWindows, startMinimized })
-    if (app.isPackaged) {
-      // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).
-      const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
-      // --from-autostart marks login-item launches so "start minimized only
-      // at startup" can tell them apart from manual launches (APP-9).
-      app.setLoginItemSettings({ openAtLogin: startWithWindows, path: exePath, args: ['--from-autostart'] })
-    }
+  // The Settings page saves startWithWindows and startMinimized through
+  // store:setConfig like every other key; this call only registers the
+  // login item. (It used to write the config a second time, directly,
+  // skipping the config:changed broadcast.)
+  ipcMain.handle('app:setStartupSettings', (_event, startWithWindows: boolean) => {
+    applyLoginItem(startWithWindows)
   })
 
   ipcMain.handle('app:getStartupSettings', () => {
-    const config = getStore().get('config', getDefaultConfig())
+    const config = getConfig()
     return { startWithWindows: config.startWithWindows, startMinimized: config.startMinimized }
   })
 

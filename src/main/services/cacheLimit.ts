@@ -1,7 +1,7 @@
 import { audioCacheManager } from './audioCacheManager'
 import { thumbnailCacheManager } from './thumbnailCacheManager'
 import { waveformCacheManager } from './waveformCacheManager'
-import { getStore } from '../ipc/store'
+import { getConfig } from '../ipc/store'
 
 /**
  * One limit for every cache (Settings, Cache limit). Each manager lists its
@@ -28,8 +28,7 @@ export const DEFAULT_CACHE_LIMIT_BYTES = 1_073_741_824
 export const MIN_CACHE_LIMIT_BYTES = 512 * 1024 * 1024
 
 function currentLimit(): number {
-  const limit = (getStore().get('config') as { audioCacheLimit?: number } | undefined)?.audioCacheLimit
-  return Math.max(MIN_CACHE_LIMIT_BYTES, limit ?? DEFAULT_CACHE_LIMIT_BYTES)
+  return Math.max(MIN_CACHE_LIMIT_BYTES, getConfig().audioCacheLimit)
 }
 
 export function enforceCacheLimit(limitBytes: number = currentLimit()): void {

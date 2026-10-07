@@ -100,7 +100,7 @@ import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
 import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit } from './ipc/converter'
-import { registerStoreIPC, getStore, setConfigPartial, applyUiZoomToWindows, migrateConfigSecrets } from './ipc/store'
+import { registerStoreIPC, getConfig, setConfigPartial, applyLoginItem, applyUiZoomToWindows, migrateConfigSecrets } from './ipc/store'
 import { getTokens as getYouTubeTokens } from './services/youtubeAuth'
 import { getTokens as getTwitchTokens } from './services/twitchAuth'
 import { registerStreamsIPC, backupMetaOnQuit } from './ipc/streams'
@@ -182,8 +182,7 @@ function createWindow(): BrowserWindow {
     const zoomReset = input.key === '0'
     if (!zoomIn && !zoomOut && !zoomReset) return
     event.preventDefault()
-    const cfg = getStore().get('config') as { uiZoomPercent?: number }
-    const cur = typeof cfg?.uiZoomPercent === 'number' ? cfg.uiZoomPercent : 100
+    const cur = getConfig().uiZoomPercent
     const next = zoomReset ? 100
       : zoomIn ? (ZOOM_LADDER.find(p => p > cur) ?? ZOOM_LADDER[ZOOM_LADDER.length - 1])
       : ([...ZOOM_LADDER].reverse().find(p => p < cur) ?? ZOOM_LADDER[0])
@@ -199,8 +198,7 @@ function createWindow(): BrowserWindow {
   // Re-apply on every load (startup and Ctrl+R) — overrides Electron's own
   // per-origin zoom memory so the config stays the truth.
   mainWindow.webContents.on('did-finish-load', () => {
-    const cfg = getStore().get('config') as { uiZoomPercent?: number }
-    applyUiZoomToWindows(typeof cfg?.uiZoomPercent === 'number' ? cfg.uiZoomPercent : 100, false)
+    applyUiZoomToWindows(getConfig().uiZoomPercent, false)
   })
 
   mainWindow.webContents.on('context-menu', (_event, params) => {
@@ -337,7 +335,7 @@ async function launchGroupFromTray(mainWindow: BrowserWindow, groupId: string, g
 function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
   const watcherStatus = fileWatcher.getStatus()
   const converterStatus = getConverterStatus()
-  const config = getStore().get('config') as any
+  const config = getConfig()
   const launcherGroups = getLauncherGroups()
 
   const watcherLabel = watcherStatus.active
@@ -363,8 +361,7 @@ function buildTrayMenu(mainWindow: BrowserWindow): Electron.Menu {
       // builds.
       enabled: app.isPackaged,
       click: (item) => {
-        const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
-        app.setLoginItemSettings({ openAtLogin: item.checked, path: exePath, args: ['--from-autostart'] })
+        applyLoginItem(item.checked)
         // Through the broadcasting helper so an open Settings page (and any
         // other consumer of the shared config state) sees the change live.
         setConfigPartial({ startWithWindows: item.checked })
@@ -450,16 +447,9 @@ app.whenReady().then(() => {
   registerCloudSyncIPC()  // streams page probes cloud-sync:is-active on mount
   registerUpdateCheckIPC()
 
-  // Re-register startup entry on each launch (packaged only) to self-heal if app has been moved.
-  // For portable builds, PORTABLE_EXECUTABLE_FILE is the actual .exe on disk (not the temp-extracted copy).
-  if (app.isPackaged) {
-    const config = getStore().get('config') as any
-    const exePath = process.env.PORTABLE_EXECUTABLE_FILE ?? process.execPath
-    if (config?.startWithWindows) {
-      // --from-autostart marks login-item launches (see APP-9 sub-option).
-      app.setLoginItemSettings({ openAtLogin: true, path: exePath, args: ['--from-autostart'] })
-    }
-  }
+  // Re-register the startup entry on each launch to self-heal if the app
+  // has been moved (applyLoginItem is a no-op in unpackaged builds).
+  if (getConfig().startWithWindows) applyLoginItem(true)
 
   const mainWindow = createWindow()
 
@@ -565,11 +555,11 @@ app.whenReady().then(() => {
   // launches the Windows login item made (it passes --from-autostart);
   // manual launches open the window normally (APP-9).
   if (app.isPackaged) {
-    const config = getStore().get('config') as any
+    const config = getConfig()
     const launchedAtStartup = process.argv.includes('--from-autostart')
     if (
-      config?.startWithWindows && config?.startMinimized &&
-      (!config?.startMinimizedOnlyAtStartup || launchedAtStartup)
+      config.startWithWindows && config.startMinimized &&
+      (!config.startMinimizedOnlyAtStartup || launchedAtStartup)
     ) {
       mainWindow.once('ready-to-show', () => mainWindow.hide())
     }

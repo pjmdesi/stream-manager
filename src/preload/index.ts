@@ -681,8 +681,10 @@ contextBridge.exposeInMainWorld('api', {
   // ── Startup settings ──────────────────────────────────────────────────────
   getStartupSettings: (): Promise<{ startWithWindows: boolean; startMinimized: boolean }> =>
     ipcRenderer.invoke('app:getStartupSettings'),
-  setStartupSettings: (startWithWindows: boolean, startMinimized: boolean): Promise<void> =>
-    ipcRenderer.invoke('app:setStartupSettings', startWithWindows, startMinimized),
+  /** Registers or clears the Windows login item; the flags themselves are
+   *  saved through setConfig like every other setting. */
+  setStartupSettings: (startWithWindows: boolean): Promise<void> =>
+    ipcRenderer.invoke('app:setStartupSettings', startWithWindows),
 
   // ── Launcher ──────────────────────────────────────────────────────────────
   getLauncherGroups: () =>

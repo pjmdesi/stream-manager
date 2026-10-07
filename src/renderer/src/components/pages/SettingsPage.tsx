@@ -389,8 +389,8 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
     // Side effects only when their inputs changed: re-running these with
     // clean draft values would stamp stale state over changes made from the
     // tray (OS login item) while the page sat open.
-    if ('startWithWindows' in changed || 'startMinimized' in changed) {
-      await window.api.setStartupSettings(!!local.startWithWindows, !!local.startMinimized)
+    if ('startWithWindows' in changed) {
+      await window.api.setStartupSettings(!!local.startWithWindows)
     }
     // Dev-only: apply the just-persisted force-quota flag to the live
     // runtime in ytQuotaState. The toggle isn't visible in production
