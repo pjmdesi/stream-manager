@@ -7,17 +7,18 @@
 3. CONV-18
 4. APP-21
 5. APP-49
-6. APP-48
-7. CONV-17
-8. CONV-13
-9. STR-37
-10. CONV-15
-11. CONV-16
-12. SYNC-8
-13. PLR-31
-14. COMB-6
-15. CONV-4
-16. CONV-14
+6. APP-51
+7. APP-48
+8. CONV-17
+9. CONV-13
+10. STR-37
+11. CONV-15
+12. CONV-16
+13. SYNC-8
+14. PLR-31
+15. COMB-6
+16. CONV-4
+17. CONV-14
 
 ## Next up
 
@@ -351,7 +352,7 @@
   Scope note: an investigation that ends in a recommendation (keep, retune, or change the codec), with evidence: a few representative recordings encoded both ways, sizes and encode times, and which players open the result. Changing the shipped preset, if that is the outcome, is a follow-up decision, since existing archives were made with the current one.
 
 - **CONV-17** [bug] [impact:3]
-  When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this.
+  When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this. Reproduced again 2026-10-07: cancelling queued and running jobs one after another in quick succession left one ffmpeg running with no row for it; ended through Task Manager.
   From the APP-21 scan (2026-10-07): there is no one list of the ffmpeg children SM spawns. The converter scheduler caps conversions and clip exports (`maxConcurrentConversions`), while Combine (`ipc/combine.ts`), the player's audio extraction and waveform extraction (`ffmpegService.ts`), the GPU encoder probe and the stream relay (`relayManager.ts`) each spawn ffmpeg on their own, so the cap is not app-wide and quit-time teardown knows only the converter's jobs. The orphan half of this ticket wants a `services/ffmpegChildren.ts` registry that every spawn site goes through (pid, purpose, owner id, started at), with kill-all at quit, a sweep that kills any registered child whose owner no longer exists in SM's own state, and a count by purpose for the nav and for diagnostics; `tasklist`-style scans of the whole machine are the false-positive risk the ticket warns about and are not the mechanism. Decision for this ticket: whether Combine should take a converter slot while it runs.
 
 - **CONV-18** [bug] [impact:5] [done]
@@ -592,6 +593,9 @@
   Bug [checkbox]
   Description
   Submit
+
+- **APP-51** [impact:1]
+  Explore ways to make dist creation process faster, maybe limit compression algorithm? It doesn't really need any compression for the dist version. It just takes too much time now that it's the more common version being used in the testing phase of updates.
 
 ### Onboarding & Setup
 

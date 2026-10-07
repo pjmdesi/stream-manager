@@ -1035,7 +1035,7 @@ export function IntegrationsPage({ initialStatus }: {
                       ? <><Loader2 size={11} className="animate-spin" /> Loading available models…</>
                       : claudeModelsError
                         ? <span className="text-amber-400">Couldn’t load model list ({claudeModelsError}). Showing your saved choice — test the connection to retry.</span>
-                        : <>Only models your account can access are listed. Stronger models (Sonnet 4.6, Opus 4.8) give better suggestions, especially tags.</>}
+                        : <>Only models your account can access are listed. Larger models give better suggestions, especially tags; smaller ones are cheaper and faster.</>}
                   </p>
                 </div>
               )}

@@ -916,6 +916,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span>{job.progress.toFixed(1)}%</span>
               <span>Conversion cancelled</span>
+              {/* A kept partial is a file in the output folder, so the folder
+                  link stays; it goes only when the setting deletes partials
+                  (and for archive swaps, whose temp is always removed). */}
+              {!job.replaceInput && !autoDeletePartial && (
+                <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
+                  <button
+                    onClick={() => window.api.openInExplorer(outputDir)}
+                    className="block max-w-full text-gray-400 hover:text-gray-300 transition-colors truncate"
+                  >
+                    {outputDirText}
+                  </button>
+                </Tooltip>
+              )}
             </div>
           )}
 
