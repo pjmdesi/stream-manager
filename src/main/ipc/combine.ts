@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import os from 'os'
 import { suspendProcess, resumeProcess, clipProvenanceComment, requireFfmpegBin } from '../services/ffmpegService'
+import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
 
 // Single-slot active run — the Combine page runs one job at a time. Lets
 // combine:cancel kill the ffmpeg child, combine:pause/resume suspend it
@@ -71,6 +72,15 @@ export function registerCombineIPC(): void {
           win.webContents.send('combine:progress', { percent })
       }
 
+      // Written as `<output>.tmp` (invisible to sync clients while it grows),
+      // read back against the expected length, then renamed into place.
+      const writePath = tempOutputPath(outputPath)
+      const muxer = muxerForPath(outputPath)
+      // A `.tmp` under our own output name is a leftover from a crashed or
+      // killed run (the finished one was renamed away); `-n` below would
+      // otherwise refuse to write over it.
+      try { if (fs.existsSync(writePath)) fs.unlinkSync(writePath) } catch (_) {}
+
       return new Promise<void>((resolve, reject) => {
         const args = [
           // -n (never overwrite) instead of -y: the existence check above
@@ -89,7 +99,8 @@ export function registerCombineIPC(): void {
           // Manager Clip" marker into the output.
           '-metadata', `comment=${clipProvenanceComment('combined', app.getVersion())}`,
           '-progress', 'pipe:1',
-          outputPath
+          ...(muxer ? ['-f', muxer] : []),
+          writePath
         ]
 
         const proc = spawn(ffmpegBin, args)
@@ -113,7 +124,7 @@ export function registerCombineIPC(): void {
         let startedWriting = false
         const cleanupPartialOutput = () => {
           if (!startedWriting) return
-          try { if (fs.existsSync(outputPath)) fs.unlinkSync(outputPath) } catch (_) {}
+          try { if (fs.existsSync(writePath)) fs.unlinkSync(writePath) } catch (_) {}
         }
 
         proc.stdout?.on('data', (data: Buffer) => {
@@ -148,8 +159,28 @@ export function registerCombineIPC(): void {
             console.log('[combine] cancelled; ffmpeg stderr tail:\n' + stderrTail)
             cleanupPartialOutput()
             reject(new Error('cancelled'))
-          } else if (code === 0) { send(100); resolve() }
-          else {
+          } else if (code === 0) {
+            // A clean exit is not a whole file: read it back, then give it
+            // its name. A failed check or rename keeps the `.tmp` for
+            // inspection and reports why.
+            void (async () => {
+              // Same tolerance as the renderer's post-run check: a stream
+              // copy concat lands within a few seconds of the summed inputs.
+              const check = await verifyFinishedOutput(writePath, totalDurationSec, Math.max(5, totalDurationSec * 0.02))
+              if (!check.ok) {
+                reject(new Error(`Output check failed: ${check.reason}. The file was kept as "${path.basename(writePath)}" for inspection.`))
+                return
+              }
+              try {
+                await commitOutput(writePath, outputPath, { replaceExisting: false })
+              } catch (e: any) {
+                reject(new Error(`The combined file could not be renamed into place (${e.message}). It was kept as "${path.basename(writePath)}".`))
+                return
+              }
+              send(100)
+              resolve()
+            })()
+          } else {
             cleanupPartialOutput()
             // Last stderr lines carry ffmpeg's actual complaint.
             const detail = stderrTail.trim().split('\n').slice(-6).join('\n')

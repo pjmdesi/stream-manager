@@ -9,6 +9,22 @@ import { HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 import { expectSelfWrite } from '../services/selfWrites'
 import { broadcast } from '../services/broadcast'
+import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
+
+/** Where ffmpeg actually writes a job's output: `<outputFile>.tmp`, invisible
+ *  to sync clients until the finished file is verified and renamed into
+ *  place (services/mediaOutput). `job.outputFile` stays the name the UI
+ *  shows and the file ends up under. */
+function writePathOf(job: Pick<ConversionJob, 'outputFile'>): string {
+  return tempOutputPath(job.outputFile)
+}
+
+/** `-f <muxer>` for a `.tmp` output when the preset does not set one. */
+function withExplicitMuxer(args: string, finalPath: string): string {
+  if (/(?:^|\s)-f\s/.test(args)) return args
+  const muxer = muxerForPath(finalPath)
+  return muxer ? `${args} -f ${muxer}` : args
+}
 
 /** Form state for the simplified custom-preset editor. Stored on the preset so
  *  the user can re-open and edit it in form mode later, and so exports preserve
@@ -466,7 +482,7 @@ export async function prepareConverterForQuit(timeoutMs = 4000): Promise<void> {
   // that gets a tick before close exits cleanly.
   for (const flag of downloadCancelFlags.values()) flag.cancelled = true
   parkInFlightJobsForQuit()
-  const partials = [...new Set(encoding.filter(j => j.outputFile).map(j => j.outputFile))]
+  const partials = [...new Set(encoding.filter(j => j.outputFile).map(j => writePathOf(j)))]
   if (partials.length === 0) return
   // Persist FIRST so a lock (or anything else) can't lose the list.
   getStore().set(QUIT_PARTIALS_KEY, partials)
@@ -895,17 +911,33 @@ export async function startConversionJob(
   const resolve = () => settleJobDone(id)
   const reject = (err: Error) => settleJobError(id, err)
   {
-    const handleComplete = () => {
+    // The input's duration, set where the input is probed below and read by
+    // handleComplete's verification. 0 means "do not compare" (unknown, or
+    // the preset trims).
+    let expectedDurationSec = 0
+    const handleComplete = () => { void (async () => {
       const cur = jobs.get(id)!
-      // For replaceInput jobs the output is a temp file — swap it into the
-      // input's place before declaring success. If the preset's output
-      // extension differs from the input's (e.g. archiving a .mp4 with an
-      // mkv-output preset), the final file takes the new extension so the
-      // container matches the actual content.
+      const writePath = writePathOf(job)
+      // Read the result back before anything is renamed or removed. ffmpeg's
+      // exit code says the encoder finished; it does not say the file on
+      // disk is whole. A failed check leaves the `.tmp` where it is (out of
+      // the library, invisible to sync clients) and the row says why.
+      const check = await verifyFinishedOutput(writePath, expectedDurationSec)
+      if (!check.ok) {
+        handleError(new Error(
+          `Output check failed: ${check.reason}. The file was kept as "${path.basename(writePath)}" for inspection; nothing else was changed.`
+        ), { keepOutput: true })
+        return
+      }
+      // For replaceInput jobs the verified temp is swapped into the input's
+      // place before declaring success. If the preset's output extension
+      // differs from the input's (e.g. archiving a .mp4 with an mkv-output
+      // preset), the final file takes the new extension so the container
+      // matches the actual content.
       //
       // Swap order matters: (1) rename the original aside as a backup,
       // (2) rename the temp into the final name, (3) delete the backup only
-      // after 2 succeeded. Every failure leaves the original recoverable —
+      // after 2 succeeded. Every failure leaves the original recoverable:
       // step 1 failing touches nothing, step 2 failing renames the backup
       // straight back. The old unlink-then-rename order permanently lost
       // BOTH copies when a sync client/AV held a handle at the wrong moment:
@@ -919,24 +951,23 @@ export async function startConversionJob(
           ? job.inputFile
           : job.inputFile.replace(/\.[^.]+$/, outputExt)
         const backupPath = job.inputFile + '.smbak'
-        // On swap failure the encode itself SUCCEEDED (handleComplete only
-        // runs on ffmpeg exit 0) — that's potentially hours of work, so
-        // instead of deleting the finished output, keep it as a visible
-        // "<name>-archived.<ext>" sibling the user can swap in manually
-        // (or just delete). Replaces any previous preserve of the same
-        // input — repeat failures would produce the same content anyway.
-        // Only failed ENCODES still delete their (garbage) temp, via
-        // handleError's default cleanup.
+        // On swap failure the encode itself SUCCEEDED and verified, which is
+        // potentially hours of work, so instead of deleting the finished
+        // output, keep it as a visible "<name>-archived.<ext>" sibling the
+        // user can swap in manually (or just delete). Replaces any previous
+        // preserve of the same input; repeat failures would produce the same
+        // content anyway. Only failed ENCODES still delete their (garbage)
+        // temp, via handleError's default cleanup.
         const preserveOutput = (): string => {
           const preservedPath = job.inputFile.replace(/\.[^.]+$/, '') + `-archived${outputExt}`
           try {
-            fs.renameSync(job.outputFile, preservedPath)
-            return `The finished conversion was kept as "${path.basename(preservedPath)}" — delete the original and rename it to finish manually, without re-encoding.`
+            fs.renameSync(writePath, preservedPath)
+            return `The finished conversion was kept as "${path.basename(preservedPath)}". Delete the original and rename it to finish manually, without re-encoding.`
           } catch {
-            // Temp itself locked — leave it in place and keep trying in the
-            // background; it stays watcher-ignored (__arc_tmp) until then.
-            renameWithRetry(job.outputFile, preservedPath, 'preserved archive output')
-            return `The finished conversion is being kept as "${path.basename(preservedPath)}" (rename pending — the file is still locked).`
+            // Temp itself locked: leave it in place and keep trying in the
+            // background; it stays a `.tmp` until then.
+            renameWithRetry(writePath, preservedPath, 'preserved archive output')
+            return `The finished conversion is being kept as "${path.basename(preservedPath)}" (rename pending, the file is still locked).`
           }
         }
         try {
@@ -946,27 +977,40 @@ export async function startConversionJob(
           return
         }
         try {
-          fs.renameSync(job.outputFile, finalPath)
+          fs.renameSync(writePath, finalPath)
         } catch (e: any) {
           try {
             fs.renameSync(backupPath, job.inputFile)
           } catch (restoreErr: any) {
             // Both renames failing back-to-back means the folder is hard
-            // locked. Nothing has been deleted — the original is intact
+            // locked. Nothing has been deleted: the original is intact
             // under the backup name, so say exactly that.
             handleError(new Error(
-              `Replace failed and the original could not be renamed back — it is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message}) ${preserveOutput()}`
+              `Replace failed and the original could not be renamed back. It is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message}) ${preserveOutput()}`
             ), { keepOutput: true })
             return
           }
           handleError(new Error(`Replace failed: ${e.message}. ${preserveOutput()}`), { keepOutput: true })
           return
         }
-        // Success — the backup is now a duplicate, and archiving exists to
-        // reclaim space, so it's a permanent delete (with retries for
-        // transient handles). Worst case a .smbak lingers: costs disk,
-        // never data.
+        // Success: the replacement is verified and in place, the backup is
+        // a duplicate, and archiving exists to reclaim space, so it's a
+        // permanent delete (with retries for transient handles). Worst case
+        // a .smbak lingers: costs disk, never data.
         deleteWithRetry(backupPath, 'replace-original backup')
+      } else {
+        // Everything else: the verified temp takes its final name. Replacing
+        // an existing file keeps the semantics the old `-y` write had (a
+        // re-export under the same clip name), moved from the start of the
+        // job to its verified end.
+        try {
+          await commitOutput(writePath, job.outputFile, { replaceExisting: true })
+        } catch (e: any) {
+          handleError(new Error(
+            `The finished file could not be renamed into place (${e.message}). It was kept as "${path.basename(writePath)}"; rename it to "${path.basename(job.outputFile)}" to finish.`
+          ), { keepOutput: true })
+          return
+        }
       }
       jobs.set(id, { ...cur, status: 'done', progress: 100 })
       cancellers.delete(id)
@@ -983,7 +1027,7 @@ export async function startConversionJob(
       // Advance the group: start the next queued job in the same group.
       scheduleNext()
       resolve()
-    }
+    })() }
     const handleError = (err: Error, opts?: { keepOutput?: boolean }) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
       cancellers.delete(id)
@@ -991,12 +1035,12 @@ export async function startConversionJob(
       resumers.delete(id)
       downloadCancelFlags.delete(id)
       broadcast('converter:jobError', { jobId: id, error: err.message })
-      // For replaceInput jobs, clean up the temp output that ffmpeg wrote
-      // before failing — otherwise __arc_tmp.* files accumulate. Swap
-      // failures pass keepOutput: their encode FINISHED and the output was
-      // preserved as "<name>-archived.<ext>" instead (see preserveOutput).
-      if (job.replaceInput && job.outputFile && !opts?.keepOutput) {
-        deleteWithRetry(job.outputFile, 'archive temp file (error path)')
+      // Clean up the `.tmp` a failed encode wrote; a half-written file is
+      // garbage and would otherwise accumulate. Swap, check and rename
+      // failures pass keepOutput: their encode FINISHED and the file was
+      // kept under a name the message gives.
+      if (job.outputFile && !opts?.keepOutput) {
+        deleteWithRetry(writePathOf(job), 'failed output (error path)')
       }
       // Group bookkeeping — a failure short-circuits the hook for the whole group.
       maybeFireGroupHook(id)
@@ -1117,10 +1161,21 @@ export async function startConversionJob(
         // Stream" — a generic marker that survives any product-name change.
         if (job.groupCompletionHook?.type === 'archiveMarkAsArchived') {
           const { app } = await import('electron')
-          gpuArgs = `${gpuArgs} -metadata encoded_by="Archived Stream — Stream Manager v${app.getVersion()}"`
+          // Quote the whole key=value token: parseArgsString strips only a
+          // token's outer quotes, so `encoded_by="..."` shipped the opening
+          // quote inside the tag value (seen in a v2.7.0 archive).
+          gpuArgs = `${gpuArgs} -metadata "encoded_by=Archived Stream — Stream Manager v${app.getVersion()}"`
         }
-        const duration = await probeFile(job.inputFile).then(info => info.duration).catch(() => 0)
-        const result = runConversion(job.inputFile, job.outputFile, gpuArgs, duration, handleProgress, handleComplete, handleError)
+        const duration = await probeFile(job.inputFile).then(info => Number(info.duration) || 0).catch(() => 0)
+        // The output should run as long as the input unless the preset
+        // trims (a custom `-t`, `-to`, `-ss` or frame cap); then only the
+        // finalized-file checks apply.
+        const presetTrims = /(?:^|\s)-(?:t|to|ss|frames(?::\w+)?|fs)\s/.test(gpuArgs)
+        expectedDurationSec = presetTrims ? 0 : duration
+        // Written as `<output>.tmp` with the container named explicitly; the
+        // verified file is renamed into place in handleComplete.
+        const writePath = writePathOf(job)
+        const result = runConversion(job.inputFile, writePath, withExplicitMuxer(gpuArgs, job.outputFile), duration, handleProgress, handleComplete, handleError)
         cancellers.set(id, result.cancel)
         pausers.set(id, result.pause)
         resumers.set(id, result.resume)
@@ -1238,7 +1293,10 @@ export function isConverterWritingPath(filePath: string): boolean {
     const writing = j.status === 'running' || j.status === 'replacing' ||
       j.status === 'paused' || j.status === 'downloading'
     if (!writing) continue
-    if (j.outputFile && j.outputFile.replace(/\\/g, '/').toLowerCase() === target) return true
+    if (!j.outputFile) continue
+    // Both the `.tmp` being written and the final name it will take.
+    if (j.outputFile.replace(/\\/g, '/').toLowerCase() === target) return true
+    if (writePathOf(j).replace(/\\/g, '/').toLowerCase() === target) return true
   }
   return false
 }
@@ -1750,15 +1808,34 @@ export function registerConverterIPC(): void {
     if (cancelled) { cleanup(); return }
 
     // ── Phase 2: Encode using filter_complex on the small temp files ──────────
+    // Written as `<output>.tmp` with the container named explicitly, read
+    // back against the expected length, then renamed into place (replacing
+    // a previous export of the same name, as the old `-y` write did).
+    const clipWritePath = writePathOf(job)
+    const clipMuxer = muxerForPath(job.outputFile)
     const result = runClipConversion({
       inputFiles: tempFiles,
-      outputFile: job.outputFile,
+      outputFile: clipWritePath,
       filterComplex,
-      outputArgs,
+      outputArgs: clipMuxer ? [...outputArgs, '-f', clipMuxer] : outputArgs,
       totalDuration,
       onProgress: sendProgress,
-      onComplete: () => { cleanup(); onComplete() },
-      onError:    (err) => { cleanup(); onError(err) },
+      onComplete: () => { void (async () => {
+        cleanup()
+        const check = await verifyFinishedOutput(clipWritePath, totalDuration)
+        if (!check.ok) {
+          onError(new Error(`Output check failed: ${check.reason}. The file was kept as "${path.basename(clipWritePath)}" for inspection.`))
+          return
+        }
+        try {
+          await commitOutput(clipWritePath, job.outputFile, { replaceExisting: true })
+        } catch (e: any) {
+          onError(new Error(`The finished clip could not be renamed into place (${e.message}). It was kept as "${path.basename(clipWritePath)}".`))
+          return
+        }
+        onComplete()
+      })() },
+      onError:    (err) => { cleanup(); deleteWithRetry(clipWritePath, 'failed clip export'); onError(err) },
     })
 
     // Update canceller and pause/resume to control the encoding process
@@ -1809,15 +1886,18 @@ export function registerConverterIPC(): void {
         broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
       }
       // For replaceInput jobs the temp output is internal — clean it up
-      // unconditionally so we don't leave __arc_tmp.* files behind.
+      // unconditionally so we don't leave archive temps behind.
       if (j.replaceInput && j.outputFile) {
-        deleteWithRetry(j.outputFile, 'archive temp file (cancel)')
+        deleteWithRetry(writePathOf(j), 'archive temp file (cancel)')
       } else if (config.autoDeletePartialOnCancel && j.outputFile) {
         // Swallow the unlink echo — the callback below is the notify.
-        expectSelfWrite(j.outputFile)
-        deleteWithRetry(j.outputFile, 'cancelled output', notifyStreamsChanged)
-      } else {
-        // Partial kept (by config) — it's a real file now; show it.
+        expectSelfWrite(writePathOf(j))
+        deleteWithRetry(writePathOf(j), 'cancelled output', notifyStreamsChanged)
+      } else if (j.outputFile) {
+        // Partial kept (by config): give the `.tmp` its output name so the
+        // user can find it, then show it. Unverified by design; the user
+        // asked for it.
+        renameWithRetry(writePathOf(j), j.outputFile, 'kept partial output')
         notifyStreamsChanged()
       }
       maybeFireGroupHook(jobId)
@@ -1842,7 +1922,7 @@ export function registerConverterIPC(): void {
       persistPendingJobs()
       settleJobDone(j.id)
       if (j.replaceInput && j.outputFile) {
-        deleteWithRetry(j.outputFile, 'archive temp file (cancel-group)')
+        deleteWithRetry(writePathOf(j), 'archive temp file (cancel-group)')
       }
       broadcast('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
     }

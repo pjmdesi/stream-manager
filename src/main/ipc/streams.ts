@@ -2349,18 +2349,20 @@ export function registerStreamsIPC(): void {
       //     renamed away on every save, so it would fire a phantom add/unlink
       //     pair each time), and readAllMeta's preserved corrupt copies
       //     (_meta.corrupt-*.json)
-      //   - *__arc_tmp.*: archive job temp output. ffmpeg writes incrementally
-      //     while encoding so 'change' events fire continuously through a
-      //     multi-hour archive run, and the renderer was thrashing thumbnails.
-      //     The temp file is renamed/swapped to the real file at end-of-job
-      //     anyway, so the user only needs to see the final state.
+      //   - *.tmp: every in-progress ffmpeg output (converter, archive swap,
+      //     clip export, combine) is written as `<final>.tmp` and renamed
+      //     into place once verified (services/mediaOutput). ffmpeg writes
+      //     incrementally, so 'change' events would otherwise fire through
+      //     a multi-hour run and thrash thumbnails; the user only needs to
+      //     see the final state. The older `*__arc_tmp.<ext>` archive temp
+      //     name is kept for jobs persisted before the change.
       //   - in-flight converter outputs: watching a growing ffmpeg output
       //     is churn, and the write-stability stat-polling can race a
       //     cancelled job's file-handle release into an EPERM. The
       //     completion/cancel paths fire their own explicit events, so
       //     nothing is missed. (Via the inFlightWrites registry.)
       ignored: (p: string) => {
-        if (path.basename(p).startsWith('_meta.') || /__arc_tmp\.[^.]+$/.test(p)) return true
+        if (path.basename(p).startsWith('_meta.') || /\.tmp$/i.test(p) || /__arc_tmp\.[^.]+$/.test(p)) return true
         return isInFlightWrite(p)
       },
       // File events resolve to the owning stream folder so the renderer can
