@@ -1760,12 +1760,21 @@ export function StreamsPage({
   // walk fails so the user gets a partial result rather than a no-op.
   const collectFolderFiles = useCallback(async (f: StreamFolder): Promise<{ path: string; size: number }[]> => {
     try {
+      if (isDumpMode) {
+        // Every stream shares the one folder in dump mode, so a stream's
+        // files are the folder's top-level files whose names carry its
+        // date, the rule the delete path uses (filesForDate). The recursive
+        // listing below is the whole library here: one stream's Offload
+        // queued all of it (SYNC-9).
+        const entries = await window.api.listFilesRecursive(f.folderPath, 0)
+        return entries.filter(e => !e.isDirectory && e.name.includes(f.date)).map(e => ({ path: e.path, size: e.size }))
+      }
       const entries = await window.api.listFilesRecursive(f.folderPath, 6)
       return entries.filter(e => !e.isDirectory).map(e => ({ path: e.path, size: e.size }))
     } catch {
       return f.videos.map(v => ({ path: v, size: 0 }))
     }
-  }, [])
+  }, [isDumpMode])
   const handleOffload = useCallback(async (folder: StreamFolder) => {
     if (!cloudSyncActive) return
     const files = await collectFolderFiles(folder)

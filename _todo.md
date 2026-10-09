@@ -20,6 +20,7 @@
 16. COMB-6
 17. CONV-4
 18. CONV-14
+19. THU-40
 
 ## Next up
 
@@ -192,6 +193,9 @@
 - **STR-37** [ui]
   Confirm before deleting a single file from the files grid. The per-file trash button on a file card deletes on one click; a misclick on 2026-10-06 deleted a dehydrated file and getting it back was painful. The confirmation applies to hydrated and dehydrated files alike (a dehydrated file is harder to recover, since the local placeholder goes and the cloud copy follows). A confirmation modal like the stream-level `DeleteModal`, naming the file and its size, with the same recycle-bin wording; the files grid lives on the page, not in a modal, so the no-secondary-modals rule does not come into it. The bulk select-mode delete already confirms and stays as it is. Filed 2026-10-06.
 
+- **STR-38** [bug] [ui] [impact:2]
+  When entering multi-select mode in the files grid, the placeholder "Create thumbnail" disappears, causing a reflow of the other items in the grid. This means if the file the user clicks to "quick enter" multi-select mode is after the placeholder, the resulting selected item is no longer under the mouse. I'm not happy with the look of having the placeholder in between the grid of files. It should go at the end or beginning (or an alternate solution). I lean toward putting it at the beginning. In fact, maybe we put both items as perminent items in the top of the files grid section, designed differently so they don't match the size of the files cards. The create thumbnail button should look more like a button, and the file dropzone element could still look the same but be shrunk significatly. I'm imagining the two items as a sort of sub header under the action buttons.
+
 ### Player
 
 - **PLR-3** [perf] [maybe]
@@ -311,6 +315,9 @@
 - **THU-39** [impact:1]
   Group collapse / expand state should be recorded in the thumbnail JSON so they return to the same state when repoeneing.
 
+- **THU-40** [ui] [bug]
+  The flip vertical/horizontal buttons in the floating alignment panel seem to be swapped. The action matches the tooltip, but I don't think the icons are correct.
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -423,7 +430,7 @@
   Investigate if there are any parts of the YouTube or Twitch APIs that are not being utilized bout could be and list them as part of this ticket.
 
 - **SYNC-9** [bug] [impact:4]
-  In dump mode, Offload and Pin local on one stream act on the entire library. Found 2026-10-07: the sidebar's Offload on a single stream queued all twelve files of the dump folder (every stream's recordings and thumbnails). Cause: `handleOffload` and `handlePinLocal` in `StreamsPage.tsx` both call `collectFolderFiles(folder)`, which lists `folder.folderPath` recursively, and in dump mode every stream's `folderPath` is the dump root. The delete path already handles this (`useInUse.streamReason` takes the stream's own files in dump mode); offload and pin need the same: in dump mode the file set is the stream's videos, thumbnails and its `_sm-thumbnail` json and png, in folder mode the recursive listing as today. The bulk Offload all and Pin all local in the files grid go through the same two handlers and inherit the fix.
+  In dump mode, Offload and Pin local on one stream act on the entire library. Found 2026-10-07: the sidebar's Offload on a single stream queued all twelve files of the dump folder (every stream's recordings and thumbnails). Cause: `handleOffload` and `handlePinLocal` in `StreamsPage.tsx` both call `collectFolderFiles(folder)`, which lists `folder.folderPath` recursively, and in dump mode every stream's `folderPath` is the dump root. The delete path already handles this (`useInUse.streamReason` takes the stream's own files in dump mode); offload and pin need the same: in dump mode the file set is the stream's videos, thumbnails and its `_sm-thumbnail` json and png, in folder mode the recursive listing as today. The bulk Offload all and Pin all local in the files grid go through the same two handlers and inherit the fix. Built 2026-10-07, awaiting review.
 
 - **SYNC-10** [impact:3]
   Offload must skip files SM itself has in use, app-wide, instead of asking Windows and reporting the refusal as a failure. Seen 2026-10-07: a recording being archived by the converter showed "Failed, the cloud provider could not complete the operation, the file may be in use (0x80070187)" in the cloud sync panel, when SM knew it was reading that file. The panel should list such a file as "In use" (or pinned-style, like the displayed thumbnail) with the reason in the tooltip (open in the player, being converted, being combined, open in the thumbnail editor, being copied by an auto-rule) and not issue the dehydrate. The pieces exist: the renderer's `useInUse` (converter jobs plus open items, used to block deletes) and main's `getProtectedPaths` (displayed thumbnails) and `isConverterWritingPath`; the offload queue needs one check that consults them, in main, so every entry point (sidebar, grid, bulk) gets it.
@@ -599,6 +606,9 @@
 - **APP-50** [cleanup] [impact:1]
   One announcer for `streams:changed`. Ten emitters in three files (`streams.ts` six, `converter.ts` three, `thumbnail.ts` one) build the payload by hand in four shapes (`{ streamKeys }`, `{ quiet, streamKeys }`, `{ quiet }`, none) and address two audiences: nine broadcast to every window, the thumbnail editor's save notifies only the window that saved (APP-21 scan, 2026-10-07). Proposal: `announceStreamsChanged({ streamKeys?, quiet? })` in `streams.ts`, used by all ten, broadcasting (the popout ignores the event and there is no second main window), with the payload type exported so the preload's `onStreamsChanged` signature and the six renderer listeners share it. Hygiene, not a bug.
 
+- **APP-52** [impact:3]
+  The portable launcher extracts the whole bundle on every cold launch and deletes the folder when the app exits, so each start pays a decompression of the 131 MB exe into about 550 MB (APP-32's pre-check only skips it while the app is already running). Keep the extraction between launches: the unpack folder is already fixed per build, so the launcher can leave it in place on exit and reuse it when a marker written at the end of a complete extraction matches this build, extracting only when the marker is missing or from another version. Every launch after the first per version becomes instant, the download stays small (the store-compression alternative measured 2026-10-07 is a 549 MB exe and is not faster on slow drives). Same template patch mechanism as APP-32 in `scripts/dist.cjs`, same loud failure if the template changes; needs the two-launch test and an upgrade test (old folder replaced when a new version first runs). Filed 2026-10-07.
+
 - **APP-45** [impact:3] [needs-design] [investigate]
   Add feedback path within the app. Discussion & design needed. Not sure the best place or method of ingest. It would be great if feedback could automatically produce github issues. Probably shouldn't allow image upload. Just text feedback either reviewing the app or reporting issues/bugs.
   Initial form idea, keeping it simple:
@@ -607,7 +617,7 @@
   Description
   Submit
 
-- **APP-51** [impact:1]
+- **APP-51** [impact:1] [done]
   Explore ways to make dist creation process faster, maybe limit compression algorithm? It doesn't really need any compression for the dist version. It just takes too much time now that it's the more common version being used in the testing phase of updates. Built 2026-10-07, awaiting review.
 
 ### Onboarding & Setup

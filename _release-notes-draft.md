@@ -11,6 +11,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 ## Fixes
 
+- In a dump-folder library, Offload and Pin local on a stream now act on that stream's files only; they used to queue the whole folder.
 - Conversions, archives, clip exports and combined files are now written under a temporary name and checked before they take their final name. A cloud sync client no longer sees a file while it is still being written, and a result that did not finish properly is kept aside and reported instead of being treated as done. An archive's original is removed only after the replacement has passed that check.
 
 ## Across the app
