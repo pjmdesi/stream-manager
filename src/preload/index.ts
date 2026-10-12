@@ -266,6 +266,12 @@ contextBridge.exposeInMainWorld('api', {
   cancelJobGroup: (groupId: string) =>
     ipcRenderer.invoke('converter:cancelGroup', groupId),
 
+  cancelAllJobs: () =>
+    ipcRenderer.invoke('converter:cancelAll'),
+
+  getFfmpegChildren: () =>
+    ipcRenderer.invoke('app:ffmpegChildren'),
+
   startQueuedJob: (jobId: string) =>
     ipcRenderer.invoke('converter:startQueued', jobId),
 

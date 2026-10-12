@@ -152,8 +152,17 @@ declare global {
         audioTrackIndices?: number[]
         audioTrackVolumes?: Record<number, number>
       }): Promise<string>
-      cancelJob(jobId: string): Promise<void>
+      /** Resolves to the path the partial output was kept under (partials
+       *  kept by setting, and the encoder had written something), else null. */
+      cancelJob(jobId: string): Promise<string | null>
       cancelJobGroup(groupId: string): Promise<void>
+      /** Cancels every unfinished job except one mid archive-swap. Resolves to how many it cancelled. */
+      cancelAllJobs(): Promise<number>
+      /** Diagnostic: the ffmpeg children the main process has registered, by purpose and one by one. */
+      getFfmpegChildren(): Promise<{
+        counts: Partial<Record<string, number>>
+        children: Array<{ pid: number; purpose: string; owner: string; ageMs: number }>
+      }>
       pauseJob(jobId: string): Promise<void>
       resumeJob(jobId: string): Promise<void>
       startQueuedJob(jobId: string): Promise<void>

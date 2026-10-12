@@ -21,41 +21,47 @@
 17. CONV-4
 18. CONV-14
 19. THU-40
+20. STR-39
+21. STR-40
+22. STR-41
+23. APP-53
 
 ## Next up
 
 1. STR-34
-2. SYNC-10
-3. STR-32
-4. APP-38
-5. APP-19
-6. APP-39
-7. NAV-1
-8. PLR-30
-9. STR-36
-10. STR-31
-11. STR-30
-12. STR-11
-13. STR-25
-14. STR-26
-15. STR-29
-16. PLR-17
-17. PLR-25
-18. PLR-26
-19. PLR-32
-20. THU-38
-21. THU-35
-22. THU-36
-23. THU-37
-24. THU-39
-25. INTG-1
-26. APP-25
-27. APP-26
-28. APP-28
-29. APP-31
-30. APP-34
-31. APP-35
-32. SYNC-7
+2. STR-42
+3. STR-43
+4. SYNC-10
+5. STR-32
+6. APP-38
+7. APP-19
+8. APP-39
+9. NAV-1
+10. PLR-30
+11. STR-36
+12. STR-31
+13. STR-30
+14. STR-11
+15. STR-25
+16. STR-26
+17. STR-29
+18. PLR-17
+19. PLR-25
+20. PLR-26
+21. PLR-32
+22. THU-38
+23. THU-35
+24. THU-36
+25. THU-37
+26. THU-39
+27. INTG-1
+28. APP-25
+29. APP-26
+30. APP-28
+31. APP-31
+32. APP-34
+33. APP-35
+34. SYNC-7
 
 ## Improvement ideas
 
@@ -195,6 +201,23 @@
 
 - **STR-38** [bug] [ui] [impact:2]
   When entering multi-select mode in the files grid, the placeholder "Create thumbnail" disappears, causing a reflow of the other items in the grid. This means if the file the user clicks to "quick enter" multi-select mode is after the placeholder, the resulting selected item is no longer under the mouse. I'm not happy with the look of having the placeholder in between the grid of files. It should go at the end or beginning (or an alternate solution). I lean toward putting it at the beginning. In fact, maybe we put both items as perminent items in the top of the files grid section, designed differently so they don't match the size of the files cards. The create thumbnail button should look more like a button, and the file dropzone element could still look the same but be shrunk significatly. I'm imagining the two items as a sort of sub header under the action buttons.
+
+- **STR-39** [impact:3]
+  Improve the Linked Video dropdown in the detail sidebar footer. Currently, it loads some items, then after a second or two, loads in everything after reading from the YouTube API. This causes a massive reflow and has more than once caused me to click the wrong thing. It also makes it impossible to try to find the correct item when everything gets loaded in. Some changes to improve the UX:
+  1. Don't show already linked items by default, then add a button in the dropdown menu to show these items. It should be a small button at the bottom of the menu, pinned in place (normal users should never have to click it, but it should be there).
+  2. Add a "recommended" item at the very bottom (since the menu opens upward almost exclusively due to its position, the bottom entry would be nearest the user's cursor). This should be SM's best guess at the item the user is probably going to want to link. We should use the metadata details to calculate a matching score based on how closely the stream item details match the YouTube entry details. The highest scoring item will show in this special slot with a star or other icon that says "this is probably the one you want". The date and title will prbably be the strongest items to match against, but the day may not be wholly reliable since the user might be posting a trimmed or edited version of a livestreams months after the actual livestream date. Title, tags, uploaded video filename (if that's available through the API), etc. Split 2026-10-12: this ticket is the reflow fix and item 1 (linked videos hidden behind a pinned "Show linked" button); item 2, the recommended entry, is STR-42, and the typed filter is STR-43.
+
+- **STR-40** [ui] [impact:1]
+  Mark files the converter produced in the files grid. A recording, clip or combined file that came out of SM's converter is only recognizable by the suffix in its name, which is a weak tell. Show the converter's lightning bolt icon to the left of the name, where the archive icon sits, for every file SM converted (the provenance tag in the container already identifies clip exports and combines; converter outputs need the same stamp if they lack one). Files archived through the archive process keep the archive icon alone, since it implies the same and more. Filed 2026-10-12.
+
+- **STR-41** [ui] [impact:1]
+  The YouTube import's confirmation step says nothing when an imported stream landed alongside an existing one for the same date (the folder gets the `-N` suffix silently, 2026-10-12). List those with their folder name, the same wording the New stream notice uses, so the user knows there are now two streams on that day. Filed 2026-10-12.
+
+- **STR-42** [impact:3]
+  Linked Video dropdown: a recommended entry at the bottom of the menu (nearest the cursor, since the menu opens upward), SM's best guess at the video the user is about to link, with a marker and the reason beside it ("matches file name", "same length"). Split from STR-39 (its item 2 has the original wording). The scorer compares the stream item with each unlinked video and is the same matcher STR-34's automatic link-back needs, so it is built once as a shared function and used here first. Signals, strongest first: the uploaded file name (the API's `fileDetails` part exposes it to the video's owner; confirm on current docs at design time), duration against the stream's primary recording, the resolved title against the YouTube title, tags, and date proximity last as a weak tiebreaker (edited versions go up months later). Marker: the single Sparkle icon (decided 2026-10-12; not the plural Sparkles, and not the star, which means "pick as primary" in the nav and launcher and toggles on click), with a short "Best match" label beside it. Filed 2026-10-12.
+
+- **STR-43** [ui] [impact:3] [blocked:STR-42]
+  Linked Video dropdown as a hybrid text field: typing filters the list to matching videos as the tag fields do, with the recommended entry and the pinned "Show linked" button keeping their places. Comes after STR-39 and STR-42, which settle the menu's contents. Filed 2026-10-12.
 
 ### Player
 
@@ -368,6 +391,7 @@
 - **CONV-17** [bug] [impact:3]
   When I had a large list of items being converted that I needed to cancel, I had to click through one-by-one since there's no cancel all button. We should add this (with a confirm dialoge). Additionally, once I had cancelled all of them one at a time, the fans on my machine were stilll ramped up. I checked task manager and indeed there were still ffmpeg processes running even though there was nothing left in the conversion queue. This needs to be made impossible. SM should track all ffmpeg processes it spawns, know their state at all times, and make sure that state matches what SM indicates. If an sm-spawned ffmpeg process is running and has to correlating item in SM (conversion, combine, audio-extract, etc.), it should be immediately cancelled. But we should also make sure to avoid false postives in the case of app hang or errors. We proably already have a process to handle killing multiple ffmpeg processes since quitting the app is supposed to do this. Reproduced again 2026-10-07: cancelling queued and running jobs one after another in quick succession left one ffmpeg running with no row for it; ended through Task Manager.
   From the APP-21 scan (2026-10-07): there is no one list of the ffmpeg children SM spawns. The converter scheduler caps conversions and clip exports (`maxConcurrentConversions`), while Combine (`ipc/combine.ts`), the player's audio extraction and waveform extraction (`ffmpegService.ts`), the GPU encoder probe and the stream relay (`relayManager.ts`) each spawn ffmpeg on their own, so the cap is not app-wide and quit-time teardown knows only the converter's jobs. The orphan half of this ticket wants a `services/ffmpegChildren.ts` registry that every spawn site goes through (pid, purpose, owner id, started at), with kill-all at quit, a sweep that kills any registered child whose owner no longer exists in SM's own state, and a count by purpose for the nav and for diagnostics; `tasklist`-style scans of the whole machine are the false-positive risk the ticket warns about and are not the mechanism. Decision for this ticket: whether Combine should take a converter slot while it runs.
+  Built 2026-10-12, awaiting review.
 
 - **CONV-18** [bug] [impact:5] [done]
   Long ffmpeg writes were exposed to the sync client while in progress, and a result was trusted on ffmpeg's exit code alone. Found 2026-10-06: two cloud-offloaded archives failed to hydrate (HRESULT 0x80070185). The NAS copy of `SCP - Secret Laboratory 3_archive-av1.mkv` was exactly 1,310,720 bytes with a Matroska header still in ffmpeg's in-progress state (segment size "unknown", no duration, no cues), so it was a snapshot of the file while it was being written; the Synology log shows the client "added" it eight seconds after creation and never registered the ninety minutes of writes that followed, then called it in sync, and the later offload discarded the only complete copy. That file was a manual conversion written straight to its final name, so the archive button's rename swap was not the trigger here, but both paths share the condition: a file that takes an hour or more to write sits in the sync root the whole time and the client may snapshot it half-built. The originals came back from the Windows Recycle Bin because they had been deleted by hand. Built and verified 2026-10-06.
@@ -597,7 +621,7 @@
 - **APP-47** [cleanup] [impact:3]
   Route every renderer hydration check through `lib/hydrationCache`. The cache declares itself the surfaces' single source of truth for local-or-cloud status, with a 30 s freshness TTL and subscriptions, yet twelve direct `window.api.checkLocalFiles` calls bypass it (CombinePage three, ConverterPage, SendToConverterModal, PlayerPage four, StreamsPage three; found by the APP-21 scan 2026-10-07). None of them record what they learn, so a status one surface just verified stays stale on another until the TTL lapses, and opening a video from the grid runs two PowerShell attribute checks back to back for the same path. Proposal: `checkHydration(paths, { fresh? })` in hydrationCache that answers from the cache for paths verified within the TTL, asks main for the rest in one call, records every answer, and returns the flags in order; the sites that must decide on live data (about to open or convert a file) pass `fresh: true` and still record. Replace the twelve sites; `window.api.checkLocalFiles` then has one renderer caller.
 
-- **APP-48** [cleanup] [impact:3]
+- **APP-48** [cleanup] [impact:3] [done]
   One module for the stream folder convention and stream keys. Four functions answer "which stream owns this path and what is its `_meta.json` key": `metaKey` and `streamKeyForPath` in `main/ipc/streams.ts`, `streamMetaKey` in `renderer/lib/videoMapKey.ts`, and the key half of `resolveStreamContext` in `PlayerPage.tsx`; the `YYYY-MM-DD(-N)` folder pattern and the date-in-filename pattern are declared about twelve times across `streams.ts`, `fileWatcher.ts`, `main/index.ts`, `PlayerPage`, `StreamsPage` and `CombinePage` (APP-21 scan, 2026-10-07). They agree on the common layouts and differ at the edges: in dump mode main's `metaKey(root, root)` returns the root folder's name where the renderer returns the stream date, which is masked today by a `streamMode` guard at each call site, the same class of divergence that produced the phantom entry noted in `fireGroupCompletionHook`. Proposal: `src/shared/streamKey.ts` (pure path logic, both processes compile it, like `shared/videoExts.ts`): `STREAM_FOLDER_RE`, `isStreamFolderName`, `streamFolderDate`, `streamFolderSuffix`, `dateInFileName`, `streamKeyOfFolder(root, folderPath, date)`, `streamKeyOfFile(root, filePath)`; the four functions and the regex sites route through it, with one test file of layouts (flat, year/month nesting, same-day suffixes, dump mode) that pins the agreed answers. Built 2026-10-12, awaiting review.
 
 - **APP-49** [cleanup] [impact:2] [done]
@@ -608,6 +632,9 @@
 
 - **APP-52** [impact:3]
   The portable launcher extracts the whole bundle on every cold launch and deletes the folder when the app exits, so each start pays a decompression of the 131 MB exe into about 550 MB (APP-32's pre-check only skips it while the app is already running). Keep the extraction between launches: the unpack folder is already fixed per build, so the launcher can leave it in place on exit and reuse it when a marker written at the end of a complete extraction matches this build, extracting only when the marker is missing or from another version. Every launch after the first per version becomes instant, the download stays small (the store-compression alternative measured 2026-10-07 is a 549 MB exe and is not faster on slow drives). Same template patch mechanism as APP-32 in `scripts/dist.cjs`, same loud failure if the template changes; needs the two-launch test and an upgrade test (old folder replaced when a new version first runs). Filed 2026-10-07.
+
+- **APP-53** [big] [needs-design]
+  Retire dump-folder libraries after 2.8.0. Every feature carries a second code path for dump mode (keys by date, files found by date in the name, no per-stream folder, the offload and delete file sets, createFolder writing the meta by date, the watcher's destination, the Player's stream resolution, thumbnail naming), each one a test item and a place to diverge (SYNC-9 was one). Nobody is known to use it, and the folder-per-stream layout is the recommended one. Proposal: 2.8.0 is the last version that opens a dump library: it shows a notice in dump mode saying so and pointing at the existing conversion (`streams:convertDumpFolder`, which moves files into date folders and writes a manifest), the release notes say it, and onboarding stops offering the choice. The version after is 3.0.0 (a library that no longer opens is a breaking change, decided 2026-10-12): a dump library gets a required, user-confirmed conversion on first launch (never a silent move of a user's files; the manifest stays as the record), and the dump branches are deleted; that half gets its own ticket once 2.8.0 is out. This ticket is the 2.8.0 half. Design points: what the conversion does with files that carry no date in the name (report, never guess), with cloud placeholders in a sync root (renames are fine, but thousands at once churn the client), with `_sm-thumbnail` files and the `_meta.json` keys (date to folder name), and whether the website's FAQ describes dump mode. Proposed 2026-10-12.
 
 - **APP-45** [impact:3] [needs-design] [investigate]
   Add feedback path within the app. Discussion & design needed. Not sure the best place or method of ingest. It would be great if feedback could automatically produce github issues. Probably shouldn't allow image upload. Just text feedback either reviewing the app or reporting issues/bugs.

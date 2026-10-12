@@ -14,6 +14,9 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - New stream no longer refuses a date that already has a stream. It says so and creates the new one alongside (a dump folder still holds one stream per date, and says that instead).
 - In a dump-folder library, Offload and Pin local on a stream now act on that stream's files only; they used to queue the whole folder.
 - Conversions, archives, clip exports and combined files are now written under a temporary name and checked before they take their final name. A cloud sync client no longer sees a file while it is still being written, and a result that did not finish properly is kept aside and reported instead of being treated as done. An archive's original is removed only after the replacement has passed that check.
+- Canceling a conversion in the moment before its encoder started could leave that encoder running with no row for it. The app now keeps one list of every ffmpeg process it starts, checks that each still belongs to something, and stops any that does not. Quitting stops them all, including the stream relay, which used to outlive the app and hold its port.
+- The Converting list has a Cancel all button, with a confirmation.
+- A canceled conversion whose partial file is kept no longer takes the name of an existing file; it is kept as a "-partial" sibling instead. With the delete-partials setting on, a canceled re-export no longer deletes the previous finished file.
 
 ## Across the app
 

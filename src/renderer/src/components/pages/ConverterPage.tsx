@@ -310,6 +310,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   const [importError, setImportError] = useState('')
   const [presetsModalOpen, setPresetsModalOpen] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<{ jobId: string; outputFile: string } | null>(null)
+  const [cancelAllDialog, setCancelAllDialog] = useState(false)
 
   const autoDeletePartial = !!config.autoDeletePartialOnCancel
 
@@ -709,18 +710,27 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   }
 
   const cancelJob = async (id: string) => {
-    const job = jobs.find(j => j.id === id)
-    await window.api.cancelJob(id)
+    // The main process owns the partial: it deletes the `.tmp` when the
+    // setting says so, or keeps it under a name that is free (never over
+    // a finished file of the same name) and reports that name. Only then
+    // is there something to offer to delete. Deleting the output's final
+    // name from here was wrong once writes moved to `.tmp`: on a re-export
+    // it hit the previous, complete file.
+    const keptPartial = await window.api.cancelJob(id)
     setJobs(prev => prev.map(j => j.id === id ? { ...j, status: 'cancelled' } : j))
     jobEtas.delete(id)
     jobElapsed.delete(id)
-    if (job?.outputFile) {
-      if (autoDeletePartial) {
-        window.api.deleteFile(job.outputFile).catch(() => {})
-      } else {
-        setDeleteDialog({ jobId: id, outputFile: job.outputFile })
-      }
-    }
+    if (keptPartial) setDeleteDialog({ jobId: id, outputFile: keptPartial })
+  }
+
+  // Cancel all (CONV-17): one confirm, then every unfinished job at once.
+  // No per-job partial prompts; the modal says what happens to partials.
+  const cancelAllJobs = async () => {
+    setCancelAllDialog(false)
+    const targetIds = new Set(convertingJobs.filter(j => j.status !== 'replacing').map(j => j.id))
+    await window.api.cancelAllJobs().catch(() => {})
+    setJobs(prev => prev.map(j => targetIds.has(j.id) && !isTerminal(j) && j.status !== 'replacing' ? { ...j, status: 'cancelled' } : j))
+    for (const id of targetIds) { jobEtas.delete(id); jobElapsed.delete(id) }
   }
 
   const pauseJob = async (id: string) => {
@@ -743,6 +753,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   const hasEnded = (j: ConversionJob) => j.groupId ? !liveGroupIds.has(j.groupId) : isTerminal(j)
   const convertingJobs = jobs.filter(j => !hasEnded(j))
   const finishedJobs = jobs.filter(hasEnded)
+
+  // Cancel all asks about what is in the list now. When the last job ends
+  // while the question is open (a short copy finishing, a cancel from its
+  // row), there is nothing left to confirm, so the modal closes itself
+  // instead of offering to cancel nothing.
+  useEffect(() => {
+    if (cancelAllDialog && !convertingJobs.some(j => j.status !== 'replacing')) setCancelAllDialog(false)
+  }, [cancelAllDialog, convertingJobs])
 
   const clearFinished = () => {
     // Clears exactly what the Finished card shows: whole ended units. A
@@ -1242,6 +1260,12 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                             </button>
                           </Tooltip>
                         )}
+                        <Tooltip content="Cancel every conversion in this list, running and queued (asks first)" side="top">
+                          <button onClick={() => setCancelAllDialog(true)} className={rowActionClass('red')}>
+                            <Ban size={13} />
+                            Cancel all
+                          </button>
+                        </Tooltip>
                       </>
                     )
                   })()}
@@ -1318,6 +1342,36 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             }}
           >
             Delete file
+          </Button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal
+      isOpen={cancelAllDialog}
+      onClose={() => setCancelAllDialog(false)}
+      title="Cancel all conversions?"
+      width="sm"
+    >
+      <div className="flex flex-col gap-4">
+        <p className="text-sm text-gray-300">
+          {(() => {
+            // One line: what stops. What happens to partial files follows
+            // the setting the user already chose, as it does for a single
+            // Cancel, so it is not repeated here.
+            const working = convertingJobs.filter(j => j.status === 'running' || j.status === 'paused' || j.status === 'downloading').length
+            const queued = convertingJobs.filter(j => j.status === 'queued').length
+            return working > 0 && queued > 0
+              ? `Stops ${working} in progress and cancels ${queued} queued.`
+              : working > 0 ? `Stops ${working} in progress.` : `Cancels ${queued} queued.`
+          })()}
+        </p>
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" size="sm" onClick={() => setCancelAllDialog(false)}>
+            Keep converting
+          </Button>
+          <Button variant="danger" size="sm" icon={<Ban size={13} />} onClick={cancelAllJobs}>
+            Cancel all
           </Button>
         </div>
       </div>

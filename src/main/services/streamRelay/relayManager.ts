@@ -21,6 +21,7 @@ import { ChildProcess, spawn } from 'child_process'
 import { EventEmitter } from 'events'
 import os from 'os'
 import { requireFfmpegBin } from '../ffmpegService'
+import { trackChild } from '../ffmpegChildren'
 
 export interface RelayConfig {
   port: number
@@ -192,6 +193,10 @@ export class RelayManager extends EventEmitter {
 
     this.child = child
     this.streamingNow = false
+    // Registered so quit kills it (a relay ffmpeg used to outlive the app
+    // and hold the port) and so a replaced child that ignored SIGTERM is
+    // swept (ffmpegChildren.ts).
+    trackChild(child, 'relay', { id: 'relay', isLive: () => this.child === child })
 
     // All event handlers gate on `this.child === child` so stale events from
     // a child we've already replaced (e.g. on a port-change restart) don't

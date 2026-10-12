@@ -14,6 +14,7 @@
         "test": "node --test \"src/shared/**/*.test.ts\"",
         "lint": "eslint .",
         "dist": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build && node scripts/dist.cjs",
+        "launch:dist": "",
         "release:patch": "npm version patch && npm run dist",
         "release:minor": "npm version minor && npm run dist",
         "release:major": "npm version major && npm run dist",

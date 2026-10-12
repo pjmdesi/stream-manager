@@ -117,6 +117,7 @@ import { registerStreamRelayIPC } from './ipc/streamRelay'
 import { registerUpdateCheckIPC } from './services/updateCheck'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
+import { startOrphanSweep, killAllChildren, ffmpegChildCounts, trackedChildren } from './services/ffmpegChildren'
 
 function createWindow(): BrowserWindow {
   const savedState = loadWindowState()
@@ -583,6 +584,12 @@ app.whenReady().then(() => {
     // integration page is the typical entry point and the relay's auto-
     // start logic looks at the saved config which is already loaded.
     registerStreamRelayIPC()
+    // Periodic check that every ffmpeg child SM has spawned still has an
+    // owner in SM's own state; orphans are killed (CONV-17). The handler
+    // is a diagnostic: `await window.api.getFfmpegChildren()` in DevTools
+    // shows what SM believes it is running.
+    startOrphanSweep()
+    ipcMain.handle('app:ffmpegChildren', () => ({ counts: ffmpegChildCounts(), children: trackedChildren() }))
 
     // Eagerly probe available GPU encoders so the preset editor's encoder
     // dropdown is instant when the user opens it. Result is cached in
@@ -597,6 +604,10 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   fileWatcher.stop()
+  // No ffmpeg outlives the app: converter encodes the quit path has
+  // already cancelled, plus Combine, the player's extractions and the
+  // relay, which used to survive a quit and hold its port.
+  killAllChildren('quit')
   tempManager.cleanupAll()
   // Catch the tail of the rolling _meta.json backups: writes since the last
   // interval-gated backup get one final copy before shutdown.
@@ -605,3 +616,7 @@ app.on('window-all-closed', () => {
     app.quit()
   }
 })
+
+// Last guard for quits that skip window-all-closed. Idempotent: children
+// already gone are no longer registered.
+app.on('will-quit', () => { killAllChildren('quit') })

@@ -5,6 +5,7 @@ import path from 'path'
 import os from 'os'
 import { suspendProcess, resumeProcess, clipProvenanceComment, requireFfmpegBin } from '../services/ffmpegService'
 import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
+import { trackChild } from '../services/ffmpegChildren'
 
 // Single-slot active run — the Combine page runs one job at a time. Lets
 // combine:cancel kill the ffmpeg child, combine:pause/resume suspend it
@@ -113,6 +114,9 @@ export function registerCombineIPC(): void {
           resume: () => { if (proc.pid) resumeProcess(proc.pid) },
         }
         activeCombine = runState
+        // Wanted while it is the active run and not cancelled; the orphan
+        // sweep kills it otherwise (ffmpegChildren.ts).
+        trackChild(proc, 'combine', { id: 'combine', isLive: () => activeCombine === runState && !runState.cancelled })
 
         // A failed run's partial output is garbage — clean it up like the
         // archive error path does its temp. Gated on ffmpeg having actually

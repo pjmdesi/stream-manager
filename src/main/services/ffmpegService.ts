@@ -1,10 +1,11 @@
 import ffmpeg from 'fluent-ffmpeg'
 import ffmpegStatic from 'ffmpeg-static'
 import ffprobeStatic from 'ffprobe-static'
-import { spawn } from 'child_process'
+import { spawn, type ChildProcess } from 'child_process'
 import { app } from 'electron'
 import path from 'path'
 import { unlinkWithRetry } from './unlinkWithRetry'
+import { trackChild, UNTIL_EXIT, type ChildOwner } from './ffmpegChildren'
 
 // In a packaged build ffmpeg-static and ffprobe-static resolve to paths inside
 // app.asar/. asarUnpack copies the binaries out to app.asar.unpacked/, but the
@@ -273,6 +274,13 @@ export async function extractAudioTracks(
         const cmd = ffmpeg(filePath)
           .outputOptions([`-map 0:a:${i}`, '-c:a libopus', '-b:a 192k', '-vn'])
           .output(outputPath)
+          .on('start', () => {
+            const proc = (cmd as any).ffmpegProc as ChildProcess | undefined
+            if (proc) trackChild(proc, 'audio-extract', { id: `audio-extract:${i}`, isLive: () => !cancelled })
+            // A cancel that landed before the child existed had nothing to
+            // kill (fluent-ffmpeg's kill is a no-op until then); kill now.
+            if (cancelled) { try { (cmd as any).kill('SIGKILL') } catch (_) {} }
+          })
           .on('progress', (progress) => {
             if (cancelled) { try { (cmd as any).kill('SIGKILL') } catch (_) {}; return }
             if (duration > 0 && progress.timemark) {
@@ -334,6 +342,7 @@ function getEncodersOutput(): Promise<string> {
     const proc = spawn(ffmpegBin, ['-hide_banner', '-encoders'], {
       stdio: ['ignore', 'pipe', 'ignore']
     })
+    trackChild(proc, 'probe', UNTIL_EXIT('encoder-list'))
     let out = ''
     proc.stdout!.on('data', (c: Buffer) => out += c.toString())
     proc.on('close', () => { _encodersOutput = out; resolve(out) })
@@ -374,6 +383,7 @@ async function testEncoderRuntime(name: string): Promise<boolean> {
       '-c:v', name,
       '-f', 'null', '-',
     ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    trackChild(proc, 'probe', UNTIL_EXIT(`encoder-test:${name}`))
     let stderrBuf = ''
     proc.stderr?.on('data', (chunk: Buffer) => { stderrBuf += chunk.toString('utf8') })
     let settled = false
@@ -632,6 +642,7 @@ export function runConversion(
   onProgress: (percent: number) => void,
   onComplete: () => void,
   onError: (err: Error) => void,
+  owner: ChildOwner,
   inputOptions?: string[]
 ): { cancel: () => void; pause: () => void; resume: () => void } {
   const args = parseArgsString(ffmpegArgs)
@@ -639,13 +650,20 @@ export function runConversion(
   if (inputOptions && inputOptions.length > 0) command = command.inputOptions(inputOptions)
   command = command.outputOptions(args).output(outputFile)
   let ffmpegPid: number | null = null
+  // fluent-ffmpeg prepares the spawn asynchronously after run(), and its
+  // kill() is a silent no-op until the child exists. A cancel that lands
+  // in that window used to be lost: the encoder started a moment later
+  // with no job left to stop it (CONV-17). The flag carries the cancel
+  // across the window; 'start' acts on it.
+  let cancelled = false
 
   command
     .on('start', () => {
-      // ffmpegProc is set synchronously before start fires, but defer one tick to be safe
-      setImmediate(() => {
-        ffmpegPid = (command as any).ffmpegProc?.pid ?? null
-      })
+      // ffmpegProc is assigned synchronously, right before 'start' fires.
+      const proc = (command as any).ffmpegProc as ChildProcess | undefined
+      ffmpegPid = proc?.pid ?? null
+      if (proc) trackChild(proc, 'convert', owner)
+      if (cancelled) { try { command.kill('SIGKILL') } catch (_) {} }
     })
     .on('progress', (progress) => {
       if (duration > 0 && progress.timemark) {
@@ -657,18 +675,19 @@ export function runConversion(
       }
     })
     .on('end', () => {
+      if (cancelled) return
       onProgress(100)
       onComplete()
     })
     .on('error', (err) => {
-      if (err.message.includes('SIGKILL') || err.message.includes('killed')) return
+      if (cancelled || err.message.includes('SIGKILL') || err.message.includes('killed')) return
       onError(err)
     })
 
   command.run()
 
   return {
-    cancel: () => { try { command.kill('SIGKILL') } catch (_) {} },
+    cancel: () => { cancelled = true; try { command.kill('SIGKILL') } catch (_) {} },
     pause:  () => { if (ffmpegPid) suspendProcess(ffmpegPid) },
     resume: () => { if (ffmpegPid) resumeProcess(ffmpegPid) },
   }
@@ -692,6 +711,7 @@ export async function extractWaveformData(filePath: string): Promise<Buffer> {
       '-vn',
       'pipe:1'
     ], { stdio: ['ignore', 'pipe', 'ignore'] })
+    trackChild(proc, 'waveform', UNTIL_EXIT(`waveform:${path.basename(filePath)}`))
 
     proc.stdout!.on('data', (chunk: Buffer) => chunks.push(chunk))
     proc.on('close', () => resolve(Buffer.concat(chunks)))
@@ -726,7 +746,8 @@ export function extractSegmentToFile(
   inputFile: string,
   outputFile: string,
   inPoint: number,
-  outPoint: number
+  outPoint: number,
+  owner: ChildOwner
 ): { promise: Promise<void>; kill: () => void } {
   const margin = 10 // seconds before inPoint to ensure keyframe capture
   const seekTime = Math.max(0, inPoint - margin)
@@ -760,6 +781,7 @@ export function extractSegmentToFile(
       '-y',
       outputFile,
     ], { stdio: ['ignore', 'ignore', 'pipe'] })
+    trackChild(proc, 'clip-segment', owner)
 
     proc.stderr!.on('data', (c: Buffer) => {
       stderr += c.toString()
@@ -796,8 +818,9 @@ export function runClipConversion(params: {
   onProgress: (percent: number) => void
   onComplete: () => void
   onError: (err: Error) => void
+  owner: ChildOwner
 }): { cancel: () => void; pause: () => void; resume: () => void } {
-  const { inputFiles, outputFile, filterComplex, outputArgs, totalDuration, onProgress, onComplete, onError } = params
+  const { inputFiles, outputFile, filterComplex, outputArgs, totalDuration, onProgress, onComplete, onError, owner } = params
 
   if (!ffmpegBin) {
     onError(new Error('ffmpeg binary not found'))
@@ -819,6 +842,7 @@ export function runClipConversion(params: {
 
   const proc = spawn(ffmpegBin, args, { stdio: ['ignore', 'ignore', 'pipe'] })
   ffmpegPid = proc.pid ?? null
+  trackChild(proc, 'clip-export', owner)
 
   proc.stderr!.on('data', (chunk: Buffer) => {
     stderrBuf += chunk.toString()

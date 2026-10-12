@@ -11,6 +11,7 @@ import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 import { expectSelfWrite } from '../services/selfWrites'
 import { broadcast } from '../services/broadcast'
 import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
+import { requestOrphanSweep, type ChildOwner } from '../services/ffmpegChildren'
 
 /** Where ffmpeg actually writes a job's output: `<outputFile>.tmp`, invisible
  *  to sync clients until the finished file is verified and renamed into
@@ -257,6 +258,13 @@ function setJobStatus(jobId: string, status: ConversionJob['status']): void {
  *  NOT count — hydration runs in parallel and holds no slot. */
 function isActiveJob(j: ConversionJob): boolean {
   return j.status === 'running' || j.status === 'replacing' || j.status === 'paused'
+}
+
+/** Owner handle for the ffmpeg-children registry (ffmpegChildren.ts): a
+ *  job's child is wanted only while the job holds an encode slot. A child
+ *  still alive once the job has ended is an orphan and gets swept. */
+function jobOwner(id: string): ChildOwner {
+  return { id: `job:${id}`, isLive: () => { const j = jobs.get(id); return !!j && isActiveJob(j) } }
 }
 
 // ── Job-completion waiters ────────────────────────────────────────────────
@@ -1050,6 +1058,16 @@ export async function startConversionJob(
       scheduleNext()
       reject(err)
     }
+    // Each await in the path below is a window in which a cancel can land
+    // with nothing yet to kill: the job's status is the record of it.
+    // Checked before every side effect (a status flip, the spawn), so a
+    // job cancelled while this path was still preparing never starts an
+    // encoder it has no row for (CONV-17). A quit parks running jobs back
+    // to 'queued', which reads as "not wanted" here too.
+    const stillWanted = () => {
+      const s = jobs.get(id)?.status
+      return s === 'running' || s === 'downloading'
+    }
     ;(async () => {
       try {
         // ── Cloud-hydrate wait ──────────────────────────────────────────────
@@ -1062,6 +1080,7 @@ export async function startConversionJob(
         const { checkLocalFiles } = await import('./files')
         const inputIsLocal = async () => (await checkLocalFiles([job.inputFile]))[0]
         if (!(await inputIsLocal())) {
+          if (!stillWanted()) return
           setStatus('downloading')
           const flag = { cancelled: false }
           downloadCancelFlags.set(id, flag)
@@ -1175,8 +1194,9 @@ export async function startConversionJob(
         expectedDurationSec = presetTrims ? 0 : duration
         // Written as `<output>.tmp` with the container named explicitly; the
         // verified file is renamed into place in handleComplete.
+        if (!stillWanted()) return
         const writePath = writePathOf(job)
-        const result = runConversion(job.inputFile, writePath, withExplicitMuxer(gpuArgs, job.outputFile), duration, handleProgress, handleComplete, handleError)
+        const result = runConversion(job.inputFile, writePath, withExplicitMuxer(gpuArgs, job.outputFile), duration, handleProgress, handleComplete, handleError, jobOwner(id))
         cancellers.set(id, result.cancel)
         pausers.set(id, result.pause)
         resumers.set(id, result.resume)
@@ -1315,6 +1335,104 @@ export function getActiveConversionCounts(): { running: number; queued: number }
     else if (j.status === 'queued') queued++
   }
   return { running, queued }
+}
+
+/** Where a cancelled job's partial lands when partials are kept: the
+ *  output's own name when nothing is there, else a "-partial" sibling. The
+ *  rename must never land on an existing file: a re-export under a name
+ *  that already exists would otherwise replace the finished file with the
+ *  half-written one. */
+function keptPartialPath(outputFile: string): string {
+  if (!fs.existsSync(outputFile)) return outputFile
+  const ext = path.extname(outputFile)
+  const base = outputFile.slice(0, outputFile.length - ext.length)
+  for (let n = 1; ; n++) {
+    const candidate = `${base}-partial${n > 1 ? `-${n}` : ''}${ext}`
+    if (!fs.existsSync(candidate)) return candidate
+  }
+}
+
+/** Cancel a set of jobs as one operation (CONV-17). Every target is marked
+ *  cancelled and its process killed BEFORE the scheduler runs, so a slot
+ *  freed by the first cannot be handed to a sibling that is about to be
+ *  cancelled too; that hand-off was one way cancelling a list left an
+ *  encoder running with no row. Jobs that have already ended are skipped.
+ *  Returns, per job, the path its partial output was kept under (for the
+ *  renderer's delete-the-partial prompt); absent when nothing was kept. */
+function cancelJobs(jobIds: string[]): Map<string, string> {
+  const kept = new Map<string, string>()
+  const targets: ConversionJob[] = []
+  for (const jobId of jobIds) {
+    const j = jobs.get(jobId)
+    const cancel = cancellers.get(jobId)
+    if (cancel) {
+      try { cancel() } catch (err) { console.warn('[converter] cancel threw:', err) }
+      cancellers.delete(jobId)
+    }
+    pausers.delete(jobId)
+    resumers.delete(jobId)
+    // Flip the download-wait flag too, in case the job is mid-cloud-hydrate.
+    const dlFlag = downloadCancelFlags.get(jobId)
+    if (dlFlag) dlFlag.cancelled = true
+    if (!j || j.status === 'done' || j.status === 'cancelled' || j.status === 'error') continue
+    jobs.set(jobId, { ...j, status: 'cancelled' })
+    // Settle any done-waiter (cancel resolves, it is a user action, not
+    // an error) — essential for jobs cancelled while still QUEUED, whose
+    // startConversionJob paths never ran to settle it. No-op if the
+    // running path already settled. A clip export cancelled while
+    // waiting also drops its deferred pipeline.
+    settleJobDone(jobId)
+    clipRunners.delete(jobId)
+    broadcast('converter:jobStatus', { jobId, status: 'cancelled' })
+    targets.push(j)
+  }
+  if (targets.length === 0) return kept
+  persistPendingJobs()
+  const config = getConfig()
+  for (const j of targets) {
+    if (!j.outputFile) continue
+    // The renderer surfaces (session videos, files grid) hide the output
+    // while the job is writing — on cancel the job leaves that state, so
+    // tell them to reconcile. When the partial is being auto-deleted,
+    // notify AFTER the unlink lands (ffmpeg's handle release can take a
+    // few retries) so the rescan sees the file gone rather than briefly
+    // listing the dead partial. Scoped to the owning stream when the
+    // output lives inside one.
+    const notifyStreamsChanged = () => {
+      const streamsDir = getStreamsDir()
+      const key = streamsDir && getStreamMode() !== 'dump-folder'
+        ? streamKeyOfFile(streamsDir, j.outputFile)
+        : null
+      broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
+    }
+    const writePath = writePathOf(j)
+    if (j.replaceInput) {
+      // For replaceInput jobs the temp output is internal — clean it up
+      // unconditionally so we don't leave archive temps behind.
+      deleteWithRetry(writePath, 'archive temp file (cancel)')
+    } else if (config.autoDeletePartialOnCancel) {
+      // Swallow the unlink echo — the callback below is the notify.
+      expectSelfWrite(writePath)
+      deleteWithRetry(writePath, 'cancelled output', notifyStreamsChanged)
+    } else if (fs.existsSync(writePath)) {
+      // Partial kept (by config): give the `.tmp` a visible name so the
+      // user can find it, then show it. Unverified by design; the user
+      // asked for it. A job cancelled before its encoder wrote anything
+      // (queued, downloading, or caught in the pre-spawn window) has no
+      // partial and nothing to offer.
+      const keptPath = keptPartialPath(j.outputFile)
+      kept.set(j.id, keptPath)
+      renameWithRetry(writePath, keptPath, 'kept partial output')
+      notifyStreamsChanged()
+    }
+  }
+  for (const j of targets) maybeFireGroupHook(j.id)
+  // Cancellation frees slots — let the scheduler fill them from any group.
+  scheduleNext()
+  // A kill that missed its target (the cancel landed before the spawn) is
+  // caught by the registry's sweep.
+  requestOrphanSweep()
+  return kept
 }
 
 export function registerConverterIPC(): void {
@@ -1711,7 +1829,7 @@ export function registerConverterIPC(): void {
         const tempFile = path.join(tempDir, `seg_${i}.mkv`)
         tempFiles.push(tempFile)
 
-        const { promise, kill } = extractSegmentToFile(job.inputFile, tempFile, inPoint, outPoint)
+        const { promise, kill } = extractSegmentToFile(job.inputFile, tempFile, inPoint, outPoint, jobOwner(id))
         installCanceller(kill)
         await promise
         installCanceller(() => {})
@@ -1837,6 +1955,7 @@ export function registerConverterIPC(): void {
         onComplete()
       })() },
       onError:    (err) => { cleanup(); deleteWithRetry(clipWritePath, 'failed clip export'); onError(err) },
+      owner: jobOwner(id),
     })
 
     // Update canceller and pause/resume to control the encoding process
@@ -1852,83 +1971,25 @@ export function registerConverterIPC(): void {
     return id
   })
 
-  ipcMain.handle('converter:cancelJob', async (_event, jobId: string) => {
-    const cancel = cancellers.get(jobId)
-    if (cancel) { cancel(); cancellers.delete(jobId) }
-    pausers.delete(jobId)
-    resumers.delete(jobId)
-    // Flip the download-wait flag too, in case the job is mid-cloud-hydrate.
-    const dlFlag = downloadCancelFlags.get(jobId)
-    if (dlFlag) dlFlag.cancelled = true
-    const j = jobs.get(jobId)
-    if (j) {
-      jobs.set(jobId, { ...j, status: 'cancelled' })
-      // Settle any done-waiter (cancel resolves, it is a user action, not
-      // an error) — essential for jobs cancelled while still QUEUED, whose
-      // startConversionJob paths never ran to settle it. No-op if the
-      // running path already settled. A clip export cancelled while
-      // waiting also drops its deferred pipeline.
-      settleJobDone(jobId)
-      clipRunners.delete(jobId)
-      persistPendingJobs()
-      const config = getConfig()
-      // The renderer surfaces (session videos, files grid) hide the output
-      // while the job is writing — on cancel the job leaves that state, so
-      // tell them to reconcile. When the partial is being auto-deleted,
-      // notify AFTER the unlink lands (ffmpeg's handle release can take a
-      // few retries) so the rescan sees the file gone rather than briefly
-      // listing the dead partial. Scoped to the owning stream when the
-      // output lives inside one.
-      const notifyStreamsChanged = () => {
-        const streamsDir = getStreamsDir()
-        const key = streamsDir && getStreamMode() !== 'dump-folder' && j.outputFile
-          ? streamKeyOfFile(streamsDir, j.outputFile)
-          : null
-        broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
-      }
-      // For replaceInput jobs the temp output is internal — clean it up
-      // unconditionally so we don't leave archive temps behind.
-      if (j.replaceInput && j.outputFile) {
-        deleteWithRetry(writePathOf(j), 'archive temp file (cancel)')
-      } else if (config.autoDeletePartialOnCancel && j.outputFile) {
-        // Swallow the unlink echo — the callback below is the notify.
-        expectSelfWrite(writePathOf(j))
-        deleteWithRetry(writePathOf(j), 'cancelled output', notifyStreamsChanged)
-      } else if (j.outputFile) {
-        // Partial kept (by config): give the `.tmp` its output name so the
-        // user can find it, then show it. Unverified by design; the user
-        // asked for it.
-        renameWithRetry(writePathOf(j), j.outputFile, 'kept partial output')
-        notifyStreamsChanged()
-      }
-      maybeFireGroupHook(jobId)
-      // Cancellation frees a slot — let the scheduler fill it from any group.
-      scheduleNext()
-    }
+  ipcMain.handle('converter:cancelJob', async (_event, jobId: string): Promise<string | null> => {
+    return cancelJobs([jobId]).get(jobId) ?? null
   })
 
   // Cancel every job belonging to a group. Useful for the archive-batch UI's
   // single "Cancel all" button so the user doesn't have to hit cancel N times.
   ipcMain.handle('converter:cancelGroup', async (_event, groupId: string) => {
-    const groupJobs = [...jobs.values()].filter(j => j.groupId === groupId)
-    for (const j of groupJobs) {
-      if (j.status === 'done' || j.status === 'cancelled' || j.status === 'error') continue
-      const cancel = cancellers.get(j.id)
-      if (cancel) { cancel(); cancellers.delete(j.id) }
-      pausers.delete(j.id)
-      resumers.delete(j.id)
-      const dlFlag = downloadCancelFlags.get(j.id)
-      if (dlFlag) dlFlag.cancelled = true
-      jobs.set(j.id, { ...j, status: 'cancelled' })
-      persistPendingJobs()
-      settleJobDone(j.id)
-      if (j.replaceInput && j.outputFile) {
-        deleteWithRetry(writePathOf(j), 'archive temp file (cancel-group)')
-      }
-      broadcast('converter:jobStatus', { jobId: j.id, status: 'cancelled' })
-    }
-    // Cancelling a whole group frees slots — backfill from any other group.
-    scheduleNext()
+    cancelJobs([...jobs.values()].filter(j => j.groupId === groupId).map(j => j.id))
+  })
+
+  // Cancel everything that has not ended: the Converting card's Cancel all
+  // (CONV-17). A job mid archive-swap ('replacing') is left to finish: the
+  // swap is a few renames, and interrupting it is how originals get lost.
+  ipcMain.handle('converter:cancelAll', async (): Promise<number> => {
+    const ids = [...jobs.values()]
+      .filter(j => j.status === 'queued' || j.status === 'downloading' || j.status === 'running' || j.status === 'paused')
+      .map(j => j.id)
+    cancelJobs(ids)
+    return ids.length
   })
 
   ipcMain.handle('converter:pauseJob', async (_event, jobId: string) => {
