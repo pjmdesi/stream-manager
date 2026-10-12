@@ -250,6 +250,21 @@ export function registerFilesIPC(): void {
     fs.unlinkSync(filePath)
   })
 
+  // What each dropped path is, so a drop zone can expand folders and keep
+  // files (CONV-13). A renderer File object says nothing reliable about
+  // this: a directory arrives as a File with an empty type, as does any
+  // extensionless file.
+  ipcMain.handle('files:pathKinds', async (_event, paths: string[]): Promise<Array<'file' | 'dir' | 'missing'>> =>
+    paths.map(p => {
+      try {
+        const st = fs.statSync(p)
+        return st.isDirectory() ? 'dir' : 'file'
+      } catch {
+        return 'missing'
+      }
+    })
+  )
+
   ipcMain.handle('files:list', async (_event, dir: string): Promise<FileInfo[]> => {
     if (!fs.existsSync(dir)) return []
 

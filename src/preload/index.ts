@@ -84,6 +84,9 @@ contextBridge.exposeInMainWorld('api', {
   fileExists: (filePath: string) =>
     ipcRenderer.invoke('files:exists', filePath),
 
+  pathKinds: (paths: string[]) =>
+    ipcRenderer.invoke('files:pathKinds', paths),
+
   mkdir: (dirPath: string) =>
     ipcRenderer.invoke('files:mkdir', dirPath),
 

@@ -68,6 +68,8 @@ declare global {
       listFilesRecursive(dir: string, maxDepth?: number): Promise<FileInfo[]>
       listFileNames(dirPath: string): Promise<{ name: string; isDirectory: boolean }[]>
       fileExists(filePath: string): Promise<boolean>
+      /** 'dir' for a folder, 'file' for anything else that exists. */
+      pathKinds(paths: string[]): Promise<Array<'file' | 'dir' | 'missing'>>
       mkdir(dirPath: string): Promise<void>
       openUrl(url: string): Promise<void>
       openInExplorer(filePath: string): Promise<void>

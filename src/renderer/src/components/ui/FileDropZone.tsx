@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react'
 import { Upload, Film } from 'lucide-react'
 import { Tooltip } from './Tooltip'
+import { resolveDroppedPaths, dropNotice } from '../../lib/droppedPaths'
 
 /** How many accepted extensions the empty state names before "and N more";
  *  the full list is the line's tooltip. The video list is 21 long. */
@@ -41,11 +42,18 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
   browseStartIn,
 }) => {
   const [isDragging, setIsDragging] = useState(false)
+  // What the last drop left out (files of other types, folders with
+  // nothing usable). Shown in the zone until the next drag, drop, browse
+  // or click, so the user who dropped the wrong thing sees why nothing
+  // happened, without a timer or a toast.
+  const [notice, setNotice] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const handleDrop = (e: React.DragEvent) => {
+  const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
+    setNotice(null)
+    const ctrlKey = e.ctrlKey
 
     const paths: string[] = []
     const items = e.dataTransfer.items
@@ -62,13 +70,26 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         }
       }
     }
+    if (paths.length === 0) return
 
-    if (paths.length > 0) {
-      onFiles(paths, { ctrlKey: e.ctrlKey })
+    // With an accept list, folders expand to the accepted files inside
+    // them and files of other types are left out (CONV-13); a dropped
+    // folder used to arrive as one "file" and fail downstream.
+    const resolved = await resolveDroppedPaths(paths, accept)
+    setNotice(dropNotice(resolved, paths.length))
+    if (resolved.files.length > 0) {
+      onFiles(resolved.files, { ctrlKey })
     }
   }
 
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragging(true)
+    if (notice) setNotice(null)
+  }
+
   const handleBrowse = async () => {
+    setNotice(null)
     const extensions = accept?.map(ext => ext.replace('.', ''))
     const paths = await window.api.openFileDialog({
       filters: extensions
@@ -86,13 +107,19 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
     return (
       <div
         className={`relative ${className}`}
-        onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+        onDragOver={handleDragOver}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
+        onClickCapture={() => { if (notice) setNotice(null) }}
       >
         {isDragging && (
           <div className="absolute inset-0 bg-accent-600/20 border-2 border-dashed border-accent-500 rounded-xl z-10 flex items-center justify-center pointer-events-none">
             <div className="text-accent-300 font-medium text-center px-4">{overlayLabel}</div>
+          </div>
+        )}
+        {notice && !isDragging && (
+          <div className="absolute inset-x-0 top-3 z-10 flex justify-center pointer-events-none">
+            <div className="bg-navy-800/90 border border-amber-500/40 text-amber-300 text-xs rounded-lg px-3 py-1.5">{notice}</div>
           </div>
         )}
         {children}
@@ -112,7 +139,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
           }
           ${className}
         `}
-        onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+        onDragOver={handleDragOver}
         onDragLeave={() => setIsDragging(false)}
         onDrop={handleDrop}
         onClick={handleBrowse}
@@ -120,7 +147,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         {isDragging
           ? <Upload size={16} className="text-accent-400" />
           : <Film size={16} className="text-gray-400" />}
-        <p className="text-xs text-gray-400">{label}</p>
+        <p className={`text-xs ${notice ? 'text-amber-300' : 'text-gray-400'}`}>{notice ?? label}</p>
       </div>
     )
   }
@@ -136,7 +163,7 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
         }
         ${className}
       `}
-      onDragOver={e => { e.preventDefault(); setIsDragging(true) }}
+      onDragOver={handleDragOver}
       onDragLeave={() => setIsDragging(false)}
       onDrop={handleDrop}
       onClick={handleBrowse}
@@ -160,6 +187,9 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
           <p className="text-gray-400 text-sm mt-1">
             Supports: {accept.join(', ')}
           </p>
+        )}
+        {notice && (
+          <p className="text-amber-300 text-sm mt-2">{notice}</p>
         )}
       </div>
     </div>

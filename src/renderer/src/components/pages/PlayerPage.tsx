@@ -4558,7 +4558,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
           {/* Video + controls column */}
           <div className="flex flex-col flex-1 overflow-hidden">
             {/* Video */}
-            <FileDropZone onFiles={handleFiles} className="flex-1 relative bg-black min-h-0 group">
+            <FileDropZone onFiles={handleFiles} accept={VIDEO_EXTENSIONS} className="flex-1 relative bg-black min-h-0 group">
               {/* Container observed for crop overlay geometry */}
               <div ref={setVideoContainerEl} className="absolute inset-0 overflow-hidden">
                 {/* Zoom / pan wrapper */}
