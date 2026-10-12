@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { getStore, getStreamsDir, getStreamMode } from './store'
-import { metaKey } from './streams'
+import { streamKeyOfFolder } from '../../shared/streamKey'
 import { checkLocalFiles } from './files'
 import { expectSelfWrite } from '../services/selfWrites'
 
@@ -228,7 +228,7 @@ export function registerThumbnailIPC(): void {
     if (win && !win.isDestroyed()) {
       const streamsDir = getStreamsDir()
       const scoped = getStreamMode() !== 'dump-folder' && streamsDir
-        ? { streamKeys: [metaKey(streamsDir, folderPath)] }
+        ? { streamKeys: [streamKeyOfFolder(streamsDir, folderPath)] }
         : undefined
       win.webContents.send('streams:changed', scoped)
     }

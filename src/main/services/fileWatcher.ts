@@ -8,6 +8,7 @@ import { Transform } from 'stream'
 import { getStreamsDir, getStreamMode } from '../ipc/store'
 import { isInFlightWrite } from './inFlightWrites'
 import { unlinkWithRetry } from './unlinkWithRetry'
+import { isStreamFolderName, streamFolderDate, streamFolderIndex, dateInName, recordingStart } from '../../shared/streamKey'
 
 const PROGRESS_THROTTLE_MS = 250
 
@@ -54,10 +55,9 @@ function findDatedFolderRecursive(streamsDir: string, date: string, maxDepth = 5
       if (!e.isDirectory()) continue
       if (e.name.startsWith('_') || e.name.startsWith('.')) continue
       const full = path.join(dir, e.name)
-      const m = e.name.match(/^(\d{4}-\d{2}-\d{2})(?:-(\d+))?$/)
-      if (m) {
-        if (m[1] === date) {
-          matches.push({ path: full, idx: m[2] ? parseInt(m[2], 10) : 1 })
+      if (isStreamFolderName(e.name)) {
+        if (streamFolderDate(e.name) === date) {
+          matches.push({ path: full, idx: streamFolderIndex(e.name) })
         }
         // Don't recurse into stream folders looking for nested stream folders.
         continue
@@ -102,9 +102,8 @@ function prevIsoDay(date: string): string {
  *  time when the name carries no time — and only trusting that when it
  *  lands on the file's own named date. */
 function startedBeforeCutoff(filePath: string, isoDate: string): boolean {
-  const name = path.basename(filePath)
-  const m = name.match(/\d{4}-\d{2}-\d{2}[ _T-]+(\d{2})[-_.:](\d{2})/)
-  if (m) return parseInt(m[1], 10) < OVERNIGHT_CUTOFF_HOUR
+  const start = recordingStart(path.basename(filePath))
+  if (start) return start.getHours() < OVERNIGHT_CUTOFF_HOUR
   try {
     const bt = fs.statSync(filePath).birthtime
     const pad = (n: number) => String(n).padStart(2, '0')
@@ -409,10 +408,8 @@ class FileWatcher {
 
   private resolveAutoDestination(rule: WatchRule, filePath: string): string | null {
     if (!rule.autoMatchDate) return null
-    const fileName = path.basename(filePath)
-    const match = fileName.match(/(\d{4}-\d{2}-\d{2})/)
-    if (!match) return null
-    const date = match[1]
+    const date = dateInName(path.basename(filePath))
+    if (!date) return null
     if (!this.streamsDir) return null
     // Dump mode: the streams root IS the destination — no per-date folders exist.
     if (this.streamMode === 'dump-folder') return this.streamsDir
@@ -438,14 +435,13 @@ class FileWatcher {
     // Only intercept when destination is exactly the streams root
     if (path.resolve(destination) !== path.resolve(this.streamsDir)) return destination
 
-    const fileName = path.basename(filePath)
-    const match = fileName.match(/(\d{4}-\d{2}-\d{2})/)
-    if (!match) return destination
-    const exact = findDatedFolderRecursive(this.streamsDir, match[1])
+    const date = dateInName(path.basename(filePath))
+    if (!date) return destination
+    const exact = findDatedFolderRecursive(this.streamsDir, date)
     if (exact) return exact
     // Cross-midnight overflow → the previous day's LAST session.
-    if (startedBeforeCutoff(filePath, match[1])) {
-      const prev = findDatedFolderRecursive(this.streamsDir, prevIsoDay(match[1]), 5, 'latest')
+    if (startedBeforeCutoff(filePath, date)) {
+      const prev = findDatedFolderRecursive(this.streamsDir, prevIsoDay(date), 5, 'latest')
       if (prev) return prev
     }
     return destination

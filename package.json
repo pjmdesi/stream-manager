@@ -11,6 +11,7 @@
         "preview": "electron-vite preview",
         "start": "electron .",
         "typecheck": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json",
+        "test": "node --test \"src/shared/**/*.test.ts\"",
         "lint": "eslint .",
         "dist": "tsc --noEmit -p tsconfig.web.json && tsc --noEmit -p tsconfig.node.json && electron-vite build && node scripts/dist.cjs",
         "release:patch": "npm version patch && npm run dist",

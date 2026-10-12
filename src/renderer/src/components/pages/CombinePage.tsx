@@ -15,6 +15,7 @@ import { formatBytes } from '../../lib/formatBytes'
 import { formatTimecode } from '../../lib/formatTimecode'
 import { rowActionClass } from '../ui/rowAction'
 import { VIDEO_EXTENSIONS, isVideoFile } from '../../../../shared/videoExts'
+import { recordingStart } from '../../../../shared/streamKey'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
 import { subscribeHydration } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
@@ -90,12 +91,6 @@ interface PendingFiles {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function parseTimestamp(filename: string): Date | null {
-  const m = filename.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2})-(\d{2})-(\d{2})/)
-  if (!m) return null
-  return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6])
-}
-
 function nameOf(p: string): string {
   return p.split(/[\\/]/).pop() ?? p
 }
@@ -148,7 +143,7 @@ function makeCombineFile(p: string, stream?: CombineFile['stream']): CombineFile
     path: p,
     name,
     duration: null,
-    timestamp: parseTimestamp(name),
+    timestamp: recordingStart(name),
     size: null,
     local: null,
     stream,

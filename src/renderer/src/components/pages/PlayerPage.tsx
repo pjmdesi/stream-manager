@@ -31,16 +31,17 @@ import { renderStreamTitle } from '../../lib/streamTitle'
 import { formatTimecode } from '../../lib/formatTimecode'
 import { injectSdpBandwidth, waitForIceComplete } from '../../lib/webrtc'
 import { VIDEO_EXTENSIONS, isVideoExtension } from '../../../../shared/videoExts'
+import { streamKeyOfFile, dateInName } from '../../../../shared/streamKey'
 import { seriesNavFor, EMPTY_SERIES_NAV, type SeriesNav } from '../../lib/seriesNav'
 import { StreamNavButtons } from '../streams/StreamNavButtons'
 import { resolveTrackName } from '../../lib/trackNames'
 import { TrackNameLabel } from '../ui/TrackNameLabel'
 
 /** Given an absolute file path and the streams root, find the file's stream
- *  folder and the canonical key used in _meta.json:
- *  - In folder-per-stream mode (any depth): walks up from the file's parent
- *    to the first date-named ancestor; key = relative path from streamsRoot.
- *  - In dump mode (no date-named ancestor): key = the date in the filename.
+ *  folder and the canonical key used in _meta.json (shared/streamKey):
+ *  - In folder-per-stream mode (any depth): the first stream-folder-named
+ *    directory under the root above the file; key = its relative path.
+ *  - In dump mode (no such ancestor): key = the date in the filename.
  *  Falls back to bare basename if everything else fails. */
 function resolveStreamContext(filePath: string, streamsRoot: string | undefined): {
   dir: string         // stream folder path (or file's parent in dump mode)
@@ -49,41 +50,28 @@ function resolveStreamContext(filePath: string, streamsRoot: string | undefined)
   isDump: boolean     // true when dir is the streams root (no date-named ancestor)
   date: string | null // date in dump mode, used to scope sibling listing
 } {
-  const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}(-\d+)?$/
   const streamsDir = (streamsRoot || '').replace(/[\\/]+$/, '')
-  const fpNorm = filePath.replace(/\\/g, '/')
-  const rootNorm = streamsDir.replace(/\\/g, '/')
-  let dirNorm = fpNorm.slice(0, fpNorm.lastIndexOf('/'))
-  // Walk up looking for a date-named ancestor (folder-per-stream layouts).
-  while (
-    rootNorm &&
-    dirNorm.length > rootNorm.length &&
-    !DATE_FOLDER_RE.test(dirNorm.slice(dirNorm.lastIndexOf('/') + 1))
-  ) {
-    dirNorm = dirNorm.slice(0, dirNorm.lastIndexOf('/'))
-  }
-  const ancestorName = dirNorm.slice(dirNorm.lastIndexOf('/') + 1)
-  if (DATE_FOLDER_RE.test(ancestorName) && rootNorm && dirNorm.startsWith(rootNorm + '/')) {
+  const key = streamsDir ? streamKeyOfFile(streamsDir, filePath) : null
+  if (key !== null) {
     return {
-      dir: dirNorm.replace(/\//g, '\\'),
-      metaKey: dirNorm.slice(rootNorm.length + 1),
+      dir: `${streamsDir}/${key}`.replace(/\//g, '\\'),
+      metaKey: key,
       streamsDir,
       isDump: false,
       date: null,
     }
   }
   // Dump mode (or no date-named ancestor) — derive the key from the filename.
-  const fileName = fpNorm.slice(fpNorm.lastIndexOf('/') + 1)
-  const m = fileName.match(/(\d{4}-\d{2}-\d{2})/)
-  const dateKey = m ? m[1] : fileName.split('.')[0]
+  const fileName = filePath.split(/[\\/]/).pop() ?? filePath
+  const date = dateInName(fileName)
   // dir for dump mode = the file's actual parent (the dump dir itself).
   const parentDir = filePath.slice(0, Math.max(filePath.lastIndexOf('\\'), filePath.lastIndexOf('/')))
   return {
     dir: parentDir,
-    metaKey: dateKey,
+    metaKey: date ?? fileName.split('.')[0],
     streamsDir,
     isDump: true,
-    date: m ? m[1] : null,
+    date,
   }
 }
 

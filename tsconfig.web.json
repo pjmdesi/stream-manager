@@ -1,5 +1,6 @@
 {
   "include": ["src/renderer/src/**/*", "src/shared/**/*"],
+  "exclude": ["src/shared/**/*.test.ts"],
   "compilerOptions": {
     "composite": true,
     "module": "ESNext",

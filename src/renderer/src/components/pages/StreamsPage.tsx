@@ -43,6 +43,7 @@ import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
+import { streamFolderIndex } from '../../../../shared/streamKey'
 import { rowActionClass } from '../ui/rowAction'
 import { localDateString, localTimeString, localDateFromIso } from '../../lib/localDate'
 import { ThumbImage, friendlyDate } from '../streams/ThumbImage'
@@ -2558,11 +2559,7 @@ export function StreamsPage({
       if (!changed) return prev
       // Same ordering as main's streams:list: date desc, same-day by
       // -N suffix desc.
-      const idxOf = (name: string) => {
-        const m = name.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
-        return m ? parseInt(m[1], 10) : 1
-      }
-      next.sort((a, b) => b.date.localeCompare(a.date) || idxOf(b.folderName) - idxOf(a.folderName))
+      next.sort((a, b) => b.date.localeCompare(a.date) || streamFolderIndex(b.folderName) - streamFolderIndex(a.folderName))
       return next
     })
     if (opts.bumpThumbs) {
@@ -11120,6 +11117,14 @@ function NewStreamModal({
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const dateExists = existingDates.includes(date)
+  // Folder mode takes any number of streams per day (main suffixes the
+  // folder: 2026-10-15-2); the notice is for the user, who may have
+  // created this one already or picked the wrong day. Dump mode keys
+  // streams by date, so a second one there would overwrite the first.
+  const sameDayBlocked = dateExists && streamMode === 'dump-folder'
+  const sameDayFolderName = dateExists && !sameDayBlocked
+    ? `${date}-${Math.max(1, ...(folders ?? []).filter(f => f.date === date).map(f => streamFolderIndex(f.folderName))) + 1}`
+    : null
   // Stream dots for the DatePicker popup, grouped by date from folders.
   const dateMarks = useMemo(() => buildDateMarks(folders), [folders])
 
@@ -11270,7 +11275,7 @@ function NewStreamModal({
       footer={
         <>
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancel</Button>
-          <Button variant="primary" size="sm" loading={busy} disabled={!date || dateExists} onClick={create}>
+          <Button variant="primary" size="sm" loading={busy} disabled={!date || sameDayBlocked} onClick={create}>
             Create
           </Button>
         </>
@@ -11300,7 +11305,9 @@ function NewStreamModal({
         {dateExists && (
           <p className="text-xs text-amber-400 flex items-start gap-1.5">
             <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-            A stream already exists for {date}. Open that one instead, or pick a different date.
+            {sameDayBlocked
+              ? <>A stream already exists for {date}. A dump folder holds one stream per date: open that one instead, or pick a different date.</>
+              : <>A stream already exists for {date}. Check that it is not the one you meant; this one will be created alongside it as <span className="font-mono text-amber-300">{sameDayFolderName}</span>.</>}
           </p>
         )}
         {error && (

@@ -12,6 +12,7 @@ import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '.
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { broadcast } from '../services/broadcast'
 import { isVideoExtension } from '../../shared/videoExts'
+import { DATE_IN_NAME_RE, isStreamFolderName, streamFolderDate, streamFolderIndex, relativeKey, streamKeyOfFolder, streamKeyOfFile } from '../../shared/streamKey'
 import { consumeSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
@@ -133,21 +134,13 @@ export interface StreamFolder {
   isMissing?: boolean
 }
 
-const DATE_FOLDER_RE = /^\d{4}-\d{2}-\d{2}(-\d+)?$/
-const DATE_IN_FILENAME_RE = /(\d{4}-\d{2}-\d{2})/
+// The folder-name convention and the stream keys live in shared/streamKey
+// (APP-48): isStreamFolderName, streamFolderDate, streamFolderIndex,
+// DATE_IN_NAME_RE, relativeKey (videoMap keys), streamKeyOfFolder (the
+// _meta.json key) and streamKeyOfFile (which stream owns a path).
 const META_FILENAME = '_meta.json'
 const OLD_META_FILENAME = 'stream-meta.json'
 const IMAGE_EXTS = new Set(['.jpg', '.jpeg', '.png', '.webp', '.gif'])
-/** Returns the YYYY-MM-DD portion of a folder name, stripping any -N suffix. */
-function calendarDate(folderName: string): string {
-  return folderName.slice(0, 10)
-}
-
-/** Returns the stream index: 1 for the base folder (no suffix), 2+ for -2, -3, etc. */
-function streamIndex(folderName: string): number {
-  const m = folderName.match(/^\d{4}-\d{2}-\d{2}-(\d+)$/)
-  return m ? parseInt(m[1], 10) : 1
-}
 
 /**
  * Returns the next available folder name for a given calendar date.
@@ -157,11 +150,11 @@ function nextFolderName(parentDir: string, calDate: string): string {
   let siblings: string[] = []
   try {
     siblings = fs.readdirSync(parentDir, { withFileTypes: true })
-      .filter(e => e.isDirectory() && calendarDate(e.name) === calDate && DATE_FOLDER_RE.test(e.name))
+      .filter(e => e.isDirectory() && streamFolderDate(e.name) === calDate && isStreamFolderName(e.name))
       .map(e => e.name)
   } catch {}
   if (siblings.length === 0) return calDate
-  const maxIdx = Math.max(...siblings.map(streamIndex))
+  const maxIdx = Math.max(...siblings.map(streamFolderIndex))
   return `${calDate}-${maxIdx + 1}`
 }
 
@@ -275,7 +268,7 @@ function findStreamFolders(streamsDir: string, maxDepth = 5): string[] {
       if (!e.isDirectory()) continue
       if (e.name.startsWith('_') || e.name.startsWith('.')) continue
       const full = path.join(dir, e.name)
-      if (DATE_FOLDER_RE.test(e.name)) {
+      if (isStreamFolderName(e.name)) {
         out.push(full)
         // Don't recurse into a stream folder — its contents (including any
         // nested clips/recordings/exports/thumbnails) are gathered separately
@@ -287,14 +280,6 @@ function findStreamFolders(streamsDir: string, maxDepth = 5): string[] {
   }
   walk(streamsDir, 0)
   return out
-}
-
-/** Path of `videoPath` relative to its stream folder, forward-slash normalized.
- *  Used as the canonical videoMap key so sub-folder files (e.g. clips/x.mp4)
- *  don't collide with top-level files of the same name. */
-function videoRelKey(folderPath: string, videoPath: string): string {
-  const rel = path.relative(folderPath, videoPath)
-  return rel.split(path.sep).join('/')
 }
 
 /** Detect game names from MKV filenames anywhere inside a stream folder
@@ -348,41 +333,6 @@ function isMeaningfulMeta(m: StreamMeta | null | undefined): boolean {
   if ((m as { smThumbnail?: boolean }).smThumbnail) return true
   if ((m as { smThumbnailTemplate?: string }).smThumbnailTemplate) return true
   return false
-}
-
-/** Canonical _meta.json key for a stream folder: forward-slash relative path
- *  from the streams root. Falls back to the basename if the path isn't actually
- *  inside streamsDir (defensive). Exported for the other write sites
- *  (thumbnail saves) that emit stream-scoped `streams:changed` events. */
-export function metaKey(streamsDir: string, folderPath: string): string {
-  const rel = path.relative(streamsDir, folderPath)
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) {
-    return path.basename(folderPath)
-  }
-  return rel.split(path.sep).join('/')
-}
-
-/** Resolve a changed filesystem path to the stream folder that owns it —
- *  the key of the FIRST date-named directory level under the streams root,
- *  matching findStreamFolders' stop-at-first-date-match walk. Returns null
- *  when the path isn't inside any stream folder (root-level files, the
- *  stream folder itself, template/asset dirs) — callers treat that as a
- *  structural change and fall back to a full reload. Folder-per-stream
- *  mode only; dump mode always full-scans. */
-export function streamKeyForPath(streamsDir: string, p: string): string | null {
-  const rel = path.relative(path.resolve(streamsDir), path.resolve(p))
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null
-  const segs = rel.split(path.sep)
-  // The matched segment must not be the final one: the event path has to
-  // live INSIDE the stream folder. An event for the date-named entry
-  // itself is a create/delete of the whole stream (structural), and a
-  // date-patterned FILE at the root must not masquerade as a folder key.
-  const parts: string[] = []
-  for (let i = 0; i < segs.length - 1; i++) {
-    parts.push(segs[i])
-    if (DATE_FOLDER_RE.test(segs[i])) return parts.join('/')
-  }
-  return null
 }
 
 /** Resolve the streams root from app config — used by IPC handlers that only
@@ -696,7 +646,7 @@ export function getProtectedPaths(streamsDir: string): Set<string> {
     const groups = new Map<string, string[]>()
     for (const entry of entries) {
       if (entry.isDirectory()) continue
-      const m = entry.name.match(DATE_IN_FILENAME_RE)
+      const m = entry.name.match(DATE_IN_NAME_RE)
       if (!m) continue
       const ext = path.extname(entry.name).toLowerCase()
       if (!IMAGE_EXTS.has(ext)) continue
@@ -716,7 +666,7 @@ export function getProtectedPaths(streamsDir: string): Set<string> {
     }
   } else {
     for (const folderPath of findStreamFolders(streamsDir)) {
-      const key = metaKey(streamsDir, folderPath)
+      const key = streamKeyOfFolder(streamsDir, folderPath)
       const sorted = detectThumbnails(folderPath)
       const chosen = pickDisplayed(sorted, allMeta[key]?.preferredThumbnail)
       if (chosen) protectedSet.add(chosen)
@@ -740,7 +690,7 @@ function migrateMeta(streamsDir: string): void {
   const allMeta: Record<string, StreamMeta> = {}
   try {
     for (const entry of fs.readdirSync(streamsDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || !DATE_FOLDER_RE.test(entry.name)) continue
+      if (!entry.isDirectory() || !isStreamFolderName(entry.name)) continue
       const oldFile = path.join(streamsDir, entry.name, OLD_META_FILENAME)
       try {
         allMeta[entry.name] = JSON.parse(fs.readFileSync(oldFile, 'utf-8'))
@@ -808,7 +758,7 @@ async function refreshVideoMaps(
       allPaths.push(v)
       pathKey.set(v, key)
       pathDate.set(v, date)
-      pathRelKey.set(v, videoRelKey(folderPath, v))
+      pathRelKey.set(v, relativeKey(folderPath, v))
     }
   }
   if (allPaths.length === 0) return new Set()
@@ -941,7 +891,7 @@ function pruneStaleVideoMapEntries(
   for (const { key, folderPath, videos } of entries) {
     const map = allMeta[key]?.videoMap
     if (!map) continue
-    const currentNames = new Set(videos.map(v => videoRelKey(folderPath, v)))
+    const currentNames = new Set(videos.map(v => relativeKey(folderPath, v)))
     for (const name of Object.keys(map)) {
       if (!currentNames.has(name)) {
         delete map[name]
@@ -970,7 +920,7 @@ function buildStreamFolder(folderPath: string, relativePath: string, allMeta: Re
     folderName,
     folderPath,
     relativePath,
-    date: calendarDate(folderName),
+    date: streamFolderDate(folderName),
     meta,
     hasMeta: isMeaningfulMeta(meta),
     detectedGames: [],
@@ -1014,7 +964,7 @@ export function registerStreamsIPC(): void {
       const groups = new Map<string, { videos: string[]; thumbnails: string[] }>()
       for (const entry of entries) {
         if (entry.isDirectory()) continue
-        const match = entry.name.match(DATE_IN_FILENAME_RE)
+        const match = entry.name.match(DATE_IN_NAME_RE)
         if (!match) continue
         const date = match[1]
         if (!groups.has(date)) groups.set(date, { videos: [], thumbnails: [] })
@@ -1087,7 +1037,7 @@ export function registerStreamsIPC(): void {
       const seenKeys = new Set<string>()
 
       for (const folderPath of streamFolderPaths) {
-        const relativePath = metaKey(dir, folderPath)
+        const relativePath = streamKeyOfFolder(dir, folderPath)
         seenKeys.add(relativePath)
         folders.push(buildStreamFolder(folderPath, relativePath, allMeta))
       }
@@ -1101,13 +1051,13 @@ export function registerStreamsIPC(): void {
         // user-meaningful, and shouldn't surface as orphans on missing folders.
         if (!isMeaningfulMeta(meta)) continue
         const folderName = key.includes('/') ? key.slice(key.lastIndexOf('/') + 1) : key
-        if (!DATE_FOLDER_RE.test(folderName)) continue
+        if (!isStreamFolderName(folderName)) continue
         const folderPath = path.join(dir, ...key.split('/'))
         folders.push({
           folderName,
           folderPath,
           relativePath: key,
-          date: calendarDate(folderName),
+          date: streamFolderDate(folderName),
           meta,
           hasMeta: true,
           detectedGames: [],
@@ -1123,7 +1073,7 @@ export function registerStreamsIPC(): void {
     folders.sort((a, b) => {
       const dateCmp = b.date.localeCompare(a.date)
       if (dateCmp !== 0) return dateCmp
-      return streamIndex(b.folderName) - streamIndex(a.folderName)
+      return streamFolderIndex(b.folderName) - streamFolderIndex(a.folderName)
     })
 
     // Attach the cached _meta.json entry to each folder so the response carries
@@ -1206,7 +1156,7 @@ export function registerStreamsIPC(): void {
     const videoSetChanged = videoEntries.some(({ key, folderPath, videos }) => {
       const cached = allMeta[key]?.videoMap
       if (!cached) return videos.length > 0
-      const currentNames = videos.map(v => videoRelKey(folderPath, v))
+      const currentNames = videos.map(v => relativeKey(folderPath, v))
       const cachedNames = new Set(Object.keys(cached))
       if (cachedNames.size !== currentNames.length) return true
       for (const name of currentNames) if (!cachedNames.has(name)) return true
@@ -1299,12 +1249,12 @@ export function registerStreamsIPC(): void {
       const meta = allMeta[streamKey]
       if (!meta || !isMeaningfulMeta(meta)) return null
       const folderName = streamKey.includes('/') ? streamKey.slice(streamKey.lastIndexOf('/') + 1) : streamKey
-      if (!DATE_FOLDER_RE.test(folderName)) return null
+      if (!isStreamFolderName(folderName)) return null
       return {
         folderName,
         folderPath,
         relativePath: streamKey,
-        date: calendarDate(folderName),
+        date: streamFolderDate(folderName),
         meta,
         hasMeta: true,
         detectedGames: [],
@@ -1345,7 +1295,7 @@ export function registerStreamsIPC(): void {
         catch (err) { console.error('[streams:listOne] prune write failed:', err) }
       }
       const cached = allMeta[entry.key]?.videoMap
-      const currentNames = entry.videos.map(v => videoRelKey(entry.folderPath, v))
+      const currentNames = entry.videos.map(v => relativeKey(entry.folderPath, v))
       const videoSetChanged = !cached
         ? entry.videos.length > 0
         : (() => {
@@ -1410,7 +1360,7 @@ export function registerStreamsIPC(): void {
 
   ipcMain.handle('streams:writeMeta', async (_event, folderPath: string, meta: StreamMeta, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     // Preserve tracking fields the metadata UIs don't own — videoMap
     // (holds clipOf parent↔clip relationships), clipDrafts (in-progress
@@ -1436,7 +1386,7 @@ export function registerStreamsIPC(): void {
   // concurrently from other UI paths.
   ipcMain.handle('streams:updateMeta', async (_event, folderPath: string, partial: Partial<StreamMeta>, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     const existing = allMeta[key] ?? ({} as StreamMeta)
     allMeta[key] = { ...existing, ...partial }
@@ -1471,7 +1421,7 @@ export function registerStreamsIPC(): void {
       const groups = new Map<string, string[]>()
       for (const entry of fs.readdirSync(streamsDir, { withFileTypes: true })) {
         if (entry.isDirectory()) continue
-        const match = entry.name.match(DATE_IN_FILENAME_RE)
+        const match = entry.name.match(DATE_IN_NAME_RE)
         if (!match) continue
         if (!IMAGE_EXTS.has(path.extname(entry.name).toLowerCase())) continue
         const arr = groups.get(match[1]) ?? []
@@ -1489,7 +1439,7 @@ export function registerStreamsIPC(): void {
       }
     } else {
       for (const folderPath of findStreamFolders(streamsDir)) {
-        const key = metaKey(streamsDir, folderPath)
+        const key = streamKeyOfFolder(streamsDir, folderPath)
         const thumbs = detectThumbnails(folderPath)
         promotePreferred(thumbs, allMeta[key]?.preferredThumbnail)
         if (thumbs[0]) thumbByKey.set(key, thumbs[0])
@@ -1532,7 +1482,7 @@ export function registerStreamsIPC(): void {
 
   ipcMain.handle('clipDraft:save', async (_event, folderPath: string, draft: ClipDraft, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     const existing = allMeta[key] ?? ({} as StreamMeta)
     const drafts = { ...(existing.clipDrafts ?? {}), [draft.id]: draft }
@@ -1543,7 +1493,7 @@ export function registerStreamsIPC(): void {
 
   ipcMain.handle('clipDraft:delete', async (_event, folderPath: string, draftId: string, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     const existing = allMeta[key]
     if (!existing?.clipDrafts?.[draftId]) return
@@ -1563,7 +1513,7 @@ export function registerStreamsIPC(): void {
   // so no streams:changed announcement is needed.
   ipcMain.handle('videoMarkers:save', async (_event, folderPath: string, videoKey: string, markers: VideoMarker[], metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     const existing = allMeta[key] ?? ({} as StreamMeta)
     const all = { ...(existing.videoMarkers ?? {}) }
@@ -1599,7 +1549,7 @@ export function registerStreamsIPC(): void {
     }))
     if (verdicts.length === 0) return []
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     try {
       const allMeta = readAllMeta(streamsDir)
       const existing = allMeta[key]
@@ -1607,7 +1557,7 @@ export function registerStreamsIPC(): void {
         const videoMap = { ...existing.videoMap }
         let touched = false
         for (const v of verdicts) {
-          const relKey = videoRelKey(folderPath, v.path)
+          const relKey = relativeKey(folderPath, v.path)
           const entry = videoMap[relKey]
           if (entry && entry.archived !== v.archived) { videoMap[relKey] = { ...entry, archived: v.archived }; touched = true }
         }
@@ -1635,7 +1585,7 @@ export function registerStreamsIPC(): void {
   // keeps concurrent edits (e.g. refreshVideoMaps) safe.
   ipcMain.handle('clip:tagExport', async (_event, folderPath: string, outputFilename: string, sourceName: string, clipState: unknown, draftId?: string | null, metaKeyOverride?: string) => {
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKeyOverride || metaKey(streamsDir, folderPath)
+    const key = metaKeyOverride || streamKeyOfFolder(streamsDir, folderPath)
     const allMeta = readAllMeta(streamsDir)
     const existing = allMeta[key] ?? ({} as StreamMeta)
     const videoMap = { ...(existing.videoMap ?? {}) }
@@ -1716,8 +1666,8 @@ export function registerStreamsIPC(): void {
         .sort((a, b) => path.basename(b).localeCompare(path.basename(a)))
         .slice(0, 5)
         .map(fp => ({
-          date: calendarDate(path.basename(fp)),
-          relativePath: metaKey(dir, fp),
+          date: streamFolderDate(path.basename(fp)),
+          relativePath: streamKeyOfFolder(dir, fp),
           games: detectGamesFromFolderRecursive(fp),
         }))
       return {
@@ -1736,7 +1686,7 @@ export function registerStreamsIPC(): void {
     try {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
         if (e.isDirectory()) continue
-        const m = e.name.match(DATE_IN_FILENAME_RE)
+        const m = e.name.match(DATE_IN_NAME_RE)
         if (!m) continue
         const date = m[1]
         if (!groups.has(date)) groups.set(date, { videos: [], thumbnails: [] })
@@ -1898,7 +1848,7 @@ export function registerStreamsIPC(): void {
       for (const entry of entries) {
         if (entry.isDirectory()) continue
         if (entry.name.startsWith('.') || entry.name.startsWith('_')) continue
-        const match = entry.name.match(DATE_IN_FILENAME_RE)
+        const match = entry.name.match(DATE_IN_NAME_RE)
         if (!match) continue
         const full = path.join(dir, entry.name)
         if (isInFlightWrite(full)) continue
@@ -1906,7 +1856,7 @@ export function registerStreamsIPC(): void {
       }
     } else {
       for (const folderPath of findStreamFolders(dir)) {
-        const key = metaKey(dir, folderPath)
+        const key = streamKeyOfFolder(dir, folderPath)
         const walk = async (d: string, depth: number) => {
           if (depth > 4) return
           let entries: fs.Dirent[] = []
@@ -1940,7 +1890,7 @@ export function registerStreamsIPC(): void {
       const ext = path.extname(f.path).toLowerCase()
       let slot: 'videos' | 'clips' | 'images' | 'other'
       if (isVideoExtension(ext)) {
-        const known = allMeta[f.key]?.videoMap?.[videoRelKey(f.folderPath, f.path)]?.category
+        const known = allMeta[f.key]?.videoMap?.[relativeKey(f.folderPath, f.path)]?.category
         const category = known ?? classifyVideo(undefined, undefined, size, false)
         slot = (category === 'clip' || category === 'short') ? 'clips' : 'videos'
       } else if (IMAGE_EXTS.has(ext)) {
@@ -2010,8 +1960,8 @@ export function registerStreamsIPC(): void {
         out.push({
           fromAbs: full,
           toAbs,
-          fromRelKey: videoRelKey(folderPath, full),
-          toRelKey: videoRelKey(folderPath, toAbs),
+          fromRelKey: relativeKey(folderPath, full),
+          toRelKey: relativeKey(folderPath, toAbs),
         })
       }
     }
@@ -2105,8 +2055,8 @@ export function registerStreamsIPC(): void {
     const oldName = path.basename(folderPath)
     const newName = isDump ? oldName : nextFolderName(path.dirname(folderPath), newDate)
     const newFolderPathPlanned = isDump ? folderPath : path.join(path.dirname(folderPath), newName)
-    const oldKey = isDump ? oldDate : metaKey(streamsDir, folderPath)
-    const newKey = isDump ? newDate : metaKey(streamsDir, newFolderPathPlanned)
+    const oldKey = isDump ? oldDate : streamKeyOfFolder(streamsDir, folderPath)
+    const newKey = isDump ? newDate : streamKeyOfFolder(streamsDir, newFolderPathPlanned)
     const needsFolderRename = !isDump && oldName !== newName
     let finalFolderPath = folderPath
     if (needsFolderRename) {
@@ -2190,7 +2140,7 @@ export function registerStreamsIPC(): void {
     // pull the canonical streams root from config so the meta key + write target
     // resolve correctly.
     const streamsDir = getStreamsDir() || path.dirname(folderPath)
-    const key = metaKey(streamsDir, folderPath)
+    const key = streamKeyOfFolder(streamsDir, folderPath)
 
     // Pause our watcher first: an open ReadDirectoryChangesW handle under
     // the root has made shell.trashItem fail on Windows (IFileOperation
@@ -2223,7 +2173,6 @@ export function registerStreamsIPC(): void {
   }
 
   ipcMain.handle('streams:convertDumpFolder', async (_event, dirPath: string): Promise<ConvertResult> => {
-    const dateRegex = /(\d{4}-\d{2}-\d{2})/
     let skipped = 0
 
     const entries = fs.readdirSync(dirPath, { withFileTypes: true })
@@ -2232,7 +2181,7 @@ export function registerStreamsIPC(): void {
     const groups = new Map<string, string[]>()
     for (const entry of entries) {
       if (entry.isDirectory()) continue
-      const match = entry.name.match(dateRegex)
+      const match = entry.name.match(DATE_IN_NAME_RE)
       if (!match) { skipped++; continue }
       const date = match[1]
       if (!groups.has(date)) groups.set(date, [])
@@ -2371,7 +2320,7 @@ export function registerStreamsIPC(): void {
       // announced via expectSelfWrite) are dropped outright.
       onFile: (p) => {
         if (consumeSelfWrite(p)) return
-        notifyChange(win, isDump ? null : streamKeyForPath(dir, p))
+        notifyChange(win, isDump ? null : streamKeyOfFile(dir, p))
       },
       // Directory events are structural (a date-named dir appearing or
       // vanishing is a stream create/delete/reschedule): full reload.
@@ -2381,7 +2330,7 @@ export function registerStreamsIPC(): void {
         // phantom "2024-06-18" reappearance. The mkdir monkey-patch in
         // main/index catches what the app does; this catches anything else
         // (cloud sync, manual creation). Remove once root cause is found.
-        if (DATE_FOLDER_RE.test(path.basename(p))) {
+        if (isStreamFolderName(path.basename(p))) {
           console.warn(`[streams-watcher ${kind}] ${new Date().toISOString()} ${p}`)
         }
         notifyChange(win, null)

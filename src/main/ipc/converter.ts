@@ -4,7 +4,8 @@ import path from 'path'
 import os from 'os'
 import { v4 as uuidv4 } from 'uuid'
 import { getStore, getConfig, getStreamsDir, getStreamMode } from './store'
-import { readAllMeta, writeAllMeta, streamKeyForPath } from './streams'
+import { readAllMeta, writeAllMeta } from './streams'
+import { streamKeyOfFile } from '../../shared/streamKey'
 import { HYDRATE_CONCURRENCY } from '../services/cfapi'
 import { registerInFlightWritePredicate } from '../services/inFlightWrites'
 import { expectSelfWrite } from '../services/selfWrites'
@@ -1263,7 +1264,7 @@ function notifyStreamOutput(finalPath: string): void {
   const rel = path.relative(path.resolve(dir), path.resolve(finalPath))
   if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return
   expectSelfWrite(finalPath)
-  const key = getStreamMode() !== 'dump-folder' ? streamKeyForPath(dir, finalPath) : null
+  const key = getStreamMode() !== 'dump-folder' ? streamKeyOfFile(dir, finalPath) : null
   broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
 }
 
@@ -1881,7 +1882,7 @@ export function registerConverterIPC(): void {
       const notifyStreamsChanged = () => {
         const streamsDir = getStreamsDir()
         const key = streamsDir && getStreamMode() !== 'dump-folder' && j.outputFile
-          ? streamKeyForPath(streamsDir, j.outputFile)
+          ? streamKeyOfFile(streamsDir, j.outputFile)
           : null
         broadcast('streams:changed', key ? { streamKeys: [key] } : undefined)
       }
