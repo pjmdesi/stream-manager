@@ -1370,7 +1370,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           <Button variant="secondary" size="sm" onClick={() => setCancelAllDialog(false)}>
             Keep converting
           </Button>
-          <Button variant="danger" size="sm" icon={<Ban size={13} />} onClick={cancelAllJobs}>
+          <Button variant="danger" size="sm" onClick={cancelAllJobs}>
             Cancel all
           </Button>
         </div>

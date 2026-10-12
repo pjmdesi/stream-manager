@@ -142,6 +142,7 @@ The other checkbox. Used when the toggle OWNS an adjacent field or push behavior
 - Props: `isOpen`, `onClose`, `title` (header text, **not** a tooltip), `width` (`sm`→`2xl`, maps to `max-w-sm`…`max-w-4xl`), `footer`, `dismissible`, `headerExtra`, `autoFocus` (`default`/`initial-only`/`none`), `noOverlay`.
 - Panel: `bg-navy-700`, `rounded-xl`, header/scroll-body/footer; footer is right-aligned actions.
 - **Button order (rule):** the user's **most-likely-next action sits on the RIGHT**, in the primary slot, even when that action is just *Close* after a completed operation (a finished flow's Close outranks a rarely-used Undo/retry). Lower-likelihood actions sit to its left; Cancel/dismiss ghosts leftmost. Canonical instance: the convert-to-folder-per-stream modal's done step (`Undo conversion` left, `Close` right + primary).
+- **Confirmation modals are text only (2026-10-12):** the action buttons of a confirm dialog (quit, delete rule, delete draft, cancel all) carry no icons; an icon on the confirm button reads as clutter. Icons stay on page-level action buttons (Stop watcher, Close session, row Remove).
 - **Overlay starts at `top-10`** (frameless titlebar rule below), backdrop `bg-black/60 backdrop-blur-sm`.
 - Autofocus: focuses first input, else the rightmost action button (by `data-variant`); `default` also refocuses a primary action when it flips enabled. Use `none` for edit forms, `initial-only` for long forms.
 
