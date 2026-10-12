@@ -10619,7 +10619,7 @@ function RescheduleModal({
             && preview.folderRename && preview.folderRename.to !== newDate && (
             <p className="text-xs text-amber-400 flex items-start gap-1.5">
               <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-              A stream already exists for {newDate}. This stream will be placed alongside it as <span className="font-mono text-amber-300">{preview.folderRename.to}</span>.
+              <span>A stream already exists for {newDate}. This stream will be placed alongside it as <span className="font-mono text-amber-300 whitespace-nowrap">{preview.folderRename.to}</span>.</span>
             </p>
           )}
 
@@ -11305,9 +11305,13 @@ function NewStreamModal({
         {dateExists && (
           <p className="text-xs text-amber-400 flex items-start gap-1.5">
             <AlertTriangle size={11} className="shrink-0 mt-0.5" />
-            {sameDayBlocked
-              ? <>A stream already exists for {date}. A dump folder holds one stream per date: open that one instead, or pick a different date.</>
-              : <>A stream already exists for {date}. Check that it is not the one you meant; this one will be created alongside it as <span className="font-mono text-amber-300">{sameDayFolderName}</span>.</>}
+            {/* One text child after the icon: separate text nodes and the
+                folder-name span would each become a flex item. */}
+            <span>
+              {sameDayBlocked
+                ? <>A stream already exists for {date}. A dump folder holds one stream per date: open that one instead, or pick a different date.</>
+                : <>A stream already exists for {date}. Check that it is not the one you meant; this one will be created alongside it as <span className="font-mono text-amber-300 whitespace-nowrap">{sameDayFolderName}</span>.</>}
+            </span>
           </p>
         )}
         {error && (
