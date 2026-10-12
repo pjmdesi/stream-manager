@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import { Upload, Film } from 'lucide-react'
 import { Tooltip } from './Tooltip'
 import { resolveDroppedPaths, dropNotice } from '../../lib/droppedPaths'
@@ -6,6 +6,8 @@ import { resolveDroppedPaths, dropNotice } from '../../lib/droppedPaths'
 /** How many accepted extensions the empty state names before "and N more";
  *  the full list is the line's tooltip. The video list is 21 long. */
 const SUPPORTS_SHOWN = 7
+/** How long a skip notice stays before the zone's own text returns. */
+const NOTICE_MS = 10_000
 
 interface FileDropZoneProps {
   /** `opts.ctrlKey` reflects the modifier held at DROP time (false for
@@ -43,10 +45,16 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
 }) => {
   const [isDragging, setIsDragging] = useState(false)
   // What the last drop left out (files of other types, folders with
-  // nothing usable). Shown in the zone until the next drag, drop, browse
-  // or click, so the user who dropped the wrong thing sees why nothing
-  // happened, without a timer or a toast.
+  // nothing usable). Shown in the zone so the user who dropped the wrong
+  // thing sees why nothing happened; it clears on the next drag, drop,
+  // browse or click, or on its own after NOTICE_MS (left alone it read as
+  // the zone's permanent text).
   const [notice, setNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (!notice) return
+    const t = setTimeout(() => setNotice(null), NOTICE_MS)
+    return () => clearTimeout(t)
+  }, [notice])
   const inputRef = useRef<HTMLInputElement>(null)
 
   const handleDrop = async (e: React.DragEvent) => {
@@ -99,7 +107,12 @@ export const FileDropZone: React.FC<FileDropZoneProps> = ({
       ...(browseStartIn === 'downloads' ? { startIn: 'downloads' as const } : browseStartIn ? { defaultPath: browseStartIn } : {}),
     })
     if (paths && paths.length > 0) {
-      onFiles(paths)
+      // The dialog filters by type, but a typed name or "*" in the file
+      // name box gets past the filter on Windows, so a pick is checked
+      // the same way a drop is.
+      const resolved = await resolveDroppedPaths(paths, accept)
+      setNotice(dropNotice(resolved, paths.length))
+      if (resolved.files.length > 0) onFiles(resolved.files)
     }
   }
 

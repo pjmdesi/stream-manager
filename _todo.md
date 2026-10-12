@@ -62,6 +62,7 @@
 32. APP-34
 33. APP-35
 34. SYNC-7
+35. STR-44
 
 ## Improvement ideas
 
@@ -218,6 +219,9 @@
 
 - **STR-43** [ui] [impact:3] [blocked:STR-42]
   Linked Video dropdown as a hybrid text field: typing filters the list to matching videos as the tag fields do, with the recommended entry and the pinned "Show linked" button keeping their places. Comes after STR-39 and STR-42, which settle the menu's contents. Filed 2026-10-12.
+
+- **STR-44** [ui] [impact:3]
+  Files grid import feedback. While a drop or browse import (move or copy into the stream folder) runs, the grid's drop zone shows only a spinner and "Adding files…", and opening another stream item shows the same busy state although the transfer belongs to the first one: the busy flag is one per grid, not per folder or per transfer. A spinner is also too little for a multi-GB video; files appear only as they land. Proposal: show the incoming file cards at once in a disabled state, enable each one as its copy or move completes, and give each card a progress bar like the converter rows (the import IPC would report per-file progress). Filed 2026-10-12.
 
 ### Player
 
