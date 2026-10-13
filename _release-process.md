@@ -17,6 +17,10 @@ Three build types (terms + indicators pinned in [`~style_guide.md`](~style_guide
 
 Both packaged build types go through `scripts/dist.cjs`, which does one thing worth knowing about besides the dev markers: it patches electron-builder's portable launcher template in place (`node_modules/app-builder-lib/templates/nsis/portable.nsi`) before every build, injecting a running-instance pre-check (APP-32, 2026-09-08). electron-builder ignores custom scripts for the portable target, so this is the only hook. It is idempotent (marker comments, re-injected fresh each build), CI gets it because `npm ci` restores the pristine template and the script re-patches it, and a local `node_modules` simply stays patched between builds. If an app-builder-lib bump reshapes the template, the build FAILS with a pointer to the function to update; that is deliberate, do not paper over it. After any electron-builder bump, run the checklist's second-launch and launcher-fallthrough items.
 
+## The ffmpeg binary
+
+On Windows the shipped ffmpeg is gyan.dev's FULL build, not the "essentials" build that the `ffmpeg-static` package downloads (v2.7.0 shipped essentials, which has no SVT-AV1, so the Archive (AV1) preset could not run as written; hotfix 2.7.1). `scripts/fetch-ffmpeg.cjs` runs from `postinstall`: it downloads the pinned version from gyan's GitHub releases, checks the archive and the exe against the hashes in the script, confirms `libsvtav1` is listed, and replaces `node_modules/ffmpeg-static/ffmpeg.exe` (plus its LICENSE and README companions). `scripts/dist.cjs` refuses to package a binary without `libsvtav1`. Bumping ffmpeg means updating `VERSION` and both hashes in the fetch script and re-running the archive-preset calibration (CONV-19 has the numbers and the method).
+
 ## Daily rhythm (on `dev`)
 
 1. Implement the item; verify with the numbered steps; `npm run typecheck` and `npm run lint` (two separate runs).

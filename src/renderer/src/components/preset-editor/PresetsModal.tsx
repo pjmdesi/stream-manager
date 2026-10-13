@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Plus, Trash2, Star, Archive, ThumbsUp, Upload, RefreshCw } from 'lucide-react'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -42,6 +42,36 @@ export function PresetsModal({
   // null = nothing open; '__new__' = the create form; otherwise the id of the
   // custom preset being edited.
   const [editingId, setEditingId] = useState<string | null>(null)
+
+  // What each preset's video encoder resolves to on this machine, so the
+  // list says what will run (the hardware swap used to be invisible, and
+  // in 2.7.0 it ran the archive presets at the wrong quality).
+  const [runsAs, setRunsAs] = useState<Record<string, { encoder: string | null; hardware: boolean }>>({})
+  useEffect(() => {
+    if (!isOpen) return
+    let cancelled = false
+    const all = [...builtinPresets, ...importedPresets].filter(p => /-c:v\s+(?!copy)/.test(p.ffmpegArgs))
+    Promise.all(all.map(p => window.api.describeEncoder(p.ffmpegArgs).then(r => [p.id, r] as const).catch(() => null)))
+      .then(entries => {
+        if (cancelled) return
+        const next: Record<string, { encoder: string | null; hardware: boolean }> = {}
+        for (const e of entries) if (e) next[e[0]] = { encoder: e[1].encoder, hardware: e[1].hardware }
+        setRunsAs(next)
+      })
+    return () => { cancelled = true }
+  }, [isOpen, builtinPresets, importedPresets])
+
+  const encoderLabel = (encoder: string): string => {
+    const family = /av1/.test(encoder) ? 'AV1' : /hevc|265/.test(encoder) ? 'H.265' : /h264|264/.test(encoder) ? 'H.264' : encoder
+    if (encoder.endsWith('_nvenc')) return `NVIDIA NVENC ${family} (hardware)`
+    if (encoder.endsWith('_amf')) return `AMD AMF ${family} (hardware)`
+    if (encoder.endsWith('_qsv')) return `Intel Quick Sync ${family} (hardware)`
+    if (encoder === 'libsvtav1') return 'SVT-AV1 on the CPU'
+    if (encoder === 'libaom-av1') return 'libaom AV1 on the CPU'
+    if (encoder === 'libx265') return 'x265 on the CPU'
+    if (encoder === 'libx264') return 'x264 on the CPU'
+    return encoder
+  }
 
   const handleSave = async (preset: ConversionPreset) => {
     await onSavePreset(preset)
@@ -92,6 +122,11 @@ export function PresetsModal({
               )}
             </div>
             {p.description && <p className="text-xs text-gray-400 mt-0.5 line-clamp-2">{p.description}</p>}
+            {runsAs[p.id]?.encoder && (
+              <p className="text-xs text-gray-400 mt-0.5">
+                Runs on this PC as <span className="text-gray-300">{encoderLabel(runsAs[p.id].encoder!)}</span>
+              </p>
+            )}
           </div>
         </div>
         {editable && (

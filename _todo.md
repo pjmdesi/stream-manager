@@ -408,6 +408,7 @@
 
 - **CONV-19** [impact:3]
   Archive presets encode the hardware path at the software quality number, and the AV1 preset names an encoder the bundled ffmpeg does not have (from CONV-16, 2026-10-12). The build is gyan's essentials: libaom and the NVENC, QSV and AMF AV1 encoders, no libsvtav1, so "Archive (SVT-AV1)" cannot run as written anywhere and is silently swapped to a hardware AV1 encoder where one exists; the swap keeps the CRF number as CQ, which is a different scale. Measured on three 30 s excerpts (1440p60 at 13 Mbps, 1080p60 at 7 Mbps, 1080p60 at 3.7 Mbps; VMAF against a lossless intermediate, ceiling about 98.6): NVENC AV1 at the substituted CQ 28 comes out at 81%, 94% and 121% of the original size (VMAF 97 to 98), NVENC HEVC at CQ 26 at 63%, 75%, 77%, while x265 CRF 26 as written lands at 19%, 26%, 31% (VMAF 92.6, 90.6, 94.9). The NVENC values that match that band are HEVC CQ 34 (VMAF 93.2, 90.6, 93.8 at 22%, 28%, 29%) and AV1 CQ 40 (VMAF 95.3, 93.5, 95.7 at 26%, 32%, 36%); at equal quality NVENC AV1 is 20 to 30% smaller than NVENC HEVC on an RTX 5080. The p7, hq, two-pass tier changes size by about 3% for twice the time. libaom AV1 is the best quality per bit of the set but runs at a seventh of real time at 1440p60, so software AV1 needs SVT-AV1, which only the full ffmpeg build carries (about 50 MB more exe). Proposal: substitute -crf with codec-specific CQ values (av1_nvenc 40, hevc_nvenc 34, with -rc vbr -b:v 0 stated), keep x265 CRF 26 as the software H.265 path, make the AV1 preset hardware-only (not offered without a hardware AV1 encoder) unless the full build is adopted, and name presets by what runs ("Archive (AV1, hardware)" with the encoder shown). Existing archives made at CQ 28 are near-lossless and roughly three times larger than they need to be; re-archiving them is the user's choice. Windows' own players need the free AV1 Video Extension from the Store for AV1; the app's player plays both codecs through its own decoders.
+  Shipped in the 2.7.1 hotfix (2026-10-13): full ffmpeg build with SVT-AV1 fetched at install and verified at packaging, hardware quality translated per vendor (NVIDIA CQ 33 for AV1 and 27 for H.265, AMD QVBR 40 and 39, Intel ICQ), presets at SVT-AV1 CRF 29 and x265 CRF 23, recommendation probes the GPU, presets say what runs, notice before the first archive. Measurements are in the 2.7.1 release notes.
 
 ### Combine
 
@@ -662,6 +663,9 @@
 
 - **APP-53** [impact:2]
   Add setting to allow bulk cloud sync to sort items by size (ascending/descending). When multiple items are chosen to pin local or offload, allow the cloud sync modal to sort the items by file size (or estimated file size if unknown), so the user can pick the largest or smallest items in the whole collection to go first. This would be a new dropdown setting in the settings menu (probably a new "cloud sync" section).
+
+- **APP-55** [impact:1] [ui]
+  Dev builds get a way to reset one-time notices. The notice before the first archive (2.7.1) is remembered in config once the user continues, so a tester cannot bring it back without editing the config file, and the same will apply to any one-time notice added later. Add a Reset one-time notices control in Settings, shown only in _DEV builds (the branch badge already knows), that clears those flags.
 
 ### Onboarding & Setup
 

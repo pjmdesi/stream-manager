@@ -116,6 +116,26 @@ function patchPortableLauncher() {
 }
 patchPortableLauncher()
 
+// ── ffmpeg build guard ────────────────────────────────────────────────────
+// The Windows ffmpeg that ships is gyan.dev's FULL build, put in place by
+// scripts/fetch-ffmpeg.cjs at install time (ffmpeg-static's own download
+// is the "essentials" build, which has no SVT-AV1). v2.7.0 shipped the
+// essentials build, so the Archive (AV1) preset could not run as written.
+// Refuse to package a binary without libsvtav1 rather than let that
+// happen again.
+function assertFullFfmpeg() {
+  if (os.platform() !== 'win32') return
+  const exe = path.join(__dirname, '..', 'node_modules', 'ffmpeg-static', 'ffmpeg.exe')
+  const r = spawnSync(exe, ['-hide_banner', '-encoders'], { encoding: 'utf8' })
+  if (r.status !== 0 || !/libsvtav1/.test(r.stdout || '')) {
+    console.error('[dist] node_modules/ffmpeg-static/ffmpeg.exe has no libsvtav1 encoder: this is the essentials build.')
+    console.error('[dist] Run `node scripts/fetch-ffmpeg.cjs` (what `npm ci` does) and build again.')
+    process.exit(1)
+  }
+  console.log('[dist] ffmpeg full build confirmed (libsvtav1 present)')
+}
+assertFullFfmpeg()
+
 let cmd = 'npx electron-builder'
 if (isDevBuild) {
   console.log(`[dist] building from branch "${branch}" - _DEV artifact name + dev icon`)

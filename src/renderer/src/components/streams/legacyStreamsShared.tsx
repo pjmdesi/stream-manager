@@ -3381,6 +3381,17 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
   const [loading, setLoading] = useState(true)
   const isOverride = !!defaultPresetId
 
+  // First-run gate: archiving replaces the originals with no way back, so
+  // the first time the picker opens it shows a notice with the steps to
+  // test a preset on one recording. Continue records the acknowledgement
+  // in config; Cancel leaves it unset so the notice returns next time.
+  const { config, updateConfig } = useStore()
+  const [noticeStep, setNoticeStep] = useState(!config.archiveNoticeAcknowledged)
+  const acknowledgeNotice = () => {
+    void updateConfig({ archiveNoticeAcknowledged: true })
+    setNoticeStep(false)
+  }
+
   const [loadError, setLoadError] = useState(false)
   useEffect(() => {
     Promise.all([window.api.getBuiltinPresets(), window.api.getImportedPresets()])
@@ -3402,6 +3413,35 @@ export function PresetPickerModal({ onPick, onClose, isDumpMode, defaultPresetId
   const confirm = () => {
     const preset = presets.find(p => p.id === selected)
     if (preset) onPick(preset, setAsDefault)
+  }
+
+  if (noticeStep) {
+    return (
+      <Modal
+        isOpen
+        onClose={onClose}
+        title="Before your first archive"
+        width="sm"
+        footer={
+          <>
+            <Button variant="ghost" onClick={onClose}>Cancel</Button>
+            <Button variant="primary" onClick={acknowledgeNotice}>Continue</Button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3 text-sm leading-relaxed">
+          <p className="text-gray-200">
+            Archiving replaces the original recording with a smaller, lower quality version. The original is not kept, and this cannot be undone.
+          </p>
+          <p className="text-gray-400">Test the preset on one recording first:</p>
+          <ol className="list-decimal pl-5 flex flex-col gap-1.5 text-gray-400">
+            <li>Use <strong className="text-gray-300">Convert</strong> on a stream, or add a recording on the Converter page. Choose the archive preset, keep the output next to the original and start it. This writes a new file beside the original; nothing is replaced.</li>
+            <li>Play both files and compare the picture and the size.</li>
+            <li>If the result is not what you want, create a custom preset in Manage presets with a different quality and test again. The Archive action can use any converter preset.</li>
+          </ol>
+        </div>
+      </Modal>
+    )
   }
 
   return (

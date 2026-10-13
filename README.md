@@ -87,6 +87,8 @@ npm ci
 npm run dev
 ```
 
+On Windows, `npm ci` also downloads ffmpeg (gyan.dev's full 6.1.1 build, about 150 MB, pinned by hash in `scripts/fetch-ffmpeg.cjs`) in place of the smaller build that `ffmpeg-static` installs; the full build carries SVT-AV1, which the Archive (AV1) preset needs.
+
 `npm run typecheck` and `npm run lint` are the gate every build passes through; run them before opening a PR.
 
 ### Build portable executable (Windows)

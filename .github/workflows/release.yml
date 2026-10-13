@@ -42,11 +42,11 @@ jobs:
           node-version: 24
           cache: npm
 
-      # The postinstall fetches Electron's binary for the dev server; the
-      # packaging step downloads its own copy, so skip it here.
+      # The postinstall fetches Electron's binary for the dev server and the
+      # full ffmpeg build; dist refuses to package without the latter. Both
+      # run here as well: Electron 44's installer has no skip switch, and the
+      # packager fetches its own copy regardless.
       - run: npm ci
-        env:
-          ELECTRON_SKIP_BINARY_DOWNLOAD: 1
 
       # The gate: no artifact if either fails. `npm run dist` re-runs the
       # typecheck as part of the local command chain (cheap); the explicit
