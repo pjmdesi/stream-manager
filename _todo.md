@@ -199,6 +199,7 @@
 
 - **STR-37** [ui]
   Confirm before deleting a single file from the files grid. The per-file trash button on a file card deletes on one click; a misclick on 2026-10-06 deleted a dehydrated file and getting it back was painful. The confirmation applies to hydrated and dehydrated files alike (a dehydrated file is harder to recover, since the local placeholder goes and the cloud copy follows). A confirmation modal like the stream-level `DeleteModal`, naming the file and its size, with the same recycle-bin wording; the files grid lives on the page, not in a modal, so the no-secondary-modals rule does not come into it. The bulk select-mode delete already confirms and stays as it is. Filed 2026-10-06.
+  Built 2026-10-12, awaiting review.
 
 - **STR-38** [bug] [ui] [impact:2]
   When entering multi-select mode in the files grid, the placeholder "Create thumbnail" disappears, causing a reflow of the other items in the grid. This means if the file the user clicks to "quick enter" multi-select mode is after the placeholder, the resulting selected item is no longer under the mouse. I'm not happy with the look of having the placeholder in between the grid of files. It should go at the end or beginning (or an alternate solution). I lean toward putting it at the beginning. In fact, maybe we put both items as perminent items in the top of the files grid section, designed differently so they don't match the size of the files cards. The create thumbnail button should look more like a button, and the file dropzone element could still look the same but be shrunk significatly. I'm imagining the two items as a sort of sub header under the action buttons.
@@ -363,7 +364,7 @@
 - **CONV-7** [investigate]
   Plan the exit from fluent-ffmpeg. Its repo went readonly with a "no longer maintained, no longer works properly with recent ffmpeg versions" warning (noticed 2026-09-05). Risk today is LOW: ffmpeg-static pins the exact ffmpeg binary the wrapper talks to, so the pairing is frozen and tested together, and the library has no network surface. The exposure is the future ffmpeg-static or Electron bump where an abandoned wrapper becomes the blocker. SM already builds raw ffmpeg argument strings for presets; fluent's remaining value is spawn lifecycle, progress parsing, and the kill/pause plumbing, all ownable in ffmpegService with direct child_process spawning. Do the migration assessment BEFORE the next ffmpeg-static bump, and treat any ffmpeg upgrade as blocked on it.
 
-- **CONV-13** [bug] [impact:2]
+- **CONV-13** [bug] [impact:2] [done]
   This applies to dropzones for the converter and the player, but the issue was first discovered in the converter.
 
   Wierdly, I'm able to drag in a folder into the dropzone of the converter page. When I did this, it treated the folder itself as the thing to be converted instead of the things inside. I tried to start the conversion ttask just to see what would happen and it just showed an error, which was what I expected.

@@ -7,6 +7,8 @@ import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { FileDropZone } from '../ui/FileDropZone'
 import { rowActionClass } from '../ui/rowAction'
+import { Modal } from '../ui/Modal'
+import { Button } from '../ui/Button'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { formatBytes } from '../../lib/formatBytes'
@@ -236,7 +238,7 @@ function timeAgo(ms: number): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleted, blockReason, drafts, onModifierSelect }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleteRequest, blockReason, drafts, onModifierSelect }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -258,9 +260,10 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   onSendToConverter: (path: string) => void
   onOffload: (path: string) => void
   onPin: (path: string) => void
-  /** Called after this file was successfully trashed, so the parent can drop
-   *  it from folder state in place (no reload). */
-  onDeleted: () => void
+  /** The trash button was clicked. The grid asks for confirmation and does
+   *  the trashing itself (STR-37): one click used to delete on the spot, and
+   *  a misclick on an offloaded file was painful to undo. */
+  onDeleteRequest: () => void
   /** Why this file can't be deleted right now (converter / open elsewhere), or
    *  null when it's deletable. */
   blockReason: string | null
@@ -380,17 +383,7 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
           <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
             <button
               disabled={!!blockReason}
-              onClick={async () => {
-                // Authoritative backstop in case the reactive disable lags a job
-                // that just started: never trash a file the converter still holds.
-                if (await window.api.isPathInUseByConverter(path).catch(() => false)) return
-                // Release any in-flight offscreen thumbnail decode of this
-                // file — its <video> handle blocks the recycle-bin move.
-                releaseThumbDecodes([path])
-                // Only report success — a failed trash must keep the card.
-                try { await window.api.trashFile(path) } catch { return }
-                onDeleted()
-              }}
+              onClick={onDeleteRequest}
               className={rowActionClass('red', 'sm')}
             ><Trash2 size={12} /></button>
           </Tooltip>
@@ -1024,13 +1017,19 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   const selectedDeletableCount = useMemo(
     () => selectedPaths.filter(p => !fileReason(p)).length,
     [selectedPaths, fileReason])
-  const bulkTrash = async () => {
+  // Every delete from the grid asks first (STR-37): the per-file trash
+  // button, and the select-mode Delete, which never confirmed either. The
+  // modal names each file with its size, marks the ones kept because they
+  // are in use, and calls out offloaded files, whose delete reaches the
+  // cloud copy as well.
+  const [deleteAsk, setDeleteAsk] = useState<{ paths: string[] } | null>(null)
+  const trashPaths = async (paths: string[]) => {
     const deleted: string[] = []
     // Release in-flight thumbnail decodes only for the files that will
     // actually be trashed — cancelling one for a kept (in-use) file would
     // leave its card thumbless until remount.
-    releaseThumbDecodes(selectedPaths.filter(p => !fileReason(p)))
-    for (const p of selectedPaths) {
+    releaseThumbDecodes(paths.filter(p => !fileReason(p)))
+    for (const p of paths) {
       // Skip anything that's in use — open in the player/thumbnail editor, or
       // (authoritative re-check) still held by the converter; the rest of the
       // selection is deleted normally.
@@ -1039,8 +1038,18 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       // Only successfully-trashed files leave the grid.
       try { await window.api.trashFile(p); deleted.push(p) } catch { /* keep */ }
     }
-    clearSelection()
     if (deleted.length) onFilesDeleted(deleted)
+  }
+  const confirmDelete = async (paths: string[]) => {
+    // A single thumbnail from its card keeps going through the parent's
+    // thumbnail delete, which drops the slot optimistically and removes the
+    // editor sidecar; everything else goes through the grid's own trash.
+    if (!selectMode && paths.length === 1 && folder.thumbnails.includes(paths[0])) {
+      await onDeleteThumbnail(paths[0])
+      return
+    }
+    await trashPaths(paths)
+    if (selectMode) clearSelection()
   }
 
   // ── Import files (drag-drop / add-files tile) ──────────────────────────
@@ -1221,7 +1230,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               {selectedPaths.length > 0 && (
                 <Tooltip content={selectedHasBlocked ? `Move selected (${selectedDeletableCount}) to recycle bin (skips files in use)` : `Move selected (${selectedDeletableCount}) to recycle bin`} side="top">
                   <button
-                    onClick={bulkTrash}
+                    onClick={() => setDeleteAsk({ paths: selectedPaths })}
                     disabled={selectedDeletableCount === 0}
                     className={rowActionClass('red', 'sm')}
                   ><Trash2 size={12} /><CollapsibleLabel expandClass="@[920px]:grid-cols-[1fr] @[920px]:ms-0" collapsedMarginStart="-ms-1">Delete</CollapsibleLabel></button>
@@ -1291,7 +1300,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onSendToConverter={onSendToConverter}
               onOffload={offloadFile}
               onPin={pinFile}
-              onDeleted={() => onFilesDeleted([path])}
+              onDeleteRequest={() => setDeleteAsk({ paths: [path] })}
               blockReason={fileReason(path)}
               drafts={draftsByVideo.get(path.split(/[\\/]/).pop() ?? '')}
               onModifierSelect={() => enterSelectWith(path)}
@@ -1342,7 +1351,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               onDragStart={() => startDrag(path)}
               onDragEnter={() => updateDrag(path)}
               onSetThumbnail={onSetThumbnail}
-              onDeleteThumbnail={onDeleteThumbnail}
+              onDeleteThumbnail={(p) => setDeleteAsk({ paths: [p] })}
               onEditThumbnail={onEditThumbnail}
               onOpenLightbox={onOpenLightbox}
               onOffload={offloadFile}
@@ -1390,6 +1399,64 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
           ))}
         </div>
       )}
+      {deleteAsk && (() => {
+        const items = deleteAsk.paths.map(p => ({
+          path: p,
+          name: p.split(/[\\/]/).pop() ?? p,
+          size: sizeOf(p),
+          reason: fileReason(p),
+          offloaded: localStatus[p] === false,
+        }))
+        const deletable = items.filter(i => !i.reason)
+        const offloaded = deletable.filter(i => i.offloaded).length
+        const many = deleteAsk.paths.length > 1
+        return (
+          <Modal
+            isOpen
+            onClose={() => setDeleteAsk(null)}
+            title={many ? `Move ${deleteAsk.paths.length} files to Recycle Bin?` : 'Move file to Recycle Bin?'}
+            width="sm"
+            footer={
+              <>
+                <Button variant="ghost" size="sm" onClick={() => setDeleteAsk(null)}>Cancel</Button>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  disabled={deletable.length === 0}
+                  onClick={() => {
+                    const paths = deletable.map(i => i.path)
+                    setDeleteAsk(null)
+                    void confirmDelete(paths)
+                  }}
+                >
+                  Move to Recycle Bin
+                </Button>
+              </>
+            }
+          >
+            <p className="text-sm text-gray-300 mb-3">{many ? 'The following will be moved to the Recycle Bin:' : 'This file will be moved to the Recycle Bin:'}</p>
+            <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
+              {items.map(i => (
+                <div key={i.path} className="flex items-center gap-3 py-px">
+                  <Tooltip content={i.path} maxWidth="max-w-md" triggerClassName="block min-w-0 flex-1">
+                    <span className={`block truncate ${i.reason ? 'text-gray-400 line-through' : ''}`}>{i.name}</span>
+                  </Tooltip>
+                  <span className="shrink-0 text-xs text-gray-400">
+                    {i.reason ? 'in use, kept' : i.size > 0 ? formatBytes(i.size) : ''}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {offloaded > 0 && (
+              <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                {offloaded === 1 && deletable.length === 1 ? 'This file is offloaded.' : `${offloaded} of these files are offloaded.`}
+                {' '}The delete reaches the cloud copy as well, so getting it back may mean the cloud provider's own recycle bin, not just this one.
+              </div>
+            )}
+            <p className="text-xs text-gray-400">This action can be undone from the Recycle Bin.</p>
+          </Modal>
+        )
+      })()}
     </div>
   )
 
