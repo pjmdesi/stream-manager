@@ -1446,15 +1446,15 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
                 struck: !!i.reason,
               }))}
             />
-            {/* An offloaded file's delete may never reach the Windows
-                Recycle Bin: Synology Drive moves it to the NAS recycle bin
-                instead, and other clients differ. Say so instead of
-                promising an undo that is not there. */}
+            {/* An offloaded file's delete may never reach the local
+                Recycle Bin (Synology Drive moves it to the NAS recycle bin
+                instead; other clients differ). Say so instead of promising
+                an undo that is not there. */}
             {offloaded > 0 && (
               <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
                 {offloaded === 1 && deletable.length === 1
-                  ? 'This file is offloaded, so it may not go to the Windows Recycle Bin. Synology Drive keeps deleted files in the NAS recycle bin instead; other cloud clients differ.'
-                  : `${offloaded} of these files are offloaded, so they may not go to the Windows Recycle Bin. Synology Drive keeps deleted files in the NAS recycle bin instead; other cloud clients differ.`}
+                  ? 'This file is offloaded, so it may not appear in your local recycle bin once deleted.'
+                  : `${offloaded} of these files are offloaded, so they may not appear in your local recycle bin once deleted.`}
               </div>
             )}
             {deletable.length > offloaded && (

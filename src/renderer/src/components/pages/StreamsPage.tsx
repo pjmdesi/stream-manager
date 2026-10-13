@@ -10637,11 +10637,13 @@ function RescheduleModal({
                 </p>
                 <PathList
                   maxHeight="max-h-48"
-                  folder={preview.folderRename ? `${preview.folderRename.from}/ → ${preview.folderRename.to}/` : undefined}
+                  folder={preview.folderRename ? `${preview.folderRename.from}/` : undefined}
+                  folderTo={preview.folderRename ? `${preview.folderRename.to}/` : undefined}
                   empty="No files to rename inside folder."
                   items={preview.filesToRename.map(f => ({
                     key: f.from,
-                    label: `${f.from} → ${f.to}`,
+                    label: f.from,
+                    to: f.to,
                     tooltip: f.collision ? 'Skipped: a file with that name already exists.' : `${f.from} → ${f.to}`,
                     tone: f.collision ? 'danger' : 'default',
                     icon: f.collision ? <AlertTriangle size={10} className="inline mr-1 mb-0.5" /> : undefined,

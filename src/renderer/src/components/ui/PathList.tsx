@@ -11,8 +11,11 @@ import { Tooltip } from './Tooltip'
 
 export interface PathListItem {
   key: string
-  /** The row's text: a file name, or "from → to" for a rename. */
+  /** The row's text: a file name, or the "from" side of a rename. */
   label: string
+  /** The "to" side of a rename. Both sides then truncate on their own, so
+   *  the arrow stays in view and roughly centered when names are long. */
+  to?: string
   /** Tooltip content, normally the full path. Defaults to the label. */
   tooltip?: React.ReactNode
   /** Right-aligned note: a size, "In use". */
@@ -25,9 +28,24 @@ export interface PathListItem {
   icon?: React.ReactNode
 }
 
-export function PathList({ folder, items, empty, maxHeight = 'max-h-64', className = '', children }: {
-  /** Folder line shown above the rows, as given ("name/" or "from/ → to/"). */
+/** "from → to" where each side takes what it needs and, when both do not
+ *  fit, they share the width equally and truncate. `max-w-max` keeps a
+ *  short side from being padded out to its half. */
+function Rename({ from, to, icon }: { from: React.ReactNode; to: string; icon?: React.ReactNode }) {
+  return (
+    <span className="flex items-center min-w-0 gap-1.5">
+      <span className="truncate flex-1 min-w-0 max-w-max">{icon}{from}</span>
+      <span className="shrink-0 text-gray-400">→</span>
+      <span className="truncate flex-1 min-w-0 max-w-max">{to}</span>
+    </span>
+  )
+}
+
+export function PathList({ folder, folderTo, items, empty, maxHeight = 'max-h-64', className = '', children }: {
+  /** Folder line shown above the rows, as given ("name/"). */
   folder?: string
+  /** With `folder`, renders the folder line as a rename ("from/ → to/"). */
+  folderTo?: string
   items: PathListItem[]
   /** Shown when there are no items. */
   empty?: React.ReactNode
@@ -40,9 +58,9 @@ export function PathList({ folder, items, empty, maxHeight = 'max-h-64', classNa
   return (
     <div className={`bg-navy-900 border border-white/5 rounded-lg px-3 py-2.5 font-mono text-sm text-gray-200 ${maxHeight} overflow-y-auto ${className}`}>
       {folder && (
-        <div className="flex items-center gap-1.5 text-gray-300 mb-1">
+        <div className="flex items-center gap-1.5 text-gray-300 mb-1 min-w-0">
           <Folder size={13} className="shrink-0 text-gray-400" />
-          <span className="truncate">{folder}</span>
+          {folderTo ? <Rename from={folder} to={folderTo} /> : <span className="truncate">{folder}</span>}
         </div>
       )}
       {children != null ? children : items.length === 0 ? (
@@ -50,8 +68,10 @@ export function PathList({ folder, items, empty, maxHeight = 'max-h-64', classNa
       ) : items.map(i => (
         <div key={i.key} className={`flex items-center gap-1.5 py-px ${i.tone === 'danger' ? 'text-red-400' : ''}`}>
           <span className="shrink-0 text-gray-400">·</span>
-          <Tooltip content={i.tooltip ?? i.label} maxWidth="max-w-md" triggerClassName="block min-w-0 flex-1">
-            <span className={`block truncate ${i.struck ? 'line-through text-gray-400' : ''}`}>{i.icon}{i.label}</span>
+          <Tooltip content={i.tooltip ?? (i.to ? `${i.label} → ${i.to}` : i.label)} maxWidth="max-w-md" triggerClassName="block min-w-0 flex-1">
+            {i.to
+              ? <Rename from={i.label} to={i.to} icon={i.icon} />
+              : <span className={`block truncate ${i.struck ? 'line-through text-gray-400' : ''}`}>{i.icon}{i.label}</span>}
           </Tooltip>
           {i.trailing != null && i.trailing !== '' && (
             <span className="shrink-0 text-xs text-gray-400">{i.trailing}</span>
