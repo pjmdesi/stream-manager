@@ -182,7 +182,7 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'archive-av1',
     name: 'Archive (AV1)',
-    description: 'Cold storage archive at about a third to a half of the original size. SVT-AV1 CRF 29 on the CPU; a GPU with an AV1 encoder (NVIDIA RTX 40 and 50, AMD RX 7000, Intel Arc) encodes at a matching quality level many times faster. Keeps all audio tracks and subtitles.',
+    description: 'Cold storage archive at about a third to two thirds of the original size, depending on the recording. SVT-AV1 CRF 29 on the CPU; a GPU with an AV1 encoder (NVIDIA RTX 40 and 50, AMD RX 7000, Intel Arc) encodes at a matching quality level many times faster. Keeps all audio tracks and subtitles.',
     ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libsvtav1 -crf 29 -preset 6 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
@@ -190,7 +190,7 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
   {
     id: 'archive-h265',
     name: 'Archive (H.265)',
-    description: 'Cold storage archive, widely compatible, at about a quarter to a half of the original size. x265 CRF 23 on the CPU; a GPU H.265 encoder runs at a matching quality level when available. Keeps all audio tracks and subtitles.',
+    description: 'Cold storage archive, widely compatible, at about half to two thirds of the original size. x265 CRF 23 on the CPU; a GPU H.265 encoder runs at a matching quality level when available. Keeps all audio tracks and subtitles.',
     ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libx265 -crf 23 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
