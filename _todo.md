@@ -24,7 +24,7 @@
 20. STR-39
 21. STR-40
 22. STR-41
-23. APP-53
+23. APP-54
 
 ## Next up
 
@@ -298,6 +298,9 @@
 
 - **PLR-33** [bug] [ui] [investigate]
   The Player accepts formats it cannot play. Since the shared video list (APP-41, 2026-10-06) its open dialog, dropzone and sibling list take every container a stream folder can hold, but Chromium's media element decodes only some of them: an `.mpg` opens and shows the error banner. Found 2026-10-06. The Player should only accept files it can play, and the sibling list should still show the other video files, disabled, so the user sees they exist and why they are skipped. Proposal: a `PLAYABLE_EXTENSIONS` subset in `shared/videoExts` for the open dialog and dropzone (Chromium plays ISO BMFF and Matroska families and WebM/Ogg: `mkv`, `mp4`, `m4v`, `mov`, `webm`, `ogv`, probably `3gp` and `f4v`; it does not play `avi`, `flv`, `ts`, `m2ts`, `mts`, `wmv`, `asf`, `mpg`, `mpeg`, `vob`, `divx`, `rmvb`, raw `hevc`); confirm the borderline ones with sample files before shipping, since `canPlayType` returns '' for Matroska even though it plays. In the sibling list, unplayable files render disabled with a tooltip naming the format and offering Send to Converter (the YouTube Ready preset produces a playable MP4). A container check cannot see codec problems (an MKV with a codec the machine lacks), so the existing error banner stays as the second line of defense.
+
+- **PLR-34** [ui] [impact:2]
+  The player shows nothing when a video track cannot be decoded on this PC. The video element has no error handler, so an H.265 file on a GPU without hardware HEVC decoding (Chromium has no software HEVC decoder) plays as audio over a black picture with no explanation, and any other unsupported codec does the same. Detect it (the element's error event, a zero videoWidth once metadata has loaded, or a MediaCapabilities probe of the file's codec before loading) and show a notice that names the codec, says this PC's GPU cannot decode it, and makes clear the file itself is fine (Windows' own player needs the Store extension for it; players such as VLC decode it in software). A notice only, no transcode fallback. Verified 2026-10-13 that on an HEVC-capable GPU the player needs no Store extension for H.265 and decodes AV1 everywhere.
 
 ### Thumbnail editor
 
@@ -647,7 +650,7 @@
 - **APP-52** [impact:3]
   The portable launcher extracts the whole bundle on every cold launch and deletes the folder when the app exits, so each start pays a decompression of the 131 MB exe into about 550 MB (APP-32's pre-check only skips it while the app is already running). Keep the extraction between launches: the unpack folder is already fixed per build, so the launcher can leave it in place on exit and reuse it when a marker written at the end of a complete extraction matches this build, extracting only when the marker is missing or from another version. Every launch after the first per version becomes instant, the download stays small (the store-compression alternative measured 2026-10-07 is a 549 MB exe and is not faster on slow drives). Same template patch mechanism as APP-32 in `scripts/dist.cjs`, same loud failure if the template changes; needs the two-launch test and an upgrade test (old folder replaced when a new version first runs). Filed 2026-10-07.
 
-- **APP-53** [big] [needs-design]
+- **APP-54** [big] [needs-design]
   Retire dump-folder libraries after 2.8.0. Every feature carries a second code path for dump mode (keys by date, files found by date in the name, no per-stream folder, the offload and delete file sets, createFolder writing the meta by date, the watcher's destination, the Player's stream resolution, thumbnail naming), each one a test item and a place to diverge (SYNC-9 was one). Nobody is known to use it, and the folder-per-stream layout is the recommended one. Proposal: 2.8.0 is the last version that opens a dump library: it shows a notice in dump mode saying so and pointing at the existing conversion (`streams:convertDumpFolder`, which moves files into date folders and writes a manifest), the release notes say it, and onboarding stops offering the choice. The version after is 3.0.0 (a library that no longer opens is a breaking change, decided 2026-10-12): a dump library gets a required, user-confirmed conversion on first launch (never a silent move of a user's files; the manifest stays as the record), and the dump branches are deleted; that half gets its own ticket once 2.8.0 is out. This ticket is the 2.8.0 half. Design points: what the conversion does with files that carry no date in the name (report, never guess), with cloud placeholders in a sync root (renames are fine, but thousands at once churn the client), with `_sm-thumbnail` files and the `_meta.json` keys (date to folder name), and whether the website's FAQ describes dump mode. Proposed 2026-10-12.
 
 - **APP-45** [impact:3] [needs-design] [investigate]
