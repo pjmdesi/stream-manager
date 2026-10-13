@@ -157,18 +157,24 @@ const BUILTIN_PRESETS: ConversionPreset[] = [
     outputExtension: 'mp4',
     isBuiltin: true
   },
+  // The two archive presets name their software encoder and quality (what
+  // runs on a machine without a usable GPU encoder). With a GPU encoder the
+  // codec is swapped and the quality number is translated to that encoder's
+  // own scale (applyGpuAcceleration); the number is not carried over as is,
+  // which v2.7.0 did and which made hardware archives near-lossless and
+  // barely smaller than the originals.
   {
     id: 'archive-av1',
-    name: 'Archive (SVT-AV1)',
-    description: 'Cold storage archive — CRF 28 SVT-AV1, preserves fine detail at a strong size ratio. Keeps all audio tracks and subtitles. Auto-swaps to a hardware AV1 encoder (NVENC / QSV / AMF) when one is available.',
-    ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libsvtav1 -crf 28 -preset 6 -c:a aac -b:a 128k -c:s copy',
+    name: 'Archive (AV1)',
+    description: 'Cold storage archive at about a quarter to a third of the original size. SVT-AV1 CRF 35 on the CPU; a GPU with an AV1 encoder (NVIDIA RTX 40 and 50, AMD RX 7000, Intel Arc) encodes at a matching quality level many times faster. Keeps all audio tracks and subtitles.',
+    ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libsvtav1 -crf 35 -preset 6 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
   },
   {
     id: 'archive-h265',
     name: 'Archive (H.265)',
-    description: 'Cold storage archive — CRF 26 H.265, widely compatible. Keeps all audio tracks and subtitles. GPU-accelerated automatically if available.',
+    description: 'Cold storage archive, widely compatible, at about a quarter to a third of the original size. x265 CRF 26 on the CPU; a GPU H.265 encoder runs at a matching quality level when available. Keeps all audio tracks and subtitles.',
     ffmpegArgs: '-map 0:v? -map 0:a? -map 0:s? -c:v libx265 -crf 26 -c:a aac -b:a 128k -c:s copy',
     outputExtension: 'mkv',
     isBuiltin: true
@@ -1316,6 +1322,13 @@ export function registerConverterIPC(): void {
   ipcMain.handle('converter:checkEncoderAvailable', async (_event, name: string) => {
     const { checkEncoderAvailable } = await import('../services/ffmpegService')
     return checkEncoderAvailable(name)
+  })
+
+  /** The video encoder a preset's arguments resolve to on this machine
+   *  (after the hardware swap), so the presets UI can say what will run. */
+  ipcMain.handle('converter:describeEncoder', async (_event, ffmpegArgs: string) => {
+    const { describeEncoder } = await import('../services/ffmpegService')
+    return describeEncoder(ffmpegArgs)
   })
 
   /** Returns the set of GPU encoder names that actually work on this machine

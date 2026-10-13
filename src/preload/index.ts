@@ -230,6 +230,9 @@ contextBridge.exposeInMainWorld('api', {
   checkEncoderAvailable: (name: string) =>
     ipcRenderer.invoke('converter:checkEncoderAvailable', name),
 
+  describeEncoder: (ffmpegArgs: string) =>
+    ipcRenderer.invoke('converter:describeEncoder', ffmpegArgs),
+
   checkAlreadyArchived: (paths: string[]): Promise<string[]> =>
     ipcRenderer.invoke('converter:checkAlreadyArchived', paths),
 

@@ -431,17 +431,22 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     Promise.all([
       window.api.getBuiltinPresets(),
       window.api.getImportedPresets(),
-      Promise.all([
-        window.api.checkEncoderAvailable('libsvtav1'),
-        window.api.checkEncoderAvailable('av1_nvenc'),
-        window.api.checkEncoderAvailable('av1_amf'),
-        window.api.checkEncoderAvailable('av1_qsv'),
-      ]),
-    ]).then(([builtin, imported, [hasSvt, hasNvenc, hasAmf, hasQsv]]) => {
+      // The encoders that actually RUN here (probed), not the ones compiled
+      // into ffmpeg: every GPU encoder is compiled in, so the old
+      // checkEncoderAvailable test recommended AV1 on every machine.
+      window.api.detectAvailableEncoders().catch(() => [] as string[]),
+    ]).then(([builtin, imported, working]) => {
       setBuiltinPresets(builtin)
       setImportedPresets(imported)
-      const hasAnyAv1 = hasSvt || hasNvenc || hasAmf || hasQsv
-      setRecommendedArchiveId(hasAnyAv1 ? 'archive-av1' : 'archive-h265')
+      // AV1 when a hardware AV1 encoder exists (20 to 30% smaller than
+      // hardware H.265 at the same quality, measured 2026-10-12). With a
+      // hardware H.265 encoder but no AV1 one, H.265: the GPU finishes a
+      // multi-hour stream in minutes where SVT-AV1 on the CPU takes hours.
+      // On a CPU-only machine AV1 again: SVT-AV1 gives more per bit than
+      // x265 at comparable speed.
+      const hasHwAv1 = working.some(e => e.startsWith('av1_'))
+      const hasHwHevc = working.some(e => e.startsWith('hevc_'))
+      setRecommendedArchiveId(hasHwAv1 || !hasHwHevc ? 'archive-av1' : 'archive-h265')
     })
   }, [])
 

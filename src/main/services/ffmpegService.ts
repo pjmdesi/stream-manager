@@ -488,6 +488,7 @@ const GPU_CODEC_MAP: Record<string, Partial<Record<'nvenc' | 'amf' | 'qsv', stri
   libx264:   { nvenc: 'h264_nvenc',  amf: 'h264_amf',  qsv: 'h264_qsv'  },
   libx265:   { nvenc: 'hevc_nvenc',  amf: 'hevc_amf',  qsv: 'hevc_qsv'  },
   libsvtav1: { nvenc: 'av1_nvenc',   amf: 'av1_amf',   qsv: 'av1_qsv'   },
+  'libaom-av1': { nvenc: 'av1_nvenc', amf: 'av1_amf',  qsv: 'av1_qsv'   },
 }
 
 // AV1 GPU encoders use a different preset naming scheme (p1-p7) — drop any
@@ -499,6 +500,50 @@ const SOFTWARE_PRESETS = new Set([
   'ultrafast', 'superfast', 'veryfast', 'faster', 'fast',
   'medium', 'slow', 'slower', 'veryslow', 'placebo'
 ])
+
+/** Translate a software CRF into the hardware encoder's own constant-quality
+ *  setting. A CRF is the preset's quality statement; every hardware encoder
+ *  rates quality on a scale of its own, and v2.7.0 passed the CRF number
+ *  through unchanged as NVENC's `-cq`, which sits far up that scale: the
+ *  archive presets then produced near-lossless files at 80 to 120% of the
+ *  original size instead of the 20 to 35% the software encoders deliver.
+ *
+ *  The offsets come from measuring 30 s excerpts of three real recordings
+ *  (1440p60 at 13 Mbps, 1080p60 at 7 Mbps and at 3.7 Mbps) against a
+ *  lossless reference with VMAF, 2026-10-12 (CONV-19):
+ *  - NVENC: HEVC CQ 34 lands where x265 CRF 26 does (VMAF 91 to 94 at 22 to
+ *    29% of the source); AV1 CQ 40 lands where SVT-AV1 CRF 35 does (VMAF 93
+ *    to 96 at 23 to 36%; CQ 36 matched CRF 32 the same way). `-rc vbr
+ *    -b:v 0` makes the CQ the only target. H.264 CQ 32 sits just above
+ *    x264 CRF 23 (VMAF 93.6 at 6.1 Mbps on the 1440p60 excerpt; CQ 30
+ *    scored 95.5, CQ 34 92.4).
+ *  - AMF: `qvbr_quality_level` runs the OTHER way (higher is better). HEVC
+ *    level 36 scored VMAF 91 to 93 on a Radeon iGPU, which anchors 62 minus
+ *    the CRF; H.264 and AV1 use the same slope anchored to their presets'
+ *    CRFs (23 and 35), unmeasured for lack of hardware here. v2.7.0 sent
+ *    AMF and QSV the NVENC-only `-cq`, which they ignore, so those archives
+ *    were encoded at the encoder's default bitrate target.
+ *  - QSV: `-global_quality` with no bitrate selects ICQ, a CRF-like scale.
+ *    Unmeasured for lack of an Intel GPU here; the offsets lean to quality
+ *    over size.
+ *  A quality number is clamped to the encoder's range. */
+function hardwareQualityArgs(gpuCodec: string, crf: number): string[] {
+  const clamp = (n: number, lo: number, hi: number) => String(Math.min(hi, Math.max(lo, Math.round(n))))
+  const family: 'h264' | 'hevc' | 'av1' = gpuCodec.startsWith('av1') ? 'av1' : gpuCodec.startsWith('hevc') ? 'hevc' : 'h264'
+  if (gpuCodec.endsWith('_nvenc')) {
+    const offset = { h264: 9, hevc: 8, av1: 5 }[family]
+    return ['-rc', 'vbr', '-cq', clamp(crf + offset, 0, 51), '-b:v', '0']
+  }
+  if (gpuCodec.endsWith('_amf')) {
+    const base = { h264: 60, hevc: 62, av1: 69 }[family]
+    return ['-rc', 'qvbr', '-qvbr_quality_level', clamp(base - crf, 1, 51)]
+  }
+  if (gpuCodec.endsWith('_qsv')) {
+    const offset = { h264: 2, hevc: 2, av1: 0 }[family]
+    return ['-global_quality', clamp(crf + offset, 1, 51)]
+  }
+  return ['-cq', clamp(crf, 0, 51)]
+}
 
 function substituteGpuArgs(args: string, vendor: GpuVendor): string {
   if (!vendor) return args
@@ -524,9 +569,12 @@ function substituteGpuArgs(args: string, vendor: GpuVendor): string {
       }
     }
 
-    // -crf is CPU-only; GPU encoders use -cq for constant quality
-    if (tok === '-crf' && replacedCodec) {
-      out.push('-cq')
+    // -crf is a software-encoder option; translate it to the hardware
+    // encoder's own constant-quality setting (see hardwareQualityArgs).
+    if (tok === '-crf' && replacedCodec && i + 1 < tokens.length) {
+      const crf = Number(tokens[i + 1])
+      out.push(...hardwareQualityArgs(gpuCodecName, Number.isFinite(crf) ? crf : 23))
+      i++
       continue
     }
 
@@ -551,6 +599,21 @@ function substituteGpuArgs(args: string, vendor: GpuVendor): string {
   }
 
   return out.join(' ')
+}
+
+/** What a preset's video encoder resolves to on this machine, for the
+ *  presets UI: the encoder ffmpeg will actually run and whether it is a
+ *  hardware swap of the preset's software encoder. */
+export async function describeEncoder(ffmpegArgs: string): Promise<{ encoder: string | null; hardware: boolean; args: string }> {
+  const resolved = await applyGpuAcceleration(ffmpegArgs)
+  const pick = (args: string) => {
+    const t = parseArgsString(args)
+    const i = t.indexOf('-c:v')
+    return i >= 0 && i + 1 < t.length ? t[i + 1] : null
+  }
+  const before = pick(ffmpegArgs)
+  const after = pick(resolved)
+  return { encoder: after, hardware: !!after && after !== before, args: resolved }
 }
 
 const WIN_NT_TYPE_DEF = `

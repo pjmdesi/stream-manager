@@ -127,6 +127,9 @@ declare global {
       // ── Converter ────────────────────────────────────────────────────────────
       getBuiltinPresets(): Promise<ConversionPreset[]>
       checkEncoderAvailable(name: string): Promise<boolean>
+      /** The video encoder these preset arguments resolve to on this machine
+       *  after the hardware swap, and whether that swap happened. */
+      describeEncoder(ffmpegArgs: string): Promise<{ encoder: string | null; hardware: boolean; args: string }>
       checkAlreadyArchived(paths: string[]): Promise<string[]>
       /** Probe LOCAL files among `videoPaths` for the archive marker and
        *  record the verdict on their videoMap entries. Returns one verdict
