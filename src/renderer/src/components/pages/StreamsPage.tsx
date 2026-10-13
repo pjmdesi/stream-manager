@@ -16,6 +16,7 @@ import { Checkbox } from '../ui/Checkbox'
 import { TagComboBox } from '../ui/TagComboBox'
 import { TopicSelect } from '../ui/TopicSelect'
 import { Modal } from '../ui/Modal'
+import { PathList } from '../ui/PathList'
 import { useStore } from '../../hooks/useStore'
 import { formatBytes } from '../../lib/formatBytes'
 import { useThumbnailEditor } from '../../context/ThumbnailEditorContext'
@@ -10634,33 +10635,18 @@ function RescheduleModal({
                 <p className="text-xs text-gray-400">
                   The following will be renamed from <span className="font-mono text-gray-300">{target.date}</span> to <span className="font-mono text-gray-300">{newDate}</span>:
                 </p>
-                <ul className="flex flex-col gap-0.5 max-h-48 overflow-y-auto">
-                  {preview.folderRename && (
-                    <li className="text-xs font-mono text-gray-400 bg-navy-900 rounded px-2 py-1">
-                      📁 {preview.folderRename.from}/ → {preview.folderRename.to}/
-                    </li>
-                  )}
-                  {preview.filesToRename.map(f => (
-                    <li
-                      key={f.from}
-                      className={`text-xs font-mono px-2 py-0.5 ${f.collision ? 'text-red-400' : 'text-gray-400'}`}
-                    >
-                      {f.collision ? (
-                        <Tooltip content="Skipped: a file with that name already exists." triggerClassName="block">
-                          <span className="block">
-                            <AlertTriangle size={10} className="inline mr-1 mb-0.5" />
-                            {f.from} → {f.to}
-                          </span>
-                        </Tooltip>
-                      ) : (
-                        <>{f.from} → {f.to}</>
-                      )}
-                    </li>
-                  ))}
-                  {preview.filesToRename.length === 0 && (
-                    <li className="text-xs text-gray-400 italic px-2 py-0.5">No files to rename inside folder.</li>
-                  )}
-                </ul>
+                <PathList
+                  maxHeight="max-h-48"
+                  folder={preview.folderRename ? `${preview.folderRename.from}/ → ${preview.folderRename.to}/` : undefined}
+                  empty="No files to rename inside folder."
+                  items={preview.filesToRename.map(f => ({
+                    key: f.from,
+                    label: `${f.from} → ${f.to}`,
+                    tooltip: f.collision ? 'Skipped: a file with that name already exists.' : `${f.from} → ${f.to}`,
+                    tone: f.collision ? 'danger' : 'default',
+                    icon: f.collision ? <AlertTriangle size={10} className="inline mr-1 mb-0.5" /> : undefined,
+                  }))}
+                />
                 {preview.hasCollisions && (
                   <p className="text-xs text-red-400 flex items-start gap-1.5">
                     <AlertTriangle size={11} className="shrink-0 mt-0.5" />
@@ -10948,10 +10934,28 @@ function DeleteModal({
         </div>
       )}
       <p className="text-sm text-gray-300 mb-3">The following will be moved to the Recycle Bin:</p>
-      <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
-        {!isDumpMode && (
-          <div className="text-gray-300 mb-1">📁 {target.folderName}/</div>
-        )}
+      <PathList
+        className="mb-3"
+        folder={isDumpMode ? undefined : `${target.folderName}/`}
+        empty={isDumpMode ? 'No files found for this date.' : '(empty)'}
+        items={(filesInFolder ?? []).map(f => {
+          // Show paths relative to the folder root so subfolders are
+          // visible (e.g. "thumbnails/thumb.png" instead of just
+          // "thumb.png"). For dump-mode paths that aren't under the
+          // folder root, fall back to the basename.
+          let display = f
+          if (display.startsWith(target.folderPath)) {
+            display = display.slice(target.folderPath.length).replace(/^[\\/]+/, '')
+          } else if (!display.includes('/') && !display.includes('\\')) {
+            // Already a bare name (e.g. listFilesForDate output)
+          } else {
+            display = display.split(/[\\/]/).pop() ?? display
+          }
+          // Normalize to forward slashes for readability.
+          display = display.replace(/\\/g, '/')
+          return { key: f, label: display, tooltip: f }
+        })}
+      >
         {filesInFolder === null ? (
           <span className="text-gray-400 italic text-xs">Loading…</span>
         ) : listFailed ? (
@@ -10961,35 +10965,8 @@ function DeleteModal({
               Retry
             </button>
           </span>
-        ) : filesInFolder.length === 0 ? (
-          <span className="text-gray-400 italic text-xs">{isDumpMode ? 'No files found for this date.' : '(empty)'}</span>
-        ) : (
-          filesInFolder.map(f => {
-            // Show paths relative to the folder root so subfolders are
-            // visible (e.g. "thumbnails/thumb.png" instead of just
-            // "thumb.png"). For dump-mode paths that aren't under the
-            // folder root, fall back to the basename.
-            let display = f
-            if (display.startsWith(target.folderPath)) {
-              display = display.slice(target.folderPath.length).replace(/^[\\/]+/, '')
-            } else if (!display.includes('/') && !display.includes('\\')) {
-              // Already a bare name (e.g. listFilesForDate output)
-            } else {
-              display = display.split(/[\\/]/).pop() ?? display
-            }
-            // Normalize to forward slashes for readability.
-            display = display.replace(/\\/g, '/')
-            return (
-              <div key={f} className="flex items-center gap-1.5 text-gray-400 py-px">
-                <span className="shrink-0 text-gray-400">·</span>
-                <Tooltip content={f} maxWidth="max-w-md" triggerClassName="block min-w-0">
-                  <span className="block truncate">{display}</span>
-                </Tooltip>
-              </div>
-            )
-          })
-        )}
-      </div>
+        ) : undefined}
+      </PathList>
       <p className="text-xs text-gray-400 mb-3">This action can be undone from the Recycle Bin.</p>
 
       {linkedVideoId && videoMissing && (

@@ -6,6 +6,7 @@ import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../type
 import { Button } from '../ui/Button'
 import { FileDropZone } from '../ui/FileDropZone'
 import { Modal } from '../ui/Modal'
+import { PathList } from '../ui/PathList'
 import { Tooltip } from '../ui/Tooltip'
 import { useStore } from '../../hooks/useStore'
 import { useDragAutoScroll } from '../../hooks/useDragAutoScroll'
@@ -1324,9 +1325,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           The conversion was cancelled. Do you want to delete the partial output file?
         </p>
         {deleteDialog && (
-          <p className="text-xs text-gray-400 font-mono break-all bg-navy-900 border border-white/5 rounded-lg px-3 py-2">
-            {deleteDialog.outputFile.replace(/.*[\\/]/, '')}
-          </p>
+          <PathList items={[{ key: deleteDialog.outputFile, label: deleteDialog.outputFile.replace(/.*[\\/]/, ''), tooltip: deleteDialog.outputFile }]} />
         )}
         <div className="flex justify-end gap-2">
           <Button variant="secondary" size="sm" onClick={() => setDeleteDialog(null)}>

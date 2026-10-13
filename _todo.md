@@ -224,6 +224,9 @@
 - **STR-44** [ui] [impact:3]
   Files grid import feedback. While a drop or browse import (move or copy into the stream folder) runs, the grid's drop zone shows only a spinner and "Adding files…", and opening another stream item shows the same busy state although the transfer belongs to the first one: the busy flag is one per grid, not per folder or per transfer. A spinner is also too little for a multi-GB video; files appear only as they land. Proposal: show the incoming file cards at once in a disabled state, enable each one as its copy or move completes, and give each card a progress bar like the converter rows (the import IPC would report per-file progress). Filed 2026-10-12.
 
+- **STR-45** [ui] [impact:2]
+  Files grid add and remove animations. A file added to the grid should slide in from the right, and a removed one should slide out to the left, the reverse, to go with the grid's left-to-right flow. Low priority. Filed 2026-10-12.
+
 ### Player
 
 - **PLR-3** [perf] [maybe]

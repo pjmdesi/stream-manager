@@ -9,6 +9,7 @@ import { FileDropZone } from '../ui/FileDropZone'
 import { rowActionClass } from '../ui/rowAction'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
+import { PathList } from '../ui/PathList'
 import { useCloudOps } from '../../context/CloudOpsContext'
 import { useInUse } from '../../hooks/useInUse'
 import { formatBytes } from '../../lib/formatBytes'
@@ -1435,25 +1436,32 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
             }
           >
             <p className="text-sm text-gray-300 mb-3">{many ? 'The following will be moved to the Recycle Bin:' : 'This file will be moved to the Recycle Bin:'}</p>
-            <div className="bg-white/5 rounded-lg px-3 py-2.5 mb-3 font-mono text-sm text-gray-200 max-h-64 overflow-y-auto">
-              {items.map(i => (
-                <div key={i.path} className="flex items-center gap-3 py-px">
-                  <Tooltip content={i.path} maxWidth="max-w-md" triggerClassName="block min-w-0 flex-1">
-                    <span className={`block truncate ${i.reason ? 'text-gray-400 line-through' : ''}`}>{i.name}</span>
-                  </Tooltip>
-                  <span className="shrink-0 text-xs text-gray-400">
-                    {i.reason ? 'in use, kept' : i.size > 0 ? formatBytes(i.size) : ''}
-                  </span>
-                </div>
-              ))}
-            </div>
+            <PathList
+              className="mb-3"
+              items={items.map(i => ({
+                key: i.path,
+                label: i.name,
+                tooltip: i.path,
+                trailing: i.reason ? 'In use' : i.size > 0 ? formatBytes(i.size) : '',
+                struck: !!i.reason,
+              }))}
+            />
+            {/* An offloaded file's delete may never reach the Windows
+                Recycle Bin: Synology Drive moves it to the NAS recycle bin
+                instead, and other clients differ. Say so instead of
+                promising an undo that is not there. */}
             {offloaded > 0 && (
               <div className="mb-3 rounded-lg border border-amber-300/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-                {offloaded === 1 && deletable.length === 1 ? 'This file is offloaded.' : `${offloaded} of these files are offloaded.`}
-                {' '}The delete reaches the cloud copy as well, so getting it back may mean the cloud provider's own recycle bin, not just this one.
+                {offloaded === 1 && deletable.length === 1
+                  ? 'This file is offloaded, so it may not go to the Windows Recycle Bin. Synology Drive keeps deleted files in the NAS recycle bin instead; other cloud clients differ.'
+                  : `${offloaded} of these files are offloaded, so they may not go to the Windows Recycle Bin. Synology Drive keeps deleted files in the NAS recycle bin instead; other cloud clients differ.`}
               </div>
             )}
-            <p className="text-xs text-gray-400">This action can be undone from the Recycle Bin.</p>
+            {deletable.length > offloaded && (
+              <p className="text-xs text-gray-400">
+                {offloaded > 0 ? 'The local files can be undone from the Recycle Bin.' : 'This action can be undone from the Recycle Bin.'}
+              </p>
+            )}
           </Modal>
         )
       })()}
