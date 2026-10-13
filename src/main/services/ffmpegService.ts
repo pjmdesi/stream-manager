@@ -73,6 +73,31 @@ export interface ChapterInfo {
   title?: string
 }
 
+/** Durations for an output check, in seconds: the longest audio or video
+ *  stream's (`media`) and the container's (`container`), null where ffprobe
+ *  reports none. Data tracks are left out on purpose: the mp4 muxer adds a
+ *  timecode track that runs the whole source length even when the media
+ *  was cut short, and the container duration follows it. Matroska keeps
+ *  duration only at container level, so `media` is null there. */
+export function probeMediaDurations(filePath: string): Promise<{ media: number | null; container: number | null }> {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) { reject(new Error(`FFprobe error: ${err.message}`)); return }
+      const positive = (v: unknown): number | null => {
+        const n = Number(v)
+        return Number.isFinite(n) && n > 0 ? n : null
+      }
+      let media: number | null = null
+      for (const s of metadata.streams) {
+        if (s.codec_type !== 'video' && s.codec_type !== 'audio') continue
+        const d = positive(s.duration)
+        if (d !== null && (media === null || d > media)) media = d
+      }
+      resolve({ media, container: positive(metadata.format.duration) })
+    })
+  })
+}
+
 export async function probeFile(filePath: string): Promise<VideoInfo> {
   return new Promise((resolve, reject) => {
     // -show_chapters on top of the default streams+format sections —
@@ -511,18 +536,22 @@ const SOFTWARE_PRESETS = new Set([
  *  The offsets come from measuring 30 s excerpts of three real recordings
  *  (1440p60 at 13 Mbps, 1080p60 at 7 Mbps and at 3.7 Mbps) against a
  *  lossless reference with VMAF, 2026-10-12 (CONV-19):
- *  - NVENC: HEVC CQ 34 lands where x265 CRF 26 does (VMAF 91 to 94 at 22 to
- *    29% of the source); AV1 CQ 40 lands where SVT-AV1 CRF 35 does (VMAF 93
- *    to 96 at 23 to 36%; CQ 36 matched CRF 32 the same way). `-rc vbr
- *    -b:v 0` makes the CQ the only target. H.264 CQ 32 sits just above
- *    x264 CRF 23 (VMAF 93.6 at 6.1 Mbps on the 1440p60 excerpt; CQ 30
- *    scored 95.5, CQ 34 92.4).
+ *  - NVENC: HEVC CQ 30 lands where x265 CRF 26 does plus a step of quality
+ *    (VMAF 94 to 96 at 38 to 46% of the source; CQ 34 was the exact match
+ *    at 22 to 29% and judged too soft on a dark 2D recording); AV1 CQ 36
+ *    lands where SVT-AV1 CRF 32 does (VMAF 95 to 96 at 37 to 52%; CQ 40
+ *    matched CRF 35 at 26 to 36%). `-rc vbr -b:v 0` makes the CQ the only
+ *    target. H.264 CQ 32 sits just above x264 CRF 23 (VMAF 93.6 at 6.1 Mbps
+ *    on the 1440p60 excerpt; CQ 30 scored 95.5, CQ 34 92.4).
+ *    The archive presets ship at SVT-AV1 CRF 29 and x265 CRF 23, which these
+ *    offsets turn into NVENC CQ 33 and CQ 27: one more step up on 2026-10-13,
+ *    after a typical 3D game archived at a quarter of its size at CQ 36.
  *  - AMF: `qvbr_quality_level` runs the OTHER way (higher is better). HEVC
  *    level 36 scored VMAF 91 to 93 on a Radeon iGPU, which anchors 62 minus
- *    the CRF; H.264 and AV1 use the same slope anchored to their presets'
- *    CRFs (23 and 35), unmeasured for lack of hardware here. v2.7.0 sent
- *    AMF and QSV the NVENC-only `-cq`, which they ignore, so those archives
- *    were encoded at the encoder's default bitrate target.
+ *    the CRF; H.264 and AV1 use the same slope anchored to the presets'
+ *    CRFs at the time (23 and 32), unmeasured for lack of hardware here.
+ *    v2.7.0 sent AMF and QSV the NVENC-only `-cq`, which they ignore, so
+ *    those archives were encoded at the encoder's default bitrate target.
  *  - QSV: `-global_quality` with no bitrate selects ICQ, a CRF-like scale.
  *    Unmeasured for lack of an Intel GPU here; the offsets lean to quality
  *    over size.
@@ -531,7 +560,7 @@ function hardwareQualityArgs(gpuCodec: string, crf: number): string[] {
   const clamp = (n: number, lo: number, hi: number) => String(Math.min(hi, Math.max(lo, Math.round(n))))
   const family: 'h264' | 'hevc' | 'av1' = gpuCodec.startsWith('av1') ? 'av1' : gpuCodec.startsWith('hevc') ? 'hevc' : 'h264'
   if (gpuCodec.endsWith('_nvenc')) {
-    const offset = { h264: 9, hevc: 8, av1: 5 }[family]
+    const offset = { h264: 9, hevc: 4, av1: 4 }[family]
     return ['-rc', 'vbr', '-cq', clamp(crf + offset, 0, 51), '-b:v', '0']
   }
   if (gpuCodec.endsWith('_amf')) {

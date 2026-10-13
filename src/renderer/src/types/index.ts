@@ -192,6 +192,8 @@ export interface AppConfig {
   streamsDir: string
   streamMode: StreamMode
   archivePresetId: string
+  /** Set when the user continues past the notice shown before the first archive. */
+  archiveNoticeAcknowledged: boolean
   clipPresetId: string
   /** Preset assigned to new files added to the Converter page. */
   defaultConversionPresetId: string
