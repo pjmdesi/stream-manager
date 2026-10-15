@@ -8,6 +8,7 @@ jobs:
   announce:
     if: ${{ !github.event.release.prerelease }}
     runs-on: ubuntu-latest
+    permissions: {}
     steps:
       - name: Post to Discord
         env:
@@ -24,16 +25,23 @@ jobs:
             --arg name "$NAME" \
             --arg url "$URL" \
             --arg body "$BODY" \
-            '{
-              content: "<@&\($role)> **Stream Manager \($tag)** is out.",
-              allowed_mentions: { parse: [], roles: [$role] },
-              embeds: [{
-                title: ((if $name == "" then $tag else $name end) | .[0:256]),
-                url: $url,
-                description: (if ($body | length) > 3500
-                  then ($body | .[0:3500]) + "…\n\n[Full release notes](" + $url + ")"
-                  else $body end),
-                color: 5814783
-              }]
-            }' \
+            '($body | gsub("\r\n"; "\n") | split("\n")) as $lines
+            | ([ $lines | to_entries[] | select(.value | test("^#{1,6}\s")) | .key ] | first // ($lines | length)) as $cut
+            | ($lines[0:$cut] | join("\n") | gsub("^\s+|\s+$"; "")) as $intro
+            | {
+                content: "<@&\($role)> **Stream Manager \($tag)** is out.",
+                allowed_mentions: { parse: [], roles: [$role] },
+                embeds: [
+                  {
+                    title: ((if $name == "" then $tag else $name end) | .[0:256]),
+                    url: $url,
+                    color: 8332030
+                  }
+                  + (if $intro == "" then {} else {
+                      description: (if ($intro | length) > 3500
+                        then ($intro | .[0:3500]) + "…\n\n[Full release notes](" + $url + ")"
+                        else $intro end)
+                    } end)
+                ]
+              }' \
           | curl -sSf --retry 3 -H "Content-Type: application/json" -d @- "$WEBHOOK"

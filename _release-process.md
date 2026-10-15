@@ -91,7 +91,7 @@ Then on GitHub:
 
 1. Actions: wait for the release workflow run on the tag to go green (a few minutes; typecheck + lint + dist on a clean runner).
 2. Releases: the workflow created a DRAFT release for the tag with the exe attached. Download that exe and smoke it: correct name, normal icon, **no chips** (a dev marker means the tag was cut from the wrong branch).
-3. Edit the draft: paste notes (edited from `_release-notes-draft.md`, then empty the draft file for the next cycle), mark **latest**, publish. No manual exe attach; the workflow already did it. Every release's copy ends with the "Questions and bug reports" section (Discord invite plus the issues link); when the draft is emptied, that section is re-added to the empty draft so it cannot be forgotten.
+3. Edit the draft: paste notes (edited from `_release-notes-draft.md`, then empty the draft file for the next cycle), mark **latest**, publish. No manual exe attach; the workflow already did it. Every release's copy ends with the "Questions and bug reports" section (Discord invite plus the issues link); when the draft is emptied, that section is re-added to the empty draft so it cannot be forgotten. The release copy has no title line (the release page already shows the name): it opens with a short plain-prose summary, with no headings, tables or images in it, followed by the `## ` sections. The Discord release announcement (`.github/workflows/discord-release.yml`, fired when the draft is published) posts that opening summary to the server and nothing from the first heading on, which stays GitHub-only.
 4. Verify `releases/latest` resolves to the new version; the website's download buttons point there.
 
 Back in the repo:
@@ -118,7 +118,7 @@ git merge master             # IMMEDIATELY — keeps dev a superset
 git push
 ```
 
-Never fix release bugs on dev first: master falls behind and the next promotion inherits untested drift. Hotfix notes go straight into the GitHub release, NOT into `_release-notes-draft.md` (that file is only for unreleased work).
+Never fix release bugs on dev first: master falls behind and the next promotion inherits untested drift. Hotfix notes go straight into the GitHub release, NOT into `_release-notes-draft.md` (that file is only for unreleased work), and open with the same plain-prose summary as step 3 above, since the Discord announcement posts it.
 
 ## Versioning
 
