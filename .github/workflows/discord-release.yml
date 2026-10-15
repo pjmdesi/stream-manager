@@ -1,0 +1,39 @@
+name: Discord release announcement
+
+on:
+  release:
+    types: [published]
+
+jobs:
+  announce:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post to Discord
+        env:
+          WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          ROLE_ID: ${{ vars.DISCORD_SM_ROLE_ID }}
+          TAG: ${{ github.event.release.tag_name }}
+          NAME: ${{ github.event.release.name }}
+          URL: ${{ github.event.release.html_url }}
+          BODY: ${{ github.event.release.body }}
+        run: |
+          jq -n \
+            --arg role "$ROLE_ID" \
+            --arg tag "$TAG" \
+            --arg name "$NAME" \
+            --arg url "$URL" \
+            --arg body "$BODY" \
+            '{
+              content: "<@&\($role)> **Stream Manager \($tag)** is out.",
+              allowed_mentions: { parse: [], roles: [$role] },
+              embeds: [{
+                title: ((if $name == "" then $tag else $name end) | .[0:256]),
+                url: $url,
+                description: (if ($body | length) > 3500
+                  then ($body | .[0:3500]) + "…\n\n[Full release notes](" + $url + ")"
+                  else $body end),
+                color: 5814783
+              }]
+            }' \
+          | curl -sSf --retry 3 -H "Content-Type: application/json" -d @- "$WEBHOOK"
