@@ -918,6 +918,10 @@ export async function startConversionJob(
   const id = job.id || uuidv4()
   const newJob: ConversionJob = { ...withInputSize(job), id, status: 'running', progress: 0 }
   jobs.set(id, newJob)
+  // The renderer's row for this job may be its own optimistic entry, made
+  // before the input was ever stat'ed; push the record so the row carries
+  // the input size (the source size beside the name, the "% of source").
+  broadcastJob(id)
   // If this job was previously queued, drop it from the persisted queue now that it's running.
   persistPendingJobs()
 

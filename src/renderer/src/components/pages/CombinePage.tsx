@@ -1208,10 +1208,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                 <>
                                   <span className="whitespace-nowrap">{runProgress}%</span>
                                   {elapsedMs > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsedMs / 1000)}</span>}
-                                  <span className={runProgress === 0 && elapsedMs >= 15000 ? 'text-amber-300' : undefined}>
-                                    {paused
-                                      ? 'Paused'
-                                      : runProgress === 0
+                                  {/* Converter parity: the Remaining value stays through a
+                                      pause (the elapsed clock stops, so it holds still); the
+                                      status icon already says paused. */}
+                                  <span className={`whitespace-nowrap ${runProgress === 0 && elapsedMs >= 15000 ? 'text-amber-300' : ''}`}>
+                                    {runProgress === 0
                                         // An honest stall tell: a copy-concat
                                         // should tick within seconds, so a
                                         // silent 0% names itself instead of
@@ -1219,7 +1220,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                         ? (elapsedMs >= 15000 ? 'No progress from ffmpeg yet — it may be stuck reading an input' : 'Starting…')
                                         : `Remaining: ${elapsedMs > 0 ? formatTimecode((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
                                   </span>
-                                  {!paused && (() => {
+                                  {(() => {
                                     // Converter parity: an estimate from the bytes written so
                                     // far, shown once 5 percent is done, against the summed
                                     // source sizes when every input's size is known.

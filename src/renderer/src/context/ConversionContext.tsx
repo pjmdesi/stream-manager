@@ -99,7 +99,12 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'error', error } : j))
     })
     const unsubAdded = window.api.onJobAdded((job: ConversionJob) => {
-      setJobs(prev => prev.some(j => j.id === job.id) ? prev : [...prev, job])
+      // A row the page added optimistically is kept (its position, its
+      // renderer-only fields) but takes main's fields over it, such as the
+      // input size main stat'ed on the way in.
+      setJobs(prev => prev.some(j => j.id === job.id)
+        ? prev.map(j => j.id === job.id ? { ...j, ...job } : j)
+        : [...prev, job])
     })
     // Main pushes the whole record when a change is more than a status: an
     // archive output kept for "Replace anyway", its later resolution, the

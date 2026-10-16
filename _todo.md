@@ -434,6 +434,9 @@
 - **CONV-22** [bug] [investigate] [impact:2]
   The Elapsed clock on converting rows sometimes skips a second (8:20 to 8:22) and sometimes does not advance on a tick while other rows did (0:20 stays 0:20). A timer should be consistent and predictable. Not reproduced on demand (2026-10-16). Candidates: the shared 1 Hz tick in ConversionContext accumulates wall-clock deltas, so a late interval callback (a busy render, a large file list) adds two seconds at once; the per-job elapsed map is mutated in place and a row only repaints when something else triggers it, so one tick can be missed; the Combine page keeps its own elapsed state with the same shape. Verify with timestamps logged per tick before changing anything. Raised 2026-10-16.
 
+- **CONV-23** [ui] [impact:2]
+  A finished conversion row stays in the Finished list after its output file is gone (deleted from the files grid, from Explorer, or by the row's own partial-file dialog). Remove the row on its own when the file no longer exists, or mark it as deleted if a trace is wanted; check on the streams-changed events the page already receives and when the window regains focus, so an Explorer delete is caught too. Raised 2026-10-16.
+
 ### Combine
 
 - **COMB-1** [needs-design]
