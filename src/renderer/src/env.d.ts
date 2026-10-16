@@ -240,7 +240,7 @@ declare global {
       cancelCombine(): Promise<void>
       pauseCombine(): Promise<void>
       resumeCombine(): Promise<void>
-      onCombineProgress(cb: (data: { percent: number }) => void): () => void
+      onCombineProgress(cb: (data: { percent: number; outputBytes?: number }) => void): () => void
 
       // ── YouTube ──────────────────────────────────────────────────────────────
       youtubeGetStatus(): Promise<{ connected: boolean; channelName?: string }>

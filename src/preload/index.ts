@@ -468,7 +468,7 @@ contextBridge.exposeInMainWorld('api', {
   resumeCombine: () =>
     ipcRenderer.invoke('combine:resume'),
 
-  onCombineProgress: (callback: (data: { percent: number }) => void) => {
+  onCombineProgress: (callback: (data: { percent: number; outputBytes?: number }) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('combine:progress', handler)
     return () => ipcRenderer.removeListener('combine:progress', handler)

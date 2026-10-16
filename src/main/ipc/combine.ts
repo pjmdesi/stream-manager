@@ -68,9 +68,11 @@ export function registerCombineIPC(): void {
       fs.writeFileSync(listPath, listContent, 'utf-8')
 
       const win = BrowserWindow.fromWebContents(event.sender)
-      const send = (percent: number) => {
+      // outputBytes: what ffmpeg has written so far (its total_size line),
+      // for the row's growing size and final-size estimate.
+      const send = (percent: number, outputBytes?: number) => {
         if (win && !win.isDestroyed())
-          win.webContents.send('combine:progress', { percent })
+          win.webContents.send('combine:progress', { percent, outputBytes })
       }
 
       // Written as `<output>.tmp` (invisible to sync clients while it grows),
@@ -138,7 +140,9 @@ export function registerCombineIPC(): void {
             startedWriting = true
             if (totalDurationSec > 0) {
               const outSec = parseInt(match[1]) / 1_000_000
-              send(Math.min(99, Math.round((outSec / totalDurationSec) * 100)))
+              const sizeMatch = text.match(/total_size=(\d+)/)
+              const outputBytes = sizeMatch ? parseInt(sizeMatch[1]) : undefined
+              send(Math.min(99, Math.round((outSec / totalDurationSec) * 100)), outputBytes)
             }
           }
         })

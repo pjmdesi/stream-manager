@@ -844,11 +844,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const sizeEstimate = (() => {
       if (!isActive || !job.outputBytes || !Number.isFinite(job.progress) || job.progress < 5) return null
       const est = job.outputBytes / (job.progress / 100)
-      const ratio = job.inputSize ? ` (${Math.round((est / job.inputSize) * 100)}% of original)` : ''
-      return `about ${formatBytes(est)}${ratio}`
+      const ratio = job.inputSize ? ` (${Math.round((est / job.inputSize) * 100)}% of source)` : ''
+      return `~${formatBytes(est)}${ratio}`
     })()
     const finalSizeText = isDone && job.outputSize && !job.keptOriginal
-      ? `${formatBytes(job.outputSize)}${job.inputSize ? ` (${Math.round((job.outputSize / job.inputSize) * 100)}% of original)` : ''}`
+      ? `${formatBytes(job.outputSize)}${job.inputSize ? ` (${Math.round((job.outputSize / job.inputSize) * 100)}% of source)` : ''}`
       : null
     const kept = job.keptOriginal
     const keptText = kept ? (() => {
@@ -859,6 +859,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       if (kept.resolved === 'discarded') return `${lead} The larger file was discarded.`
       return `${lead} The larger file is discarded ${formatRemaining(kept.expiresAt - nowTick)} unless you replace the original with it.`
     })() : null
+    // The size beside the output name: the bytes written so far while the
+    // encoder runs, the final size once done, nothing once a kept larger
+    // file has been discarded (it no longer exists).
+    const outputBytesNow = (isActive || isReplacing)
+      ? job.outputBytes
+      : isDone && !(kept?.resolved && kept.resolved !== 'replaced')
+        ? job.outputSize
+        : undefined
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
     // The raw dir keeps whichever separators built it ("\" from main's
@@ -897,22 +905,25 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
           {/* Filenames row */}
           <div className="flex items-center gap-2">
-            <div className="shrink-0 max-w-[30%] min-w-0">
-              <TruncText text={job.inputFile.split(/[\\/]/).pop() ?? job.inputFile} className="font-mono text-sm text-gray-400" />
+            {/* Each name carries its size in small text: the source's logical
+                size, and the output as it grows or its final size once done. */}
+            <div className="shrink-0 max-w-[30%] min-w-0 flex items-baseline gap-1.5">
+              <div className="min-w-0"><TruncText text={job.inputFile.split(/[\\/]/).pop() ?? job.inputFile} className="font-mono text-sm text-gray-400" /></div>
+              {typeof job.inputSize === 'number' && (
+                <span className="text-[11px] text-gray-500 tabular-nums shrink-0">{formatBytes(job.inputSize)}</span>
+              )}
             </div>
             <span className="text-sm text-gray-400 shrink-0">→</span>
             {/* Hide the temp-file name for replaceInput jobs — they're invisible
                 to the user; show the input file's name instead so the row reads
                 as "input → input (replaced in place)". */}
-            <div className="flex-1 min-w-0">
-              <TruncText text={(job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName) ?? ''} className="font-mono text-sm text-gray-200" />
-            </div>
-            <span className="text-xs text-gray-400 shrink-0">
-              {job.preset.name}
-              {typeof job.inputSize === 'number' && (
-                <span className="ml-1.5 text-gray-400 tabular-nums">· {formatBytes(job.inputSize)}</span>
+            <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+              <div className="min-w-0"><TruncText text={(job.replaceInput ? job.inputFile.split(/[\\/]/).pop() : outputName) ?? ''} className="font-mono text-sm text-gray-200" /></div>
+              {outputBytesNow != null && (
+                <span className="text-[11px] text-gray-500 tabular-nums shrink-0">{formatBytes(outputBytesNow)}</span>
               )}
-            </span>
+            </div>
+            <span className="text-xs text-gray-400 shrink-0">{job.preset.name}</span>
           </div>
 
           {/* Link back to the source stream (only for files sent from one). */}
@@ -964,13 +975,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <span className="whitespace-nowrap">
                 {job.progress === 0
                   ? 'Starting…'
-                  : `ETA: ${eta !== null && eta > 0 ? formatTimecode(eta / 1000) : 'Estimating…'}`}
+                  : `Remaining: ${eta !== null && eta > 0 ? formatTimecode(eta / 1000) : 'Estimating…'}`}
               </span>
-              {sizeEstimate && (
-                <Tooltip content="Estimated final size, from what the encoder has written so far" side="top">
-                  <span className="whitespace-nowrap cursor-default">{sizeEstimate}</span>
-                </Tooltip>
-              )}
+              <Tooltip content="Estimated final size, from what the encoder has written so far; shown once 5 percent is done" side="top">
+                <span className="whitespace-nowrap cursor-default">Final size: {sizeEstimate ?? 'estimating…'}</span>
+              </Tooltip>
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button
@@ -988,7 +997,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span className="whitespace-nowrap">100%</span>
               {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(finalElapsed / 1000)}</span>}
-              {finalSizeText && <span className="whitespace-nowrap">{finalSizeText}</span>}
+              {finalSizeText && <span className="whitespace-nowrap">Final size: {finalSizeText}</span>}
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button

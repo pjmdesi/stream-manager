@@ -271,6 +271,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
         <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
           <span className="whitespace-nowrap">100%</span>
           <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsedMs / 1000)}</span>
+          {outInfo?.size != null && <span className="whitespace-nowrap">Final size: {formatBytes(outInfo.size)}</span>}
           <Tooltip content={`Open output folder: ${displayPath(outDir)}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
             <button
               onClick={() => window.api.openInExplorer(outDir)}
@@ -308,6 +309,9 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
   // elapsed timer's effect below.
   const [runState, setRunState] = useState<{ groupId: number; paused: boolean; downloading: boolean } | null>(null)
   const [runProgress, setRunProgress] = useState(0)
+  // Bytes ffmpeg has written so far in the active run (converter parity):
+  // the size beside the output name and the final-size estimate.
+  const [runOutputBytes, setRunOutputBytes] = useState<number | undefined>(undefined)
   const [cancelling, setCancelling] = useState(false)
   // Cancels the pre-run hydration WAIT (the downloads themselves live in
   // the cloud-ops queue and keep going — hydration has no pause, same as
@@ -658,6 +662,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     setRunProgress(0)
     elapsedRef.current = 0
     setElapsedMs(0)
+    setRunOutputBytes(undefined)
     patchGroup(groupId, g => ({ ...g, completed: null, error: null, cancelledNotice: false, holdNotice: null }))
     setCancelling(false)
     cancelHydrateRef.current = false
@@ -667,7 +672,10 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
     // stop after the download and let the user decide with it visible.
     const fpsWarningWasVisible = computeCompat(group.files).fpsMismatch
 
-    const unsub = window.api.onCombineProgress(({ percent }) => setRunProgress(percent))
+    const unsub = window.api.onCombineProgress(({ percent, outputBytes }) => {
+      setRunProgress(percent)
+      if (outputBytes !== undefined) setRunOutputBytes(outputBytes)
+    })
     const sourcePaths = group.files.map(f => f.path)
     const outputPath = group.outputPath
     // Claim the sources for the run: the streams page's delete guards
@@ -1167,11 +1175,16 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                           <div className="flex items-center gap-2">
-                            <Tooltip content={g.outputPath} maxWidth="max-w-md" triggerClassName="flex-1 min-w-0">
-                              <span className="block font-mono text-sm text-gray-200 truncate">{nameOf(g.outputPath)}</span>
-                            </Tooltip>
+                            <div className="flex-1 min-w-0 flex items-baseline gap-1.5">
+                              <Tooltip content={g.outputPath} maxWidth="max-w-md" triggerClassName="min-w-0">
+                                <span className="block font-mono text-sm text-gray-200 truncate">{nameOf(g.outputPath)}</span>
+                              </Tooltip>
+                              {runOutputBytes != null && !downloading && (
+                                <span className="text-[11px] text-gray-500 tabular-nums shrink-0">{formatBytes(runOutputBytes)}</span>
+                              )}
+                            </div>
                             <span className="text-xs text-gray-400 shrink-0">
-                              Combining {g.files.length} files
+                              Combining {g.files.length} files{g.files.every(f => f.size != null) ? ` · ${formatBytes(g.files.reduce((s, f) => s + (f.size ?? 0), 0))}` : ''}
                             </span>
                           </div>
                           {g.stream && (
@@ -1204,8 +1217,20 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                         // silent 0% names itself instead of
                                         // pretending to start forever.
                                         ? (elapsedMs >= 15000 ? 'No progress from ffmpeg yet — it may be stuck reading an input' : 'Starting…')
-                                        : `ETA: ${elapsedMs > 0 ? formatTimecode((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
+                                        : `Remaining: ${elapsedMs > 0 ? formatTimecode((elapsedMs * (100 - runProgress) / runProgress) / 1000) : 'Estimating…'}`}
                                   </span>
+                                  {!paused && (() => {
+                                    // Converter parity: an estimate from the bytes written so
+                                    // far, shown once 5 percent is done, against the summed
+                                    // source sizes when every input's size is known.
+                                    const total = g.files.every(f => f.size != null) ? g.files.reduce((s, f) => s + (f.size ?? 0), 0) : 0
+                                    const est = runOutputBytes && runProgress >= 5 ? runOutputBytes / (runProgress / 100) : null
+                                    return (
+                                      <span className="whitespace-nowrap">
+                                        Final size: {est ? `~${formatBytes(est)}${total ? ` (${Math.round((est / total) * 100)}% of source)` : ''}` : 'estimating…'}
+                                      </span>
+                                    )
+                                  })()}
                                 </>
                               )}
                             <Tooltip content={`Open output folder: ${displayPath(dirOf(g.outputPath))}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
