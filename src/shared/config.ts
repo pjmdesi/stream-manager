@@ -21,6 +21,10 @@ export interface AppConfig {
   archivePresetId: string
   /** Set when the user continues past the notice shown before the first archive. */
   archiveNoticeAcknowledged: boolean
+  /** Minutes an archive output that came out no smaller than its original is
+   *  kept for "Replace anyway" before it is discarded (CONV-15). No Settings
+   *  control; edit the config file to change it. */
+  keptLargerOutputMinutes: number
   clipPresetId: string
   /** Preset assigned to new files added to the Converter page. */
   defaultConversionPresetId: string
@@ -169,6 +173,7 @@ export const CONFIG_DEFAULTS: AppConfig = {
   streamMode: '',
   archivePresetId: '',
   archiveNoticeAcknowledged: false,
+  keptLargerOutputMinutes: 120,
   clipPresetId: '',
   defaultConversionPresetId: '',
   defaultBroadcastTime: '19:00',

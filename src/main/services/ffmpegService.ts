@@ -706,7 +706,7 @@ export function runConversion(
   outputFile: string,
   ffmpegArgs: string,
   duration: number,
-  onProgress: (percent: number) => void,
+  onProgress: (percent: number, outputBytes?: number) => void,
   onComplete: () => void,
   onError: (err: Error) => void,
   owner: ChildOwner,
@@ -733,12 +733,15 @@ export function runConversion(
       if (cancelled) { try { command.kill('SIGKILL') } catch (_) {} }
     })
     .on('progress', (progress) => {
+      // Bytes written so far: fluent-ffmpeg reports ffmpeg's `size=` in kB.
+      // The converter row turns it into an estimated final size (CONV-15).
+      const outputBytes = Number.isFinite(progress.targetSize) ? progress.targetSize * 1024 : undefined
       if (duration > 0 && progress.timemark) {
         const parts = progress.timemark.split(':')
         const seconds = parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2])
-        onProgress(Math.min(100, Math.round((seconds / duration) * 1000) / 10))
+        onProgress(Math.min(100, Math.round((seconds / duration) * 1000) / 10), outputBytes)
       } else if (progress.percent != null) {
-        onProgress(Math.min(100, Math.round(progress.percent * 10) / 10))
+        onProgress(Math.min(100, Math.round(progress.percent * 10) / 10), outputBytes)
       }
     })
     .on('end', () => {

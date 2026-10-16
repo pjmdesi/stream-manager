@@ -63,6 +63,8 @@
 33. APP-35
 34. SYNC-7
 35. STR-44
+36. THU-41
+37. STR-47
 
 ## Improvement ideas
 
@@ -230,6 +232,9 @@
 - **STR-46** [bug] [ui] [impact:2]
   Linking a normal YouTube upload to a stream item dated today or later leaves the sidebar footer stuck: the privacy field shows "Loading…" forever, Push to YouTube stays disabled, and nothing offers an unlink (the paste field hides once linked and Unlink only appears when the video is known-deleted). Reproduced 2026-10-13 on the 2026-10-13 item linked to M_Pp183rt-M: the broadcast lookup returns null (it is an upload, not a broadcast) and the video lookup returns it with privacy private. Cause: the linked record is read from `isPastStream ? ytVods : ytBroadcasts`, and the paste-URL path seeds `ytVods`, so a same-day item never finds it; the single-record fallback then asks the broadcasts endpoint only. Fix in two parts: (1) an escape hatch in every linked state, an Unlink control that does not depend on the record resolving, and a "Loading…" that gives up into "Could not load video details" with Unlink and Retry once the lookup has returned nothing; (2) resolve the link across both pools and fall back from the broadcast lookup to the video lookup, so an upload linked to a same-day item resolves at once. Left alone, the item resolves on its own the next day, when its date counts as past.
 
+- **STR-47** [impact:1] [bug]
+  When multi-select mode is left on in the streams list and a user is sent to a specific stream item later from another page like the converter page, the multi-select mode remains active after the stream item is opened. Multi-select mode should be forced closed when a stream item is opened from a link.
+
 ### Player
 
 - **PLR-3** [perf] [maybe]
@@ -355,6 +360,9 @@
 - **THU-40** [ui] [bug]
   The flip vertical/horizontal buttons in the floating alignment panel seem to be swapped. The action matches the tooltip, but I don't think the icons are correct.
 
+- **THU-41** [impact:2]
+  Add setting to asset panel menu to show assets from streams on the same day
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -394,6 +402,7 @@
 
 - **CONV-15** [investigate] [impact:3]
   When archiving streams, sometimes the archive preset creates files that are larger than the original. This mostly happens to my older streams where I was using a much lower bitrate. It's not really archiving if the output is larger, and since the archive process deletes the original, we need to add a check after the conversion process is complete (or maybe during the conversion process if we could estimate the output file size), and if it is bigger than the source file, it should warn the user and give them a choice to keep the original or let the app overwite anyway.
+  Built 2026-10-16, awaiting review: the archive swap keeps the original when the output is not smaller, parks the larger file as the job's temp for two hours (config keptLargerOutputMinutes, no Settings control) with Replace anyway behind a confirmation and Discard now on the row, an amber clock or shield instead of the green check, and no archived mark unless the file was actually replaced; the progress row shows an estimated final size from five percent on, and finished rows show the final size as a share of the original.
 
   In fact, it would be great if we could add a new data point in the ETA row for converting items which estimates the output file size.
 

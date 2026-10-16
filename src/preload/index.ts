@@ -293,6 +293,9 @@ contextBridge.exposeInMainWorld('api', {
   removeJob: (jobId: string) =>
     ipcRenderer.invoke('converter:removeJob', jobId),
 
+  resolveKeptOutput: (jobId: string, action: 'replace' | 'discard') =>
+    ipcRenderer.invoke('converter:resolveKeptOutput', jobId, action),
+
   isPathInUseByConverter: (filePath: string) =>
     ipcRenderer.invoke('converter:isPathInUse', filePath),
   isFolderInUseByConverter: (folderPath: string) =>
@@ -320,6 +323,12 @@ contextBridge.exposeInMainWorld('api', {
     const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
     ipcRenderer.on('converter:jobAdded', handler)
     return () => ipcRenderer.removeListener('converter:jobAdded', handler)
+  },
+
+  onJobUpdated: (callback: (job: any) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: any) => callback(data)
+    ipcRenderer.on('converter:jobUpdated', handler)
+    return () => ipcRenderer.removeListener('converter:jobUpdated', handler)
   },
 
   onJobStatus: (callback: (data: { jobId: string; status: string }) => void) => {

@@ -173,12 +173,16 @@ declare global {
       startQueuedJob(jobId: string): Promise<void>
       getJobs(): Promise<ConversionJob[]>
       removeJob(jobId: string): Promise<void>
+      /** Settle an archive output kept because it was no smaller than its original: swap it in, or discard it (CONV-15). */
+      resolveKeptOutput(jobId: string, action: 'replace' | 'discard'): Promise<void>
       isPathInUseByConverter(filePath: string): Promise<boolean>
       isFolderInUseByConverter(folderPath: string): Promise<boolean>
-      onJobProgress(cb: (data: { jobId: string; percent: number; status?: string }) => void): () => void
-      onJobComplete(cb: (data: { jobId: string; outputPath: string }) => void): () => void
+      onJobProgress(cb: (data: { jobId: string; percent: number; outputBytes?: number; status?: string }) => void): () => void
+      onJobComplete(cb: (data: { jobId: string; outputPath: string; outputSize?: number }) => void): () => void
       onJobError(cb: (data: { jobId: string; error: string }) => void): () => void
       onJobAdded(cb: (job: ConversionJob) => void): () => void
+      /** Main pushed a changed job record (a kept archive output, its resolution, the final size); merge it over the row. */
+      onJobUpdated(cb: (job: ConversionJob) => void): () => void
       onJobStatus(cb: (data: { jobId: string; status: ConversionJob['status']; autoStart?: boolean }) => void): () => void
 
       // ── Store ────────────────────────────────────────────────────────────────

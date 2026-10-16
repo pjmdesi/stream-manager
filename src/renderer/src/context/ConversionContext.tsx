@@ -65,14 +65,14 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
   // IPC listeners — kept at the provider so events keep landing in shared
   // state regardless of which page is mounted.
   useEffect(() => {
-    const unsubProgress = window.api.onJobProgress(({ jobId, percent }: { jobId: string; percent: number }) => {
+    const unsubProgress = window.api.onJobProgress(({ jobId, percent, outputBytes }: { jobId: string; percent: number; outputBytes?: number }) => {
       setJobs(prev => prev.map(j => {
         if (j.id !== jobId) return j
         // Don't override transient sub-states ('downloading', 'replacing',
         // 'paused') just because a progress tick arrived. Only nudge
         // queued → running.
         const next = (j.status === 'queued') ? 'running' : j.status
-        return { ...j, progress: percent, status: next }
+        return { ...j, progress: percent, status: next, ...(outputBytes !== undefined ? { outputBytes } : {}) }
       }))
     })
     const unsubStatus = window.api.onJobStatus(({ jobId, status, autoStart }) => {
@@ -90,10 +90,10 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
           }
         : j))
     })
-    const unsubComplete = window.api.onJobComplete(({ jobId }: { jobId: string }) => {
+    const unsubComplete = window.api.onJobComplete(({ jobId, outputSize }: { jobId: string; outputSize?: number }) => {
       const elapsed = jobElapsed.current.get(jobId)
       if (elapsed !== undefined) jobFinalElapsed.current.set(jobId, elapsed)
-      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'done', progress: 100 } : j))
+      setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'done', progress: 100, ...(outputSize !== undefined ? { outputSize } : {}) } : j))
     })
     const unsubError = window.api.onJobError(({ jobId, error }: { jobId: string; error: string }) => {
       setJobs(prev => prev.map(j => j.id === jobId ? { ...j, status: 'error', error } : j))
@@ -101,7 +101,13 @@ export function ConversionProvider({ children }: { children: React.ReactNode }) 
     const unsubAdded = window.api.onJobAdded((job: ConversionJob) => {
       setJobs(prev => prev.some(j => j.id === job.id) ? prev : [...prev, job])
     })
-    return () => { unsubProgress(); unsubStatus(); unsubComplete(); unsubError(); unsubAdded() }
+    // Main pushes the whole record when a change is more than a status: an
+    // archive output kept for "Replace anyway", its later resolution, the
+    // final size. Merged over the row so renderer-only fields survive.
+    const unsubUpdated = window.api.onJobUpdated((job: ConversionJob) => {
+      setJobs(prev => prev.map(j => j.id === job.id ? { ...j, ...job } : j))
+    })
+    return () => { unsubProgress(); unsubStatus(); unsubComplete(); unsubError(); unsubAdded(); unsubUpdated() }
   }, [])
 
   // Tick every second. Accumulates active-only elapsed time and recomputes

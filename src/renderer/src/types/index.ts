@@ -134,6 +134,18 @@ export type GroupCompletionHook =
       metaKey?: string
     }
 
+/** An archive whose output came out no smaller than its original (CONV-15):
+ *  the original was kept and the output waits as the job's temp file for
+ *  "Replace anyway" until `expiresAt`, then is discarded. */
+export interface KeptOriginal {
+  inputBytes: number
+  outputBytes: number
+  /** When the waiting output is discarded, ms since epoch. */
+  expiresAt: number
+  /** Unset while the output waits; set once the user or the clock decided. */
+  resolved?: 'replaced' | 'discarded' | 'expired'
+}
+
 export interface ConversionJob {
   id: string
   inputFile: string
@@ -146,6 +158,11 @@ export interface ConversionJob {
    *  "still waiting" hint (APP-37), since a held cloud request gives no
    *  other signal. */
   downloadingSince?: number
+  /** Renderer-only: bytes the encoder has written so far, from the latest
+   *  progress tick. The row estimates the final size from it (CONV-15). */
+  outputBytes?: number
+  /** Final output size in bytes, set by main when the job finishes (CONV-15). */
+  outputSize?: number
   /** Logical size of the input file in bytes, captured when the job was
    *  first queued/started. Stable for the lifetime of the job (cloud
    *  placeholders return the full size, not the on-disk footprint). */
@@ -168,6 +185,9 @@ export interface ConversionJob {
    *  replaces the input on success (unlink original → rename temp). Used for
    *  in-place archive operations. */
   replaceInput?: boolean
+  /** Set by main when an archive output was kept aside instead of replacing
+   *  the original; see KeptOriginal (CONV-15). */
+  keptOriginal?: KeptOriginal
   /** Fired in the main process once every job sharing this groupId has reached
    *  status 'done'. Skipped if any job in the group failed or was cancelled. */
   groupCompletionHook?: GroupCompletionHook

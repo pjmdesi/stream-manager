@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical } from 'lucide-react'
+import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical, ShieldCheck } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../types'
 import { Button } from '../ui/Button'
@@ -207,7 +207,15 @@ function audioTrackLabel(t: AudioTrackInfo, defaults: readonly string[] | undefi
   return `Track ${t.index + 1}${desc ? ` — ${desc}` : ''}${meta ? ` · ${meta}` : ''}`
 }
 
-function StatusIcon({ status, size = 14 }: { status: ConversionJob['status']; size?: number }) {
+function StatusIcon({ status, kept, size = 14 }: { status: ConversionJob['status']; kept?: ConversionJob['keptOriginal']; size?: number }) {
+  // A kept original (CONV-15) is not a success tick: an amber clock while the
+  // larger output waits for a decision, an amber shield once it is gone and
+  // the original stands. Only an actual replacement earns the green check.
+  if (status === 'done' && kept && kept.resolved !== 'replaced') {
+    return kept.resolved
+      ? <ShieldCheck size={size} className="text-amber-300 shrink-0" />
+      : <Clock size={size} className="text-amber-300 shrink-0" />
+  }
   if (status === 'done')        return <CheckCircle size={size} className="text-green-400 shrink-0" />
   if (status === 'error')       return <AlertCircle size={size} className="text-red-400 shrink-0" />
   if (status === 'downloading') return <Cloud size={size} className="text-blue-400 animate-pulse shrink-0" />
@@ -245,6 +253,16 @@ function RowProgressFill({ percent, status, tint }: { percent: number; status: C
       style={{ width: isIndeterminate ? '100%' : `${pct}%` }}
     />
   )
+}
+
+/** "in 1 h 58 min", "in 12 min", "in under a minute": the kept-output countdown (CONV-15). */
+function formatRemaining(ms: number): string {
+  const minutes = Math.ceil(ms / 60_000)
+  if (minutes < 1) return 'in under a minute'
+  if (minutes < 60) return `in ${minutes} min`
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  return m === 0 ? `in ${h} h` : `in ${h} h ${m} min`
 }
 
 function getOutputPath(inputFile: string, preset: ConversionPreset, outputDir: string, trackSuffix = ''): string {
@@ -311,6 +329,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   const [importError, setImportError] = useState('')
   const [presetsModalOpen, setPresetsModalOpen] = useState(false)
   const [deleteDialog, setDeleteDialog] = useState<{ jobId: string; outputFile: string } | null>(null)
+  // CONV-15: an archive output kept because it was no smaller than its
+  // original waits for "Replace anyway" behind this confirmation, and its
+  // row counts down; a 30-second tick keeps the countdown honest while any
+  // such row exists.
+  const [replaceDialog, setReplaceDialog] = useState<ConversionJob | null>(null)
+  const [nowTick, setNowTick] = useState(() => Date.now())
+  const anyKeptPending = jobs.some(j => j.keptOriginal && !j.keptOriginal.resolved)
+  useEffect(() => {
+    if (!anyKeptPending) return
+    setNowTick(Date.now())
+    const t = setInterval(() => setNowTick(Date.now()), 30_000)
+    return () => clearInterval(t)
+  }, [anyKeptPending])
   const [cancelAllDialog, setCancelAllDialog] = useState(false)
 
   const autoDeletePartial = !!config.autoDeletePartialOnCancel
@@ -799,6 +830,28 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     const elapsed = jobElapsed.get(job.id) ?? 0
     const finalElapsed = jobFinalElapsed.get(job.id) ?? 0
     const eta = jobEtas.get(job.id) ?? null
+    // CONV-15: estimated final size from the bytes written so far, held back
+    // until 5 percent because a stream's opening minutes are not
+    // representative; the final size and ratio once the job is done; and
+    // the kept-original note with its countdown.
+    const sizeEstimate = (() => {
+      if (!isActive || !job.outputBytes || !Number.isFinite(job.progress) || job.progress < 5) return null
+      const est = job.outputBytes / (job.progress / 100)
+      const ratio = job.inputSize ? ` (${Math.round((est / job.inputSize) * 100)}% of original)` : ''
+      return `about ${formatBytes(est)}${ratio}`
+    })()
+    const finalSizeText = isDone && job.outputSize && !job.keptOriginal
+      ? `${formatBytes(job.outputSize)}${job.inputSize ? ` (${Math.round((job.outputSize / job.inputSize) * 100)}% of original)` : ''}`
+      : null
+    const kept = job.keptOriginal
+    const keptText = kept ? (() => {
+      const sizes = `${formatBytes(kept.outputBytes)} against ${formatBytes(kept.inputBytes)}`
+      if (kept.resolved === 'replaced') return `Replaced with the larger file (${sizes}).`
+      const lead = `Original kept: the archive would have been larger (${sizes}).`
+      if (kept.resolved === 'expired') return `${lead} The larger file was discarded when its time ran out.`
+      if (kept.resolved === 'discarded') return `${lead} The larger file was discarded.`
+      return `${lead} The larger file is discarded ${formatRemaining(kept.expiresAt - nowTick)} unless you replace the original with it.`
+    })() : null
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
     // The raw dir keeps whichever separators built it ("\" from main's
@@ -831,7 +884,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         {/* Status column — between the thumbnail and the text stack so the
             state reads at a glance without hunting inside the filename row. */}
         <div className="self-center shrink-0 flex items-center justify-center w-6">
-          <StatusIcon status={job.status} size={20} />
+          <StatusIcon status={job.status} kept={job.keptOriginal} size={20} />
         </div>
         {/* Left: all content */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
@@ -906,6 +959,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                   ? 'Starting…'
                   : `ETA: ${eta !== null && eta > 0 ? formatTimecode(eta / 1000) : 'Estimating…'}`}
               </span>
+              {sizeEstimate && (
+                <Tooltip content="Estimated final size, from what the encoder has written so far" side="top">
+                  <span className="whitespace-nowrap cursor-default">{sizeEstimate}</span>
+                </Tooltip>
+              )}
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button
@@ -923,6 +981,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
               <span className="whitespace-nowrap">100%</span>
               {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(finalElapsed / 1000)}</span>}
+              {finalSizeText && <span className="whitespace-nowrap">{finalSizeText}</span>}
               {!job.replaceInput && (
                 <Tooltip content={`Open output folder: ${outputDirText}`} maxWidth="max-w-md" side="top" triggerClassName="ml-auto min-w-0">
                   <button
@@ -932,6 +991,22 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                     {outputDirText}
                   </button>
                 </Tooltip>
+              )}
+            </div>
+          )}
+
+          {kept && (
+            <div className="flex flex-col gap-1.5 text-xs">
+              <span className={kept.resolved === 'replaced' ? 'text-gray-400' : 'text-amber-300'}>{keptText}</span>
+              {!kept.resolved && (
+                <div className="flex items-center gap-1">
+                  <Tooltip content="Delete the original recording and put the larger file in its place" side="top">
+                    <button onClick={() => setReplaceDialog(job)} className={rowActionClass('red')}>Replace anyway</button>
+                  </Tooltip>
+                  <Tooltip content="Delete the larger file now and keep the original" side="top">
+                    <button onClick={() => window.api.resolveKeptOutput(job.id, 'discard').catch(() => {})} className={rowActionClass('blue')}>Discard now</button>
+                  </Tooltip>
+                </div>
               )}
             </div>
           )}
@@ -1352,6 +1427,35 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     </Modal>
 
     <Modal
+      isOpen={!!replaceDialog}
+      onClose={() => setReplaceDialog(null)}
+      title="Replace the original?"
+      width="sm"
+    >
+      {replaceDialog && (
+        <div className="flex flex-col gap-4">
+          <p className="text-sm text-gray-300">
+            The archive is larger than the original ({formatBytes(replaceDialog.keptOriginal?.outputBytes ?? 0)} against {formatBytes(replaceDialog.keptOriginal?.inputBytes ?? 0)}). Replacing deletes the original recording, and that cannot be undone.
+          </p>
+          <PathList items={[{ key: replaceDialog.inputFile, label: replaceDialog.inputFile.replace(/.*[\\/]/, ''), tooltip: replaceDialog.inputFile }]} />
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" size="sm" onClick={() => setReplaceDialog(null)}>Keep the original</Button>
+            <Button
+              variant="danger"
+              size="sm"
+              onClick={() => {
+                window.api.resolveKeptOutput(replaceDialog.id, 'replace').catch(() => {})
+                setReplaceDialog(null)
+              }}
+            >
+              Replace anyway
+            </Button>
+          </div>
+        </div>
+      )}
+    </Modal>
+
+    <Modal
       isOpen={cancelAllDialog}
       onClose={() => setCancelAllDialog(false)}
       title="Cancel all conversions?"
@@ -1413,10 +1517,11 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         seenGroups.add(job.groupId)
         const groupJobs = list.filter(j => j.groupId === job.groupId)
         const total = groupJobs.length
-        const doneN = groupJobs.filter(j => j.status === 'done').length
+        const keptN = groupJobs.filter(j => j.status === 'done' && j.keptOriginal && j.keptOriginal.resolved !== 'replaced').length
+        const doneN = groupJobs.filter(j => j.status === 'done').length - keptN
         const errN = groupJobs.filter(j => j.status === 'error').length
         const cancelledN = groupJobs.filter(j => j.status === 'cancelled').length
-        const finishedN = doneN + errN + cancelledN
+        const finishedN = doneN + keptN + errN + cancelledN
         const aggregatePct = (groupJobs.reduce((sum, j) =>
           sum + (j.status === 'done' ? 100 : (j.status === 'cancelled' || j.status === 'error') ? 0 : (j.progress ?? 0)), 0) / total)
         const groupActive = groupJobs.some(j =>
@@ -1424,7 +1529,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           j.status === 'replacing' || j.status === 'paused')
         const groupSummary =
           finishedN === total
-            ? `${doneN}/${total} complete${errN > 0 ? `, ${errN} failed` : ''}${cancelledN > 0 ? `, ${cancelledN} cancelled` : ''}`
+            ? `${doneN}/${total} complete${keptN > 0 ? `, ${keptN} original kept` : ''}${errN > 0 ? `, ${errN} failed` : ''}${cancelledN > 0 ? `, ${cancelledN} cancelled` : ''}`
             : `${finishedN}/${total} done`
         items.push(
           <div key={`g:${job.groupId}`} className="border-b border-white/5 last:border-0">

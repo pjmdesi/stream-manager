@@ -87,6 +87,18 @@ export type GroupCompletionHook =
       metaKey?: string
     }
 
+/** An archive whose output came out no smaller than its original (CONV-15):
+ *  the original was kept and the output waits as the job's `.tmp` for
+ *  "Replace anyway" until `expiresAt`, then is discarded. */
+export interface KeptOriginal {
+  inputBytes: number
+  outputBytes: number
+  /** When the waiting output is discarded, ms since epoch. */
+  expiresAt: number
+  /** Unset while the output waits; set once the user or the clock decided. */
+  resolved?: 'replaced' | 'discarded' | 'expired'
+}
+
 export interface ConversionJob {
   id: string
   inputFile: string
@@ -107,6 +119,11 @@ export interface ConversionJob {
    *  replaces the input on success (unlink original → rename temp). Used for
    *  in-place archive operations. */
   replaceInput?: boolean
+  /** Final output size in bytes, set when the job finishes (CONV-15). */
+  outputSize?: number
+  /** Set when an archive output was kept aside instead of replacing the
+   *  original; see KeptOriginal (CONV-15). */
+  keptOriginal?: KeptOriginal
   /** Fired in the main process once every job sharing this groupId has reached
    *  status 'done'. Skipped if any job in the group failed or was cancelled. */
   groupCompletionHook?: GroupCompletionHook
@@ -497,7 +514,11 @@ export async function prepareConverterForQuit(timeoutMs = 4000): Promise<void> {
   // that gets a tick before close exits cleanly.
   for (const flag of downloadCancelFlags.values()) flag.cancelled = true
   parkInFlightJobsForQuit()
-  const partials = [...new Set(encoding.filter(j => j.outputFile).map(j => writePathOf(j)))]
+  // Archive outputs waiting for "Replace anyway" (CONV-15) end with the app:
+  // the row that offers the choice does not survive a restart.
+  const kept = [...jobs.values()].filter(j => j.keptOriginal && !j.keptOriginal.resolved)
+  for (const j of kept) clearKeptOutputTimer(j.id)
+  const partials = [...new Set([...encoding, ...kept].filter(j => j.outputFile).map(j => writePathOf(j)))]
   if (partials.length === 0) return
   // Persist FIRST so a lock (or anything else) can't lose the list.
   getStore().set(QUIT_PARTIALS_KEY, partials)
@@ -908,10 +929,10 @@ export async function startConversionJob(
   }
   broadcast('converter:jobProgress', { jobId: id, percent: 0 })
 
-  const handleProgress = (percent: number) => {
+  const handleProgress = (percent: number, outputBytes?: number) => {
     const j = jobs.get(id)
     if (j) jobs.set(id, { ...j, progress: percent })
-    broadcast('converter:jobProgress', { jobId: id, percent })
+    broadcast('converter:jobProgress', { jobId: id, percent, outputBytes })
     notifyJobProgress(id, percent)
   }
 
@@ -958,61 +979,27 @@ export async function startConversionJob(
       // BOTH copies when a sync client/AV held a handle at the wrong moment:
       // the unlink succeeded (no recycle bin), the rename failed, and the
       // error path then deleted the finished temp too.
+      // Where the archive's output ended up, for the size bookkeeping below.
+      let replacedPath: string | null = null
       if (job.replaceInput) {
+        // CONV-15 size guard: an output that is not smaller than its original
+        // is not an archive. Keep the original, park the output as the job's
+        // `.tmp` for "Replace anyway", and let the clock discard it.
+        const inputBytes = fileSizeOrZero(job.inputFile)
+        const outputBytes = fileSizeOrZero(writePath)
+        if (inputBytes > 0 && outputBytes >= inputBytes) {
+          keepOriginalForLargerOutput(id, inputBytes, outputBytes)
+          scheduleNext()
+          resolve()
+          return
+        }
         setStatus('replacing')
-        const inputExt = (job.inputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
-        const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
-        const finalPath = inputExt === outputExt
-          ? job.inputFile
-          : job.inputFile.replace(/\.[^.]+$/, outputExt)
-        const backupPath = job.inputFile + '.smbak'
-        // On swap failure the encode itself SUCCEEDED and verified, which is
-        // potentially hours of work, so instead of deleting the finished
-        // output, keep it as a visible "<name>-archived.<ext>" sibling the
-        // user can swap in manually (or just delete). Replaces any previous
-        // preserve of the same input; repeat failures would produce the same
-        // content anyway. Only failed ENCODES still delete their (garbage)
-        // temp, via handleError's default cleanup.
-        const preserveOutput = (): string => {
-          const preservedPath = job.inputFile.replace(/\.[^.]+$/, '') + `-archived${outputExt}`
-          try {
-            fs.renameSync(writePath, preservedPath)
-            return `The finished conversion was kept as "${path.basename(preservedPath)}". Delete the original and rename it to finish manually, without re-encoding.`
-          } catch {
-            // Temp itself locked: leave it in place and keep trying in the
-            // background; it stays a `.tmp` until then.
-            renameWithRetry(writePath, preservedPath, 'preserved archive output')
-            return `The finished conversion is being kept as "${path.basename(preservedPath)}" (rename pending, the file is still locked).`
-          }
-        }
-        try {
-          fs.renameSync(job.inputFile, backupPath)
-        } catch (e: any) {
-          handleError(new Error(`Replace failed (original untouched): ${e.message}. ${preserveOutput()}`), { keepOutput: true })
+        const swap = swapReplaceInput(job, writePath)
+        if (!swap.ok) {
+          handleError(new Error(swap.message), { keepOutput: true })
           return
         }
-        try {
-          fs.renameSync(writePath, finalPath)
-        } catch (e: any) {
-          try {
-            fs.renameSync(backupPath, job.inputFile)
-          } catch (restoreErr: any) {
-            // Both renames failing back-to-back means the folder is hard
-            // locked. Nothing has been deleted: the original is intact
-            // under the backup name, so say exactly that.
-            handleError(new Error(
-              `Replace failed and the original could not be renamed back. It is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message}) ${preserveOutput()}`
-            ), { keepOutput: true })
-            return
-          }
-          handleError(new Error(`Replace failed: ${e.message}. ${preserveOutput()}`), { keepOutput: true })
-          return
-        }
-        // Success: the replacement is verified and in place, the backup is
-        // a duplicate, and archiving exists to reclaim space, so it's a
-        // permanent delete (with retries for transient handles). Worst case
-        // a .smbak lingers: costs disk, never data.
-        deleteWithRetry(backupPath, 'replace-original backup')
+        replacedPath = swap.finalPath
       } else {
         // Everything else: the verified temp takes its final name. Replacing
         // an existing file keeps the semantics the old `-y` write had (a
@@ -1027,12 +1014,13 @@ export async function startConversionJob(
           return
         }
       }
-      jobs.set(id, { ...cur, status: 'done', progress: 100 })
+      const outputSize = fileSizeOrZero(replacedPath ?? job.outputFile)
+      jobs.set(id, { ...cur, status: 'done', progress: 100, outputSize })
       cancellers.delete(id)
       pausers.delete(id)
       resumers.delete(id)
       downloadCancelFlags.delete(id)
-      broadcast('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
+      broadcast('converter:jobComplete', { jobId: id, outputPath: job.outputFile, outputSize })
       // Replace-in-place jobs land on the ORIGINAL path; everything else on
       // the output path.
       notifyStreamOutput(job.replaceInput ? job.inputFile : job.outputFile)
@@ -1225,7 +1213,10 @@ function maybeFireGroupHook(jobId: string): void {
   const finalStates: ConversionJob['status'][] = ['done', 'error', 'cancelled']
   if (groupJobs.some(j => !finalStates.includes(j.status))) return
   // All done — but only fire if every one succeeded.
-  const allSucceeded = groupJobs.every(j => j.status === 'done')
+  // An archive whose output was kept aside (CONV-15) did not replace its
+  // file, so it does not count until "Replace anyway" lands: the stream's
+  // archived mark is provenance, not a wish.
+  const allSucceeded = groupJobs.every(j => j.status === 'done' && (!j.keptOriginal || j.keptOriginal.resolved === 'replaced'))
   if (!allSucceeded) return
   // Find the hook on any job in the group (we copy it onto every group job at
   // submission, so any of them works).
@@ -1234,6 +1225,157 @@ function maybeFireGroupHook(jobId: string): void {
   fireGroupCompletionHook(hook).catch(err =>
     console.error('[converter] group completion hook failed:', err)
   )
+}
+
+// ── CONV-15: archive outputs no smaller than their original ──────────────
+// The guard in handleComplete parks such an output as the job's `.tmp`
+// (invisible to the files grid and to sync clients) and the row offers
+// "Replace anyway" for a window; then the output is discarded. The window
+// also ends with the row (removeJob) and with the app
+// (prepareConverterForQuit): finished rows do not survive a restart.
+const keptOutputTimers = new Map<string, NodeJS.Timeout>()
+
+function keptOutputWindowMs(): number {
+  const cfg = getStore().get('config') as { keptLargerOutputMinutes?: number } | undefined
+  const minutes = Number(cfg?.keptLargerOutputMinutes)
+  return (Number.isFinite(minutes) && minutes > 0 ? minutes : 120) * 60_000
+}
+
+function clearKeptOutputTimer(id: string): void {
+  const t = keptOutputTimers.get(id)
+  if (t) clearTimeout(t)
+  keptOutputTimers.delete(id)
+}
+
+function fileSizeOrZero(p: string): number {
+  try { return fs.statSync(p).size } catch { return 0 }
+}
+
+/** Pushes a job's whole record to the renderer, for changes that are more
+ *  than a status (kept-original state, final size). */
+function broadcastJob(id: string): void {
+  const j = jobs.get(id)
+  if (j) broadcast('converter:jobUpdated', j)
+}
+
+/** The path an archive's output takes over: the input's own path, or the
+ *  input renamed to the preset's extension when the container changes
+ *  (archiving an .mp4 with an mkv-output preset). */
+function finalPathForReplace(job: Pick<ConversionJob, 'inputFile' | 'outputFile'>): string {
+  const inputExt = (job.inputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+  const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+  return inputExt === outputExt ? job.inputFile : job.inputFile.replace(/\.[^.]+$/, outputExt)
+}
+
+/** Swap a verified archive output into its original's place.
+ *
+ *  Swap order matters: (1) rename the original aside as a backup, (2) rename
+ *  the temp into the final name, (3) delete the backup only after 2
+ *  succeeded. Every failure leaves the original recoverable: step 1 failing
+ *  touches nothing, step 2 failing renames the backup straight back. The old
+ *  unlink-then-rename order permanently lost BOTH copies when a sync
+ *  client/AV held a handle at the wrong moment: the unlink succeeded (no
+ *  recycle bin), the rename failed, and the error path then deleted the
+ *  finished temp too.
+ *
+ *  On a failure the encode itself SUCCEEDED and verified, which is
+ *  potentially hours of work, so instead of deleting the finished output it
+ *  is kept as a visible "<name>-archived.<ext>" sibling the user can swap in
+ *  manually (or just delete); the returned message says so. Replaces any
+ *  previous preserve of the same input; repeat failures would produce the
+ *  same content anyway. */
+function swapReplaceInput(job: Pick<ConversionJob, 'inputFile' | 'outputFile'>, writePath: string): { ok: true; finalPath: string } | { ok: false; message: string } {
+  const outputExt = (job.outputFile.match(/\.[^.]+$/)?.[0] ?? '').toLowerCase()
+  const finalPath = finalPathForReplace(job)
+  const backupPath = job.inputFile + '.smbak'
+  const preserveOutput = (): string => {
+    const preservedPath = job.inputFile.replace(/\.[^.]+$/, '') + `-archived${outputExt}`
+    try {
+      fs.renameSync(writePath, preservedPath)
+      return `The finished conversion was kept as "${path.basename(preservedPath)}". Delete the original and rename it to finish manually, without re-encoding.`
+    } catch {
+      // Temp itself locked: leave it in place and keep trying in the
+      // background; it stays a `.tmp` until then.
+      renameWithRetry(writePath, preservedPath, 'preserved archive output')
+      return `The finished conversion is being kept as "${path.basename(preservedPath)}" (rename pending, the file is still locked).`
+    }
+  }
+  try {
+    fs.renameSync(job.inputFile, backupPath)
+  } catch (e: any) {
+    return { ok: false, message: `Replace failed (original untouched): ${e.message}. ${preserveOutput()}` }
+  }
+  try {
+    fs.renameSync(writePath, finalPath)
+  } catch (e: any) {
+    try {
+      fs.renameSync(backupPath, job.inputFile)
+    } catch (restoreErr: any) {
+      // Both renames failing back-to-back means the folder is hard locked.
+      // Nothing has been deleted: the original is intact under the backup
+      // name, so say exactly that.
+      return { ok: false, message: `Replace failed and the original could not be renamed back. It is intact as "${path.basename(backupPath)}" in the stream folder. (${e.message}; restore: ${restoreErr.message}) ${preserveOutput()}` }
+    }
+    return { ok: false, message: `Replace failed: ${e.message}. ${preserveOutput()}` }
+  }
+  // Success: the replacement is verified and in place, the backup is a
+  // duplicate, and archiving exists to reclaim space, so it's a permanent
+  // delete (with retries for transient handles). Worst case a .smbak
+  // lingers: costs disk, never data.
+  deleteWithRetry(backupPath, 'replace-original backup')
+  return { ok: true, finalPath }
+}
+
+/** The size guard's outcome: the job finishes as 'done' with the original
+ *  untouched, the output parked, and the clock running. */
+function keepOriginalForLargerOutput(id: string, inputBytes: number, outputBytes: number): void {
+  const cur = jobs.get(id)
+  if (!cur) return
+  const expiresAt = Date.now() + keptOutputWindowMs()
+  jobs.set(id, { ...cur, status: 'done', progress: 100, outputSize: outputBytes, keptOriginal: { inputBytes, outputBytes, expiresAt } })
+  cancellers.delete(id)
+  pausers.delete(id)
+  resumers.delete(id)
+  downloadCancelFlags.delete(id)
+  broadcast('converter:jobComplete', { jobId: id, outputPath: cur.outputFile, outputSize: outputBytes })
+  broadcastJob(id)
+  clearKeptOutputTimer(id)
+  keptOutputTimers.set(id, setTimeout(() => discardKeptOutput(id, 'expired'), expiresAt - Date.now()))
+  // Counts as not archived for the stream mark (see maybeFireGroupHook).
+  maybeFireGroupHook(id)
+}
+
+function discardKeptOutput(id: string, reason: 'discarded' | 'expired'): void {
+  clearKeptOutputTimer(id)
+  const j = jobs.get(id)
+  if (!j?.keptOriginal || j.keptOriginal.resolved) return
+  deleteWithRetry(writePathOf(j), 'kept larger archive output')
+  jobs.set(id, { ...j, keptOriginal: { ...j.keptOriginal, resolved: reason } })
+  broadcastJob(id)
+}
+
+/** "Replace anyway": the parked output takes the original's place after all. */
+function replaceKeptOutput(id: string): void {
+  const j = jobs.get(id)
+  const kept = j?.keptOriginal
+  if (!j || !kept || kept.resolved) return
+  clearKeptOutputTimer(id)
+  const writePath = writePathOf(j)
+  const fail = (message: string): void => {
+    jobs.set(id, { ...j, status: 'error', error: message, keptOriginal: { ...kept, resolved: 'discarded' } })
+    broadcast('converter:jobError', { jobId: id, error: message })
+    broadcastJob(id)
+  }
+  if (!fs.existsSync(writePath)) { fail('The kept file is gone; nothing was changed.'); return }
+  jobs.set(id, { ...j, status: 'replacing' })
+  broadcast('converter:jobStatus', { jobId: id, status: 'replacing' })
+  const swap = swapReplaceInput(j, writePath)
+  if (!swap.ok) { fail(swap.message); return }
+  jobs.set(id, { ...j, status: 'done', progress: 100, outputSize: fileSizeOrZero(swap.finalPath), keptOriginal: { ...kept, resolved: 'replaced' } })
+  broadcast('converter:jobStatus', { jobId: id, status: 'done' })
+  broadcastJob(id)
+  notifyStreamOutput(j.inputFile)
+  maybeFireGroupHook(id)
 }
 
 async function fireGroupCompletionHook(hook: GroupCompletionHook): Promise<void> {
@@ -2053,10 +2195,19 @@ export function registerConverterIPC(): void {
   // renderer reloads) and the persisted pending queue, so a removed job doesn't
   // reappear after a Ctrl+R / restart. Refuses to remove a job that's still in
   // flight; the caller should cancel it first.
+  // CONV-15: settle an archive output kept because it was no smaller than
+  // its original. 'replace' swaps it in now; 'discard' deletes it.
+  ipcMain.handle('converter:resolveKeptOutput', async (_event, jobId: string, action: 'replace' | 'discard') => {
+    if (action === 'discard') discardKeptOutput(jobId, 'discarded')
+    else replaceKeptOutput(jobId)
+  })
+
   ipcMain.handle('converter:removeJob', async (_event, jobId: string) => {
     const j = jobs.get(jobId)
     if (!j) return
     if (j.status === 'running' || j.status === 'downloading' || j.status === 'replacing' || j.status === 'paused') return
+    // A kept archive output (CONV-15) goes with its row.
+    if (j.keptOriginal && !j.keptOriginal.resolved) discardKeptOutput(jobId, 'discarded')
     jobs.delete(jobId)
     cancellers.delete(jobId)
     pausers.delete(jobId)
