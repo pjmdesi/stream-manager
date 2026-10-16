@@ -312,32 +312,26 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
       <div className="shrink-0">
         <TaggedThumb
           thumb={<VideoThumb path={path} width={104} height={58} checker rounded={isShort || isClip || isCombined || isRecording ? 'rounded-t-md' : 'rounded-md'} />}
-          tag={isShort ? { color: 'violet', label: 'Short' }
-            : isClip ? { color: 'pink', label: 'Clip' }
-            : isCombined ? { color: 'orange', label: 'Combined' }
-            : isRecording ? {
-                color: 'red',
-                label: 'Recording',
-                // Archived marker lives in the tray (same layout as the
-                // thumbnail tag's bookmark), not next to the filename.
-                // strokeWidth 3: at 9px the default 2px stroke rasterizes
-                // into sub-pixel smudge and the glyph stops reading as a box.
-                icon: archived ? <Archive size={9} strokeWidth={3} className="text-emerald-400" /> : undefined,
-                tooltip: archived ? 'Archived by Stream Manager' : undefined,
-              }
-            : null}
+          tag={(() => {
+            // The archived marker lives in the tag tray for every kind of
+            // video (same layout as the thumbnail tag's bookmark), never
+            // next to the filename: one place, one meaning. strokeWidth 3:
+            // at 9px the default 2px stroke rasterizes into sub-pixel smudge
+            // and the glyph stops reading as a box.
+            const archivedTag = archived
+              ? { icon: <Archive size={9} strokeWidth={3} className="text-emerald-400" />, tooltip: 'Archived by Stream Manager' }
+              : {}
+            return isShort ? { color: 'violet' as const, label: 'Short', ...archivedTag }
+              : isClip ? { color: 'pink' as const, label: 'Clip', ...archivedTag }
+              : isCombined ? { color: 'orange' as const, label: 'Combined', ...archivedTag }
+              : isRecording ? { color: 'red' as const, label: 'Recording', ...archivedTag }
+              : null
+          })()}
         />
       </div>
       <div className="flex-1 min-w-0 flex flex-col">
         <div className="flex items-center gap-1.5 min-w-0">
           <TruncatedText text={name} className="text-xs text-gray-200 truncate" />
-          {/* Archived marker for NON-recording videos (e.g. an archived file
-              whose category shifted) — recordings carry it in their tag tray. */}
-          {archived && !isRecording && (
-            <Tooltip content="Archived by Stream Manager" side="top">
-              <Archive size={11} strokeWidth={2.5} className="shrink-0 text-emerald-400" />
-            </Tooltip>
-          )}
         </div>
         <div className={META_LINE}>
           {isShort || isClip ? <Scissors size={11} className={TYPE_ICON} /> : isCombined ? <Combine size={11} className={TYPE_ICON} /> : <Film size={11} className={TYPE_ICON} />}

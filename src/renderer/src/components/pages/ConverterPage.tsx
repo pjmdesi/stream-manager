@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { XCircle, Zap, CheckCircle, AlertCircle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical, ShieldCheck } from 'lucide-react'
+import { XCircle, Zap, CheckCircle, AlertCircle, AlertTriangle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical, ShieldCheck } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../types'
 import { Button } from '../ui/Button'
@@ -208,13 +208,15 @@ function audioTrackLabel(t: AudioTrackInfo, defaults: readonly string[] | undefi
 }
 
 function StatusIcon({ status, kept, size = 14 }: { status: ConversionJob['status']; kept?: ConversionJob['keptOriginal']; size?: number }) {
-  // A kept original (CONV-15) is not a success tick: an amber clock while the
-  // larger output waits for a decision, an amber shield once it is gone and
-  // the original stands. Only an actual replacement earns the green check.
+  // A kept original (CONV-15) is not a success tick: an amber caution
+  // triangle while the larger output waits for a decision, an amber shield
+  // once it is gone and the original stands. Only an actual replacement
+  // earns the green check. (The clock below means queued, so it is not
+  // reused here.)
   if (status === 'done' && kept && kept.resolved !== 'replaced') {
     return kept.resolved
       ? <ShieldCheck size={size} className="text-amber-300 shrink-0" />
-      : <Clock size={size} className="text-amber-300 shrink-0" />
+      : <AlertTriangle size={size} className="text-amber-300 shrink-0" />
   }
   if (status === 'done')        return <CheckCircle size={size} className="text-green-400 shrink-0" />
   if (status === 'error')       return <AlertCircle size={size} className="text-red-400 shrink-0" />
@@ -223,7 +225,7 @@ function StatusIcon({ status, kept, size = 14 }: { status: ConversionJob['status
   if (status === 'replacing')   return <RefreshCw size={size} className="text-accent-300 animate-spin shrink-0" />
   if (status === 'paused')      return <Pause size={size} className="text-yellow-400 shrink-0" />
   if (status === 'cancelled')   return <XCircle size={size} className="text-gray-400 shrink-0" />
-  return <Clock size={size} className="text-yellow-500 shrink-0" />
+  return <Clock size={size} className="text-blue-300 shrink-0" />
 }
 
 /** Progress rendered as the row's own background: a tinted fill that grows
@@ -805,10 +807,15 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     // (Transient states like 'downloading' and 'replacing' were once
     // cleared by an allow-list mistake, which made in-flight cloud
     // archives vanish mid-wait; the terminal-state test avoids that.)
-    const clearedIds = new Set(finishedJobs.map(j => j.id))
+    // A row whose larger archive output still waits for a decision
+    // (CONV-15) stays, and so does the rest of its group, so a Clear all
+    // never discards a file without saying so.
+    const pendingGroups = new Set(finishedJobs.filter(j => j.keptOriginal && !j.keptOriginal.resolved).map(j => j.groupId ?? j.id))
+    const clearable = finishedJobs.filter(j => !pendingGroups.has(j.groupId ?? j.id))
+    const clearedIds = new Set(clearable.map(j => j.id))
     setJobs(prev => prev.filter(j => !clearedIds.has(j.id)))
     // Evict from the main process too, or getJobs re-hydrates them on reload.
-    finishedJobs.forEach(j => {
+    clearable.forEach(j => {
       jobEtas.delete(j.id)
       jobElapsed.delete(j.id)
       jobFinalElapsed.delete(j.id)
@@ -1080,10 +1087,21 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             </button>
           )}
           {(isDone || isCancelled || isError || job.status === 'queued') && (
-            <button onClick={() => removeJob(job.id)} className={rowActionClass('red')}>
-              <Trash2 size={13} />
-              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
-            </button>
+            kept && !kept.resolved ? (
+              // Removing the row would discard the larger file without saying
+              // so; the decision comes first (CONV-15).
+              <Tooltip content="Decide on the larger file first: Replace anyway or Discard now" side="top">
+                <button disabled className={rowActionClass('red')}>
+                  <Trash2 size={13} />
+                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+                </button>
+              </Tooltip>
+            ) : (
+              <button onClick={() => removeJob(job.id)} className={rowActionClass('red')}>
+                <Trash2 size={13} />
+                <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+              </button>
+            )
           )}
         </div>
       </div>

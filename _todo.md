@@ -295,11 +295,11 @@
   After adjusting the volume of an audio track in multi-track editing mode, the focus remains on the volume slider, taking over functionality of keyboard shortcuts. The focus on the sliders should only stick the the user focused it manually with the tab key, otherwise it should release focus immediately after lifting the mouse.
 
 - **PLR-31** [bug] [impact:3]
-  When attempting to go to a next/prev stream item in the player using the provided buttons, if that stream item in question does not have a hydrated video, it attempts to play that video instead of detecting that it is not hydrated and displays an error, then refuses the navigation. It should navigate anyway, and show that no videos could be opened since none of them are hydrated, and then offer to hydrated the primary video (the one that is auto-picked to be the one that opens at first).
+  When attempting to go to a next/prev stream item in the player using the provided buttons, if that stream item in question does not have a hydrated video, it attempts to play that video instead of detecting that it is not hydrated and displays an error, then refuses the navigation. It should navigate anyway, and show that no videos could be opened since none of them are hydrated, and then offer to hydrate the primary video (the one that is auto-picked to be the one that opens at first).
 
   Similarly, when I select a stream item from the popup list, and select one which is not hydrated, SM triggers a hydration, but otherwise gives no feedback (I only know it got triggered because I see the windows notification). We need to give the same feedback as attempting to open from the streams page: show the "this file isn't hydrated" modal with the offer to begin the hydration.
 
-  This actually seems to have broken the cloud sync functionality as every cloud-based action I attempted after that hydration was triggered failed on the SM side.
+  These interactions actually seem to have broken the cloud sync functionality as every cloud-based action I attempted after that hydration was triggered failed on the SM side.
 
 - **PLR-32** [bug] [ui] [impact:1]
   When the zoom/pan is at or near max, the zoom indicator in the clipper toolbar disappears. It should not disappear. It should stay visible regardless of the values.
@@ -402,7 +402,7 @@
 
 - **CONV-15** [investigate] [impact:3]
   When archiving streams, sometimes the archive preset creates files that are larger than the original. This mostly happens to my older streams where I was using a much lower bitrate. It's not really archiving if the output is larger, and since the archive process deletes the original, we need to add a check after the conversion process is complete (or maybe during the conversion process if we could estimate the output file size), and if it is bigger than the source file, it should warn the user and give them a choice to keep the original or let the app overwite anyway.
-  Built 2026-10-16, awaiting review: the archive swap keeps the original when the output is not smaller, parks the larger file as the job's temp for two hours (config keptLargerOutputMinutes, no Settings control) with Replace anyway behind a confirmation and Discard now on the row, an amber clock or shield instead of the green check, and no archived mark unless the file was actually replaced; the progress row shows an estimated final size from five percent on, and finished rows show the final size as a share of the original.
+  Built 2026-10-16 (review round 1 folded in: no-confirm quit discards the kept output, caution triangle while the decision is open, Remove and Clear all held until it is made; round 2: the files grid shows the archived marker in the tag tray for every video kind, the corner marker next to the name is gone), awaiting review: the archive swap keeps the original when the output is not smaller, parks the larger file as the job's temp for two hours (config keptLargerOutputMinutes, no Settings control) with Replace anyway behind a confirmation and Discard now on the row, an amber clock or shield instead of the green check, and no archived mark unless the file was actually replaced; the progress row shows an estimated final size from five percent on, and finished rows show the final size as a share of the original.
 
   In fact, it would be great if we could add a new data point in the ETA row for converting items which estimates the output file size.
 

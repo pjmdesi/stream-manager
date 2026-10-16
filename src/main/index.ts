@@ -99,7 +99,7 @@ if (!app.isPackaged) {
 import { registerVideoIPC } from './ipc/video'
 import { registerFilesIPC } from './ipc/files'
 import { registerTemplatesIPC } from './ipc/templates'
-import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit } from './ipc/converter'
+import { registerConverterIPC, getConverterStatus, getActiveConversionCounts, prepareConverterForQuit, discardKeptOutputsForQuit } from './ipc/converter'
 import { registerStoreIPC, getConfig, setConfigPartial, applyLoginItem, applyUiZoomToWindows, migrateConfigSecrets } from './ipc/store'
 import { getTokens as getYouTubeTokens } from './services/youtubeAuth'
 import { getTokens as getTwitchTokens } from './services/twitchAuth'
@@ -531,7 +531,13 @@ app.whenReady().then(() => {
     if (confirmedClose) return
     const { running, queued } = getActiveConversionCounts()
     const fileOps = fileWatcher.getActiveFileOpCount()
-    if (running === 0 && fileOps === 0 && !rendererSettingsDirty) return
+    if (running === 0 && fileOps === 0 && !rendererSettingsDirty) {
+      // Nothing to confirm, but archive outputs kept for "Replace anyway"
+      // (CONV-15) end with the app; the confirmed-quit path below covers
+      // them through prepareConverterForQuit, this path has to do it here.
+      discardKeptOutputsForQuit()
+      return
+    }
     event.preventDefault()
     if (!mainWindow.isVisible()) {
       mainWindow.show()

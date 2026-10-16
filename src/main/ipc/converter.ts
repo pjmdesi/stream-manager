@@ -1345,6 +1345,23 @@ function keepOriginalForLargerOutput(id: string, inputBytes: number, outputBytes
   maybeFireGroupHook(id)
 }
 
+/** Quit path for a window with no running encode (no confirm dialog, so
+ *  prepareConverterForQuit never runs): the kept archive outputs still have
+ *  to go, synchronously, because the process is about to end. Anything
+ *  locked is left for the next launch's sweep. */
+export function discardKeptOutputsForQuit(): void {
+  const kept = [...jobs.values()].filter(j => j.keptOriginal && !j.keptOriginal.resolved)
+  if (kept.length === 0) return
+  const leftovers = (getStore().get(QUIT_PARTIALS_KEY, []) as string[]) || []
+  for (const j of kept) {
+    clearKeptOutputTimer(j.id)
+    const p = writePathOf(j)
+    expectSelfWrite(p)
+    try { if (fs.existsSync(p)) fs.unlinkSync(p) } catch { leftovers.push(p) }
+  }
+  getStore().set(QUIT_PARTIALS_KEY, [...new Set(leftovers)])
+}
+
 function discardKeptOutput(id: string, reason: 'discarded' | 'expired'): void {
   clearKeptOutputTimer(id)
   const j = jobs.get(id)
