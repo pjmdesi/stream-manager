@@ -400,7 +400,7 @@
 
   Split 2026-10-05: the combine half of this ticket (track management across combined files, with the track chart) moved to COMB-7, since it is a design project of its own. What stays here is the two small pieces above, which share the same mixing step: the converter's "combine all audio tracks into one" option, and the clip export's merge made an explicit checkbox under the track selection, on by default.
 
-- **CONV-15** [investigate] [impact:3]
+- **CONV-15** [impact:3] [done]
   When archiving streams, sometimes the archive preset creates files that are larger than the original. This mostly happens to my older streams where I was using a much lower bitrate. It's not really archiving if the output is larger, and since the archive process deletes the original, we need to add a check after the conversion process is complete (or maybe during the conversion process if we could estimate the output file size), and if it is bigger than the source file, it should warn the user and give them a choice to keep the original or let the app overwite anyway.
   Built 2026-10-16 (review round 1 folded in: no-confirm quit discards the kept output, caution triangle while the decision is open, Remove and Clear all held until it is made; round 2: the files grid shows the archived marker in the tag tray for every video kind, the corner marker next to the name is gone; round 3: "Final size:" with ~ and "of source", "Remaining:" for the ETA, source size beside the source name and the growing output size beside the output name, the same on the Combine page), awaiting review: the archive swap keeps the original when the output is not smaller, parks the larger file as the job's temp for two hours (config keptLargerOutputMinutes, no Settings control) with Replace anyway behind a confirmation and Discard now on the row, an amber clock or shield instead of the green check, and no archived mark unless the file was actually replaced; the progress row shows an estimated final size from five percent on, and finished rows show the final size as a share of the original.
 
@@ -436,6 +436,9 @@
 
 - **CONV-23** [ui] [impact:2]
   A finished conversion row stays in the Finished list after its output file is gone (deleted from the files grid, from Explorer, or by the row's own partial-file dialog). Remove the row on its own when the file no longer exists, or mark it as deleted if a trace is wanted; check on the streams-changed events the page already receives and when the window regains focus, so an Explorer delete is caught too. Raised 2026-10-16.
+
+- **CONV-24** [impact:1] [maybe]
+  Maybe... add an OBS/streaming tool detection (or maybe just detection through the stream relay?) which will suggest that the user pause conversion tasks to free up resources for the streaming app. This would be a failsafe in case the user forgets that there are running conversions.
 
 ### Combine
 
