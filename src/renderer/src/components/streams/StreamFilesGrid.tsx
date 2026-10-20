@@ -374,7 +374,12 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1">Convert</CollapsibleLabel>
             </button>
           </Tooltip>
-          <CloudAction isLocal={isLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} />
+          {/* A file SM itself has in use (converter, player, thumbnail editor,
+              combine) cannot be offloaded safely: the cloud gate only sees the
+              sync client's bookkeeping, not SM's own readers, and dehydrating
+              under the converter truncated an output (2026-10-20). Same
+              reason as the delete button, so the two agree. */}
+          <CloudAction isLocal={isLocal} active={cloudSyncActive} busy={busy} onOffload={() => onOffload(path)} onPin={() => onPin(path)} offloadBlockReason={blockReason ?? null} />
           <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
             <button
               disabled={!!blockReason}
@@ -529,7 +534,9 @@ function ImageCard({ path, thumbIndex, isLocal, cloudIsLocal, cloudSyncActive, b
             onPin={() => onPin(path)}
             // Mirrors main-side getProtectedPaths: the displayed thumbnail is
             // excluded from offloading, so the button would silently no-op.
-            offloadBlockReason={isPreferred ? 'the stream item thumbnail is kept pinned on this device' : null}
+            // Otherwise the same in-use reason as the delete button (open in
+            // the thumbnail editor), see VideoCard.
+            offloadBlockReason={isPreferred ? 'the stream item thumbnail is kept pinned on this device' : (blockReason ?? null)}
           />
           <Tooltip content={blockReason ? `Can't delete: ${blockReason}` : 'Move to recycle bin'} side="top">
             <button

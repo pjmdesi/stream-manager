@@ -70,6 +70,7 @@
 38. STR-48
 39. STR-49
 40. STR-50
+41. STR-51
 
 ## Improvement ideas
 
@@ -248,6 +249,9 @@
 
 - **STR-50** [impact:1]
   Add ability to negate tags and keywords with "!" in the search
+
+- **STR-51** [bug] [ui] [impact:1]
+  When going back to the streams page from another page and the window is large enough to show icon+label version of the visible buttons, the buttons still animate as if the window had been resized. Probably something to do with the state of the page while it is inactive (hidden). No buttons anywhere should not animate simply when switching pages, only if they happen to be visible when the app windoew(or internal container) is resized.
 
 ### Player
 
