@@ -11,6 +11,13 @@ export type CloudOpItemStatus =
   | 'failed'
   | 'skipped-protected'
   | 'cancelled'
+  /** Offload refused by the cloud-copy gate (SYNC-8): the sync client has
+   *  not finished uploading the file. It stays local; retry later. */
+  | 'not-synced'
+  /** Offload refused by the gate: the size the sync client registered for
+   *  the cloud copy differs from the file, so the cloud copy is not the
+   *  whole file. It stays local; the sync client needs attention. */
+  | 'cloud-incomplete'
 
 export interface CloudOpItem {
   path: string
@@ -70,9 +77,18 @@ function basename(p: string): string {
 
 const TERMINAL_STATUSES: CloudOpItemStatus[] = [
   'done', 'already-offline', 'already-local', 'failed', 'skipped-protected', 'cancelled',
+  'not-synced', 'cloud-incomplete',
 ]
 function isTerminal(s: CloudOpItemStatus): boolean {
   return TERMINAL_STATUSES.includes(s)
+}
+
+/** Rows the user can retry: failures and the gate's refusals. A refusal
+ *  retries only on the user's click, never on its own, so the decision
+ *  stays with them even when the client would have caught up by itself. */
+const RETRYABLE_STATUSES: CloudOpItemStatus[] = ['failed', 'not-synced', 'cloud-incomplete']
+export function isRetryable(s: CloudOpItemStatus): boolean {
+  return RETRYABLE_STATUSES.includes(s)
 }
 
 export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
@@ -161,7 +177,9 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
             : it
         ))
       } else if (ev.type === 'item') {
-        if (ev.status === 'failed' && !failurePoppedBatches.current.has(ev.batchId)) {
+        // A refusal from the gate is surfaced like a failure: the file was
+        // not offloaded and the row says why.
+        if (isRetryable(ev.status) && !failurePoppedBatches.current.has(ev.batchId)) {
           failurePoppedBatches.current.add(ev.batchId)
           setModalOpen(true)
         }
@@ -181,6 +199,8 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
               ev.status === 'already-offline' ? 'already-offline' :
               ev.status === 'already-local' ? 'already-local' :
               ev.status === 'cancelled' ? 'cancelled' :
+              ev.status === 'not-synced' ? 'not-synced' :
+              ev.status === 'cloud-incomplete' ? 'cloud-incomplete' :
               'running',
             reason: ev.reason,
           }
@@ -290,14 +310,14 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
   }, [purgeOppositeRows, addOrAttachRows])
 
   const retryItem = useCallback((item: CloudOpItem) => {
-    if (item.status !== 'failed') return
+    if (!isRetryable(item.status)) return
     purgeOppositeRows(item.direction, [item.path])
     const batchId = makeBatchId(item.direction)
     const setter = item.direction === 'offload' ? setOffloadItems : setHydrateItems
     // Reset the row under a fresh batch id so incoming events route to it —
     // in place, not re-enqueued, so it doesn't jump to the bottom of the list.
     setter(prev => prev.map(it =>
-      it.batchId === item.batchId && it.path === item.path && it.status === 'failed'
+      it.batchId === item.batchId && it.path === item.path && isRetryable(it.status)
         ? { ...it, status: 'pending' as CloudOpItemStatus, reason: undefined, batchId }
         : it))
     const call = item.direction === 'offload' ? window.api.cloudSyncOffload : window.api.cloudSyncPin
@@ -311,7 +331,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
 
   const retryFailed = useCallback((direction: CloudOpDirection) => {
     const items = direction === 'offload' ? offloadItems : hydrateItems
-    const failed = items.filter(it => it.status === 'failed')
+    const failed = items.filter(it => isRetryable(it.status))
     if (failed.length === 0) return
     const paths = failed.map(it => it.path)
     purgeOppositeRows(direction, paths)
@@ -319,7 +339,7 @@ export function CloudOpsProvider({ children }: { children: React.ReactNode }) {
     const setter = direction === 'offload' ? setOffloadItems : setHydrateItems
     const failedKeys = new Set(failed.map(it => `${it.batchId}|${it.path}`))
     setter(prev => prev.map(it =>
-      failedKeys.has(`${it.batchId}|${it.path}`) && it.status === 'failed'
+      failedKeys.has(`${it.batchId}|${it.path}`) && isRetryable(it.status)
         ? { ...it, status: 'pending' as CloudOpItemStatus, reason: undefined, batchId }
         : it))
     const call = direction === 'offload' ? window.api.cloudSyncOffload : window.api.cloudSyncPin

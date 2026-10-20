@@ -2,7 +2,7 @@ import { Cloud, RefreshCw } from 'lucide-react'
 import { Tooltip } from './ui/Tooltip'
 import { useCloudOps } from '../context/CloudOpsContext'
 
-const TERMINAL = new Set(['done', 'already-offline', 'already-local', 'failed', 'skipped-protected', 'cancelled'])
+const TERMINAL = new Set(['done', 'already-offline', 'already-local', 'failed', 'skipped-protected', 'cancelled', 'not-synced', 'cloud-incomplete'])
 
 /**
  * Sidebar widget that surfaces in-flight cloud operations (offload + pin/

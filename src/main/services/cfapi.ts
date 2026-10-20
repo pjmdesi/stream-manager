@@ -72,12 +72,26 @@ function friendlyCloudReason(reason: string): string {
 // ReadDirectoryChangesW handles otherwise cause Synology to reject
 // CfDehydratePlaceholder with HRESULT 0x80070187 (file in use).
 //
+// With -CheckCloudCopy the script first reads the placeholder's platform
+// bookkeeping (CfGetPlaceholderInfo, STANDARD class: bytes validated against
+// the cloud, bytes modified locally, the in-sync flag, and the provider's
+// identity blob) and refuses to dehydrate a file the sync client has not
+// finished with (SYNC-8). The identity blob is opaque to the platform; on
+// Synology Drive it is JSON carrying the size of the server version the
+// client registered, which is the number that stayed at 1.25 MiB for a
+// 26 GB file in the CONV-18 loss. Providers whose blob does not parse skip
+// that comparison and keep the platform-field checks. A range hydrate was
+// measured as the alternative and rejected: Synology fetches the whole file
+// for any range request (scripts/probe-cf-placeholder.ps1).
+//
 // Output is a single status token on the last stdout line:
-//   OK                      — was hydrated, now a verified placeholder
-//   SKIP-ALREADY-OFFLINE    — was already a placeholder, no work done
-//   ERR|||<reason>          — failed at any step
+//   OK                          — was hydrated, now a verified placeholder
+//   SKIP-ALREADY-OFFLINE        — was already a placeholder, no work done
+//   REFUSE-NOT-SYNCED|||<why>   — gate: the client has not finished uploading; nothing changed
+//   REFUSE-INCOMPLETE|||<why>   — gate: the registered cloud-copy size differs from the file; nothing changed
+//   ERR|||<reason>              — failed at any step
 const DEHYDRATE_SCRIPT = `
-param([Parameter(Mandatory=$true, Position=0)][string]$Path)
+param([Parameter(Mandatory=$true, Position=0)][string]$Path, [switch]$CheckCloudCopy)
 $ErrorActionPreference = 'Continue'
 Add-Type @"
 using System;
@@ -89,6 +103,8 @@ public static class CFAPI {
     public static extern bool CloseHandle(IntPtr h);
     [DllImport("cldapi.dll", SetLastError=true)]
     public static extern int CfDehydratePlaceholder(IntPtr h, long off, long len, uint flags, IntPtr o);
+    [DllImport("cldapi.dll", SetLastError=true)]
+    public static extern int CfGetPlaceholderInfo(IntPtr h, int infoClass, IntPtr buf, uint bufLen, out uint returned);
 }
 "@
 # Bail early if already a placeholder. OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS = 0x441000.
@@ -97,8 +113,61 @@ if (($attrs -band 0x441000) -ne 0) {
   Write-Output "SKIP-ALREADY-OFFLINE"
   exit 0
 }
-& attrib +U -P $Path 2>$null
 $len = (Get-Item -LiteralPath $Path).Length
+if ($CheckCloudCopy) {
+  # FILE_READ_ATTRIBUTES (0x80) with FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT
+  # (0x02200000): reads the reparse point's data, triggers no recall. Struct offsets from
+  # cfapi.h CF_PLACEHOLDER_STANDARD_INFO: OnDiskDataSize 0, ValidatedDataSize 8,
+  # ModifiedDataSize 16, InSyncState 36, FileIdentityLength 56, FileIdentity 60.
+  # A failed read (not a placeholder, odd provider) skips the gate; the dehydrate
+  # below reports its own error in that case, as before.
+  # (PowerShell variable names are case-insensitive: keep these two distinct.)
+  $Marshal = [Runtime.InteropServices.Marshal]
+  $hi = [CFAPI]::CreateFileW($Path, [uint32]0x80, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02200000, [IntPtr]::Zero)
+  if ($hi -ne [IntPtr]::new(-1)) {
+    $buf = $Marshal::AllocHGlobal(8192)
+    try {
+      $ret = [uint32]0
+      $hr = [CFAPI]::CfGetPlaceholderInfo($hi, 1, $buf, [uint32]8192, [ref]$ret)
+      if ($hr -eq 0) {
+        $onDisk = $Marshal::ReadInt64($buf, 0)
+        $validated = $Marshal::ReadInt64($buf, 8)
+        $modified = $Marshal::ReadInt64($buf, 16)
+        $inSync = $Marshal::ReadInt32($buf, 36)
+        $idLen = $Marshal::ReadInt32($buf, 56)
+        $registered = -1
+        if ($idLen -gt 0 -and $idLen -le 4096) {
+          $bytes = New-Object byte[] $idLen
+          $Marshal::Copy([IntPtr]::Add($buf, 60), $bytes, 0, $idLen)
+          $text = [System.Text.Encoding]::UTF8.GetString($bytes)
+          $sizeMatch = [regex]::Match($text, '"file_size":[{]"high_part":([0-9]+),"low_part":([0-9]+)[}]')
+          if ($sizeMatch.Success) { $registered = ([long]$sizeMatch.Groups[1].Value * 4294967296) + [long]$sizeMatch.Groups[2].Value }
+        }
+        # Order matters: while the client is still uploading, the size it
+        # registered trails the file by the unsynced bytes (measured
+        # 2026-10-20 during a slow write), so the platform's own "not synced"
+        # verdict comes first and the size comparison is trusted only once the
+        # platform says everything is in sync. A mismatch that survives that
+        # is the CONV-18 signature: a registered version the client stopped
+        # updating while the file kept growing.
+        $unsynced = [Math]::Max($modified, $onDisk - $validated)
+        if ($inSync -ne 1 -or $unsynced -gt 0) {
+          if ($unsynced -gt 0) { $why = ("{0:N0} bytes are not uploaded yet" -f $unsynced) } else { $why = "the sync client has not marked it in sync" }
+          Write-Output ("REFUSE-NOT-SYNCED|||Not synced yet: {0}. The file was kept here. Retry once the sync client has finished with it." -f $why)
+          exit 0
+        }
+        if ($registered -ge 0 -and $registered -ne $len) {
+          Write-Output ("REFUSE-INCOMPLETE|||Cloud copy incomplete: the sync client registered {0:N0} bytes for this file, but it is {1:N0} bytes on this PC. The file was kept here. Check the sync client, then retry." -f $registered, $len)
+          exit 0
+        }
+      }
+    } finally {
+      $Marshal::FreeHGlobal($buf)
+      [CFAPI]::CloseHandle($hi) | Out-Null
+    }
+  }
+}
+& attrib +U -P $Path 2>$null
 $GENERIC_RW = [Convert]::ToUInt32('C0000000', 16)
 $h = [CFAPI]::CreateFileW($Path, $GENERIC_RW, [uint32]7, [IntPtr]::Zero, [uint32]3, [uint32]0x02000000, [IntPtr]::Zero)
 if ($h -eq [IntPtr]::new(-1)) {
@@ -126,16 +195,20 @@ function getDehydrateScriptPath(): string {
   return p
 }
 
-export type DehydrateOutcome = 'ok' | 'already-offline' | 'failed'
+/** 'refused-*' outcomes come only from the cloud-copy gate (checkCloudCopy)
+ *  and mean the file was left exactly as it was. */
+export type DehydrateOutcome = 'ok' | 'already-offline' | 'refused-not-synced' | 'refused-incomplete' | 'failed'
 
-function runOnePath(scriptPath: string, filePath: string): Promise<{ outcome: DehydrateOutcome; reason?: string }> {
+function runOnePath(scriptPath: string, filePath: string, checkCloudCopy = false): Promise<{ outcome: DehydrateOutcome; reason?: string }> {
   return new Promise(resolve => {
     let stdout = ''
     let stderr = ''
-    const proc = spawn('powershell.exe', [
+    const args = [
       '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
-      '-File', scriptPath, filePath
-    ])
+      '-File', scriptPath, filePath,
+    ]
+    if (checkCloudCopy) args.push('-CheckCloudCopy')
+    const proc = spawn('powershell.exe', args)
     proc.stdout.on('data', (d: Buffer) => { stdout += d.toString() })
     proc.stderr.on('data', (d: Buffer) => { stderr += d.toString() })
     proc.on('close', () => {
@@ -143,6 +216,8 @@ function runOnePath(scriptPath: string, filePath: string): Promise<{ outcome: De
       const last = lines[lines.length - 1] ?? ''
       if (last === 'OK') { resolve({ outcome: 'ok' }); return }
       if (last === 'SKIP-ALREADY-OFFLINE') { resolve({ outcome: 'already-offline' }); return }
+      if (last.startsWith('REFUSE-NOT-SYNCED|||')) { resolve({ outcome: 'refused-not-synced', reason: last.slice(20) }); return }
+      if (last.startsWith('REFUSE-INCOMPLETE|||')) { resolve({ outcome: 'refused-incomplete', reason: last.slice(20) }); return }
       if (last.startsWith('ERR|||')) { resolve({ outcome: 'failed', reason: friendlyCloudReason(last.slice(6)) }); return }
       resolve({ outcome: 'failed', reason: stderr.trim() || 'no-output' })
     })
@@ -152,10 +227,13 @@ function runOnePath(scriptPath: string, filePath: string): Promise<{ outcome: De
 
 /** Dehydrate a single file. Building block for callers that own their own
  *  worker pool (cloudSync's shared per-direction queue); dehydratePaths
- *  below remains for one-shot batch callers (converter archive hook). */
-export function dehydrateOnePath(filePath: string): Promise<{ outcome: DehydrateOutcome; reason?: string }> {
+ *  below remains for one-shot batch callers (converter archive hook).
+ *  `checkCloudCopy` runs the SYNC-8 gate first (see DEHYDRATE_SCRIPT); the
+ *  converter's abort-by-dehydrate must not pass it, since a file mid-recall
+ *  is exactly what that abort is for. */
+export function dehydrateOnePath(filePath: string, opts?: { checkCloudCopy?: boolean }): Promise<{ outcome: DehydrateOutcome; reason?: string }> {
   if (process.platform !== 'win32') return Promise.resolve({ outcome: 'failed', reason: 'not-windows' })
-  return runOnePath(getDehydrateScriptPath(), filePath)
+  return runOnePath(getDehydrateScriptPath(), filePath, opts?.checkCloudCopy === true)
 }
 
 export interface DehydrateProgressEvent {

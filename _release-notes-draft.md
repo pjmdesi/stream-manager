@@ -14,6 +14,10 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - An archive whose result would be no smaller than the original no longer replaces it. The original stays, the larger file waits for two hours in case you want it anyway (Replace anyway on the row, behind a confirmation), and the row says what happened. A stream is marked archived only when its files were actually replaced.
 - Converting rows show the source size beside the source name, the output size growing beside the output name, an estimated final size (with its share of the source) from 5 percent on, and the time remaining. The Combine page shows the same while it runs.
 
+## Cloud sync
+
+- Offloading a file now checks the sync client's own record of it first. A file the client has not finished uploading, or whose cloud copy the client registered at a different size than the file on this PC, is kept here and its row in the Cloud sync window says why. Retry once the client has caught up.
+
 ## Fixes
 
 - The files grid shows the archived marker in the same place for every kind of video (inside the Recording, Clip or Combined badge); clips and combined files used to carry it next to the name instead.

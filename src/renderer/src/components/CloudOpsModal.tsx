@@ -2,8 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react'
 import { Modal } from './ui/Modal'
 import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
-import { Loader2, CheckCircle2, XCircle, Cloud, CloudCheck, CloudDownload, Pin, Ban, Info, RotateCw } from 'lucide-react'
-import { useCloudOps, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
+import { Loader2, CheckCircle2, XCircle, Cloud, CloudAlert, CloudCheck, CloudDownload, CloudOff, Pin, Ban, Info, RotateCw } from 'lucide-react'
+import { useCloudOps, isRetryable, type CloudOpItem, type CloudOpItemStatus, type CloudOpDirection } from '../context/CloudOpsContext'
 import { formatBytes } from '../lib/formatBytes'
 
 // A working row that has run this long shows how long, with a hint that
@@ -52,7 +52,9 @@ function computeTotals(items: CloudOpItem[]): SectionTotals {
       t.totalBytes += it.size
     } else if (it.status === 'already-offline' || it.status === 'already-local') {
       t.alreadyDone += 1
-    } else if (it.status === 'failed') {
+    } else if (isRetryable(it.status)) {
+      // Failures and the gate's refusals alike: the file was not moved and
+      // Retry all picks the row up.
       t.failed += 1
       t.totalBytes += it.size
     } else if (it.status === 'skipped-protected') {
@@ -246,7 +248,7 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
           <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 px-3 py-1.5 text-[10px] uppercase tracking-wide text-gray-400 border-b border-white/10 bg-navy-900/60">
             <span>File</span>
             <span className="text-right">Size</span>
-            <span className="text-right w-32">Status</span>
+            <span className="text-right w-40">Status</span>
           </div>
           <div
             ref={listRef}
@@ -264,8 +266,8 @@ function CloudOpsSection({ direction, items, active, hasPending, cancelling, onC
                   <span className="block truncate text-gray-300">{it.name}</span>
                 </Tooltip>
                 <span className="text-right tabular-nums text-gray-400">{it.size > 0 ? formatBytes(it.size) : ''}</span>
-                <span className="w-32 inline-flex items-center justify-end gap-1.5">
-                  {it.status === 'failed' && (
+                <span className="w-40 inline-flex items-center justify-end gap-1.5">
+                  {isRetryable(it.status) && (
                     <Tooltip content={isOffload ? 'Retry offload' : 'Retry download'}>
                       <button
                         onClick={() => retryItem(it)}
@@ -328,6 +330,10 @@ function StatusBadge({ status, reason, runningSince }: { status: CloudOpItemStat
       return wrap('text-amber-300/80', <><Pin size={11} className={iconCls} /> Pinned</>, "Kept local because it's the stream's primary thumbnail")
     case 'failed':
       return wrap('text-red-300', <><XCircle size={11} className={iconCls} /> Failed</>, reason)
+    case 'not-synced':
+      return wrap('text-amber-300', <><CloudAlert size={11} className={iconCls} /> Not synced yet</>, reason)
+    case 'cloud-incomplete':
+      return wrap('text-red-300', <><CloudOff size={11} className={iconCls} /> Cloud copy incomplete</>, reason)
     case 'cancelled':
       return wrap('text-gray-400', <><Ban size={11} className={iconCls} /> Cancelled</>)
   }

@@ -144,10 +144,21 @@ async function worker(direction: Direction): Promise<void> {
       safeSend(b.sender, 'cloud-sync:progress', {
         type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'running',
       })
+      // Offloads run the cloud-copy gate (SYNC-8): a file the sync client
+      // has not finished uploading, or whose registered cloud-copy size
+      // differs from the file, is refused and stays local. The row carries
+      // the reason; the user retries once the client has caught up.
       const res = direction === 'offload'
-        ? await dehydrateOnePath(unit.path)
+        ? await dehydrateOnePath(unit.path, { checkCloudCopy: true })
         : await hydrateOnePath(unit.path)
-      if (res.outcome === 'ok') {
+      if (res.outcome === 'refused-not-synced' || res.outcome === 'refused-incomplete') {
+        b.failed += 1
+        safeSend(b.sender, 'cloud-sync:progress', {
+          type: 'item', direction, batchId: b.batchId, path: unit.path,
+          status: res.outcome === 'refused-incomplete' ? 'cloud-incomplete' : 'not-synced',
+          reason: res.reason,
+        })
+      } else if (res.outcome === 'ok') {
         b.ok += 1
         safeSend(b.sender, 'cloud-sync:progress', {
           type: 'item', direction, batchId: b.batchId, path: unit.path, status: 'done',

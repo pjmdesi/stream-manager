@@ -25,6 +25,8 @@
 21. STR-40
 22. STR-41
 23. APP-54
+24. CONV-25
+25. THU-42
 
 ## Next up
 
@@ -65,6 +67,9 @@
 35. STR-44
 36. THU-41
 37. STR-47
+38. STR-48
+39. STR-49
+40. STR-50
 
 ## Improvement ideas
 
@@ -235,6 +240,15 @@
 - **STR-47** [impact:1] [bug]
   When multi-select mode is left on in the streams list and a user is sent to a specific stream item later from another page like the converter page, the multi-select mode remains active after the stream item is opened. Multi-select mode should be forced closed when a stream item is opened from a link.
 
+- **STR-48** [impact:1]
+  Rework badges: Update badge icons in stream rows to be new narrow column next to thumbnail instead of being in the same row as the date/name text in that column. Might need to decide some other things as well: What icons will go there (add/remove any?). Should any colors change (I think archive might need to switch from green because it can be kind of confusing since green also means "success", etc. This would mean updating the badge color in all locations, the color of the rows in the converter.)
+
+- **STR-49** [impact:2]
+  When bulk pushing content to YouTube via the push all button in the sync panel on the streams page, there's no indication that anything is happening after the user confirms, only the items disappearing in the panel behind the blurred backdrop of the modal. We need to use the list in the modal, show a spinner for the ones currently being pushed (which would be all if the user chooses the all option), and then once it's confirmed to be updated, replace the spinner with a done indicator (like green text which says done in the same style as the push button originally had).
+
+- **STR-50** [impact:1]
+  Add ability to negate tags and keywords with "!" in the search
+
 ### Player
 
 - **PLR-3** [perf] [maybe]
@@ -363,6 +377,11 @@
 - **THU-41** [impact:2]
   Add setting to asset panel menu to show assets from streams on the same day
 
+- **THU-42** [impact:2] [bug] [ui]
+  Thumbnail episode picker popup panel gets cropped.
+
+  ![screenshot](_todo.md.images/THU-42-1.png)
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -440,6 +459,9 @@
 - **CONV-24** [impact:1] [maybe]
   Maybe... add an OBS/streaming tool detection (or maybe just detection through the stream relay?) which will suggest that the user pause conversion tasks to free up resources for the streaming app. This would be a failsafe in case the user forgets that there are running conversions.
 
+- **CONV-25** [impact:1]
+  Update Remove button to read clear for completed items in the converter.
+
 ### Combine
 
 - **COMB-1** [needs-design]
@@ -505,6 +527,7 @@
 
 - **SYNC-8** [investigate] [impact:4]
   Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. (Seen 2026-10-07: dehydrating files the client was still uploading fails outright, so the gate holds when the client's bookkeeping is right; this check is for when it is not.) SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window.
+  Investigated 2026-10-20: on Synology a range request hydrates the whole file, so the post-offload tail check is out; the viable route is a check before each dehydrate of the placeholder's platform info (in-sync state, validated and modified bytes) and the file size the client registered in its identity blob against the file's length, which is the pair that diverged in the loss. Probe script: `scripts/probe-cf-placeholder.ps1`. Built 2026-10-20, awaiting review.
 
 ### Auto-rules
 
