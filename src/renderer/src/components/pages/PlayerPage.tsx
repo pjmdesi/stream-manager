@@ -1765,20 +1765,28 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // sidebar section. Re-runs when the streams root or mode changes and
   // also when the active video changes (so newly-added folders or
   // freshly-written meta surface without a full app reload).
+  // The listing costs the main process about 0.65 s for 256 streams
+  // (measured 2026-10-21) and used to run the moment a file loaded, in the
+  // middle of the probe and the panel listing, so every move paid for it.
+  // After the first listing it now waits a beat, and a run of quick moves
+  // pays once, when the run stops.
+  const hasListedRef = useRef(false)
   useEffect(() => {
     if (!config.streamsDir) { setAllStreamFolders([]); setFoldersLoaded(true); return }
     let cancelled = false
-    ;(async () => {
-      try {
-        const folders = await window.api.listStreams(
-          config.streamsDir,
-          (config.streamMode || 'folder-per-stream') as 'folder-per-stream' | 'dump-folder',
-        )
-        if (!cancelled) setAllStreamFolders(folders)
-      } catch { /* swallow */ }
-      finally { if (!cancelled) setFoldersLoaded(true) }
-    })()
-    return () => { cancelled = true }
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const folders = await window.api.listStreams(
+            config.streamsDir,
+            (config.streamMode || 'folder-per-stream') as 'folder-per-stream' | 'dump-folder',
+          )
+          if (!cancelled) { setAllStreamFolders(folders); hasListedRef.current = true }
+        } catch { /* swallow */ }
+        finally { if (!cancelled) setFoldersLoaded(true) }
+      })()
+    }, hasListedRef.current ? 1500 : 0)
+    return () => { cancelled = true; clearTimeout(timer) }
   }, [config.streamsDir, config.streamMode, state.filePath])
 
   // Sorted list (by date, oldest → newest) so prev/next is chronological.
@@ -2184,8 +2192,19 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     const preferred = fullVideos.length > 0 ? fullVideos : target.videos
     let videoPath: string | null = null
     try {
-      const localFlags = await window.api.checkLocalFiles(target.videos)
-      const firstLocal = (list: string[]) => list.find(p => localFlags[target.videos.indexOf(p)]) ?? null
+      // Cache first: a stream seen recently (its panel rows, the files
+      // grid, a download) is decided at once; only paths the cache does
+      // not know, or holds stale, pay the attribute read (a PowerShell
+      // start, about half a second, measured 2026-10-21).
+      const flags = getCachedHydration(target.videos)
+      const unknown = stalePaths(target.videos)
+      if (unknown.length > 0) {
+        const fresh = await window.api.checkLocalFiles(unknown)
+        const updates: Record<string, boolean> = {}
+        unknown.forEach((p, i) => { updates[p] = fresh[i] ?? true; flags[p] = updates[p] })
+        rememberHydration(updates)
+      }
+      const firstLocal = (list: string[]) => list.find(p => flags[p]) ?? null
       videoPath = firstLocal(preferred) ?? firstLocal(target.videos)
     } catch { videoPath = preferred[0] /* status unknown: behave as before */ }
     if (videoPath) { guardedLoadFile(videoPath); return }
