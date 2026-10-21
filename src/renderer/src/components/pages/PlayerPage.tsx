@@ -1601,6 +1601,13 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // export refresh) leave `selected` out and the ref supplies it, so a
   // refresh while a download runs does not clear the panel.
   const selectedStreamFolderRef = useRef<StreamFolder | null>(null)
+  // Session panel rows whose download just landed and that wait to be
+  // clicked (the pulsing ready ring). Declared here because the panel
+  // reload prunes it: the ring belongs only to a local row of the folder
+  // being shown, so it leaves with Close Session, with a move to another
+  // stream, and when the file is offloaded again (a ring stayed on an
+  // offloaded row through all three, 2026-10-21).
+  const [readySessionPaths, setReadySessionPaths] = useState<Set<string>>(new Set())
   // With nothing loaded, the first row the user clicks to download opens by
   // itself when it lands: there is no review to interrupt, unlike the
   // Session Videos rule for a playing video (ready ring, wait for a click).
@@ -1610,7 +1617,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   const autoOpenPathRef = useRef<string | null>(null)
   const reloadSessionPanel = useCallback(async (fp: string | null, selected?: StreamFolder | null) => {
     const folder = selected !== undefined ? selected : (fp ? null : selectedStreamFolderRef.current)
-    if (!fp && !folder) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); return }
+    if (!fp && !folder) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); setReadySessionPaths(new Set()); return }
     // Find the stream folder (date-named ancestor or, in dump mode, derive
     // from filename) and compute the canonical _meta.json key for it.
     const { dir, metaKey, streamsDir, isDump, date } = fp
@@ -1685,6 +1692,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
           entry,
         }
       }))
+      // The ready ring survives only on a row that is still listed and local.
+      setReadySessionPaths(prev => {
+        if (prev.size === 0) return prev
+        const keep = new Set([...prev].filter(p => videoFiles.some((f, i) => f.path === p && localFlags[i])))
+        return keep.size === prev.size ? prev : keep
+      })
 
       // Apply saved per-track audio settings (mute / solo / volume) for the
       // currently-loaded file. Skips indices that don't exist in the source.
@@ -1917,7 +1930,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   const [hydratingSessionPaths, setHydratingSessionPaths] = useState<Set<string>>(new Set())
   const hydratingSessionRef = useRef(hydratingSessionPaths)
   useEffect(() => { hydratingSessionRef.current = hydratingSessionPaths }, [hydratingSessionPaths])
-  const [readySessionPaths, setReadySessionPaths] = useState<Set<string>>(new Set())
   // Downloads go through the CLOUD-OPS PIN QUEUE (same as the files grid's
   // Pin Local), so the sidebar cloud widget shows progress if the user
   // leaves the player, and failures surface in the cloud modal with its
@@ -1955,6 +1967,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     if (cloudSyncActive && !item.isLocal) {
       if (!hydratingSessionRef.current.has(item.path)) {
         setHydratingSessionPaths(prev => new Set(prev).add(item.path))
+        // A ring from an earlier download has no meaning on a row that is
+        // offloaded again.
+        setReadySessionPaths(prev => { if (!prev.has(item.path)) return prev; const next = new Set(prev); next.delete(item.path); return next })
         enqueueHydrate([{ path: item.path, size: item.entry?.size ?? 0 }], false)
         // First download clicked with nothing loaded: it opens when it lands.
         if (selectedStreamFolderRef.current && autoOpenPathRef.current === null) autoOpenPathRef.current = item.path
