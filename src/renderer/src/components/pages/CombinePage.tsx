@@ -254,7 +254,7 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
             {chips || <Loader2 size={11} className="animate-spin inline" />}
           </span>
         </div>
-        {stream && (
+        {stream ? (
           <Tooltip content={`Open “${stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
             <button
               type="button"
@@ -264,6 +264,10 @@ function CompletedRow({ path, elapsedMs, stream, onNavigateToStream }: {
               {stream.label}
             </button>
           </Tooltip>
+        ) : (
+          /* Same slot and size as the stream link, so rows keep one height
+             whether or not a stream item owns the files (COMB-6). */
+          <span className="block text-[11px] text-gray-400">External files</span>
         )}
         {/* No progress element — terminal rows revert to the plain
             background, converter parity (the old full green bar lingered
@@ -1012,9 +1016,11 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               {f.name}
                             </span>
                           </Tooltip>
-                          {/* Owning stream item (only for files sent from a
-                              stream). Opens its detail sidebar. */}
-                          {f.stream && (
+                          {/* Owning stream item for files sent from a stream
+                              (opens its detail sidebar); a plain line of the
+                              same size for a dropped file, so rows keep one
+                              height (COMB-6). */}
+                          {f.stream ? (
                             <Tooltip content={`Open “${f.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
                               <button
                                 type="button"
@@ -1024,6 +1030,8 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                 {f.stream.label}{f.stream.date ? ` · ${f.stream.date}` : ''}
                               </button>
                             </Tooltip>
+                          ) : (
+                            <span className="block text-[11px] text-gray-400">External file</span>
                           )}
                           {/* Encoding + file details; segments appear as their
                               probe/size lookups land. Segments whose property
@@ -1187,7 +1195,7 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                               Combining {g.files.length} files{g.files.every(f => f.size != null) ? ` · ${formatBytes(g.files.reduce((s, f) => s + (f.size ?? 0), 0))}` : ''}
                             </span>
                           </div>
-                          {g.stream && (
+                          {g.stream ? (
                             <Tooltip content={`Open “${g.stream.label}” on the streams page`} side="top" triggerClassName="block w-fit max-w-full min-w-0">
                               <button
                                 type="button"
@@ -1197,6 +1205,9 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                                 {g.stream.label}
                               </button>
                             </Tooltip>
+                          ) : (
+                            /* Same slot and size as the stream link (COMB-6). */
+                            <span className="block text-[11px] text-gray-400">External files</span>
                           )}
                           <div className={`flex items-center gap-3 text-xs tabular-nums ${downloading ? 'text-blue-300' : 'text-gray-400'}`}>
                             {/* No % / elapsed during the download — that

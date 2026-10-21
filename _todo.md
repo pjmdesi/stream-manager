@@ -330,9 +330,12 @@
 - **PLR-34** [ui] [impact:2]
   The player shows nothing when a video track cannot be decoded on this PC. The video element has no error handler, so an H.265 file on a GPU without hardware HEVC decoding (Chromium has no software HEVC decoder) plays as audio over a black picture with no explanation, and any other unsupported codec does the same. Detect it (the element's error event, a zero videoWidth once metadata has loaded, or a MediaCapabilities probe of the file's codec before loading) and show a notice that names the codec, says this PC's GPU cannot decode it, and makes clear the file itself is fine (Windows' own player needs the Store extension for it; players such as VLC decode it in software). A notice only, no transcode fallback. Verified 2026-10-13 that on an HEVC-capable GPU the player needs no Store extension for H.265 and decodes AV1 everywhere.
 
-- **PLR-35** [bug] [ui] [impact:2]
+- **PLR-35** [bug] [ui] [impact:2] [done]
   Session Videos shows the previous stream's files for a few seconds after moving to another stream, until the new listing and its cloud-status check finish, so the panel names the wrong files for a moment. Seen 2026-10-20 with the player's next/prev. Clear the list the moment the target changes and show a loading state (spinner with reserved height, per the style guide) until the rows are in, or make the listing fast enough that no gap shows (today it is one recursive folder listing plus one cloud-status check per move).
   Built 2026-10-21, awaiting review.
+
+- **PLR-36** [investigate] [perf] [impact:2]
+  Moving between streams in the player still takes one to four seconds on the user's machine after the PLR-35 follow-up (the move decides from the hydration cache, the library re-listing waits a beat), which read as only a little faster there while the dev machine measured 0.6 s for a cold move and under 0.3 s warm. Costs measured per move so far: library re-listing 650 ms for 256 streams (now deferred), one attribute read 440 to 640 ms per PowerShell start (now cache-first), probe 170 to 250 ms, folder listing and metadata read under 5 ms. Not measured yet: the video element's own load and first frame for a multi-GB file on the sync root, the thumbnail and waveform strips, the row thumbnails, and whether main-process work blocks the IPC replies during the load. Investigate with timestamps around each stage of loadFile on the user's library, then decide what to defer, cache or skip.
 
 ### Thumbnail editor
 
@@ -491,6 +494,7 @@
 
 - **COMB-6** [ui] [impact:1]
   Add a line for external files to indicate that they are external and to keep a consistent height for task rows. This would go in place of the stream item title/link. It would not need to link to anything.
+  Built 2026-10-21, awaiting review.
 
 - **COMB-7** [needs-design] [blocked:CONV-14]
   Audio track management when combining (split from CONV-14, 2026-10-05). Original text: This kind of track management functionality also needs to be added to the combine functionality. Right now, I believe it keeps all audio tracks, and just appends whatever each video file has next to each other. We might need to explore a more complicated visualization which shows the different tracks in each file and what the resulting combined file would look like. Showing simple colored blocks in a gantt-style chart may work.

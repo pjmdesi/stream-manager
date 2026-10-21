@@ -20,6 +20,10 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 - Session Videos in the player fills in at once when a video opens or the stream changes, with each file's cloud status following a moment later; it used to wait a second or more on that check and showed the previous stream's files in the meantime.
 
+## Combine
+
+- Rows for files dropped from outside a stream now carry an "External file" line where a stream's name would be, so every row has the same height.
+
 ## Cloud sync
 
 - Offloading a file now checks the sync client's own record of it first. A file the client has not finished uploading, or whose cloud copy the client registered at a different size than the file on this PC, is kept here and its row in the Cloud sync window says why. Retry once the client has caught up.
