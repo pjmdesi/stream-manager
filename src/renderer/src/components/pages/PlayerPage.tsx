@@ -1615,6 +1615,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // stream drops the target, so a download never opens over something the
   // user went on to. Decided 2026-10-20.
   const autoOpenPathRef = useRef<string | null>(null)
+  // PLR-35: true from a move to another stream until its listing and cloud
+  // check have landed; the panel shows a spinner instead of the previous
+  // stream's rows. The generation counter lets the newest reload win when
+  // two overlap (next pressed twice), so an older listing never lands last.
+  const [sessionPanelLoading, setSessionPanelLoading] = useState(false)
+  const reloadGenRef = useRef(0)
   const reloadSessionPanel = useCallback(async (fp: string | null, selected?: StreamFolder | null) => {
     const folder = selected !== undefined ? selected : (fp ? null : selectedStreamFolderRef.current)
     if (!fp && !folder) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); setReadySessionPaths(new Set()); return }
@@ -1630,6 +1636,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
           date: folder!.date,
         }
     const currentName = fp ? fp.replace(/.*[\\/]/, '') : ''
+    const gen = ++reloadGenRef.current
+    if (folderMetaKeyRef.current !== metaKey) {
+      // Another stream: empty the panel now rather than showing the previous
+      // stream's files until the listing returns. A reload of the same
+      // stream (a sibling opened, a file landed) keeps its rows.
+      setSiblingFiles([]); setFolderDrafts([]); setCurrentVideoClip(null); setMarkers([]); setMarkerPopupId(null)
+      setSessionPanelLoading(true)
+    }
     setFolderPath(dir)
     folderMetaKeyRef.current = metaKey
     try {
@@ -1642,6 +1656,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         window.api.listFilesRecursive(dir),
         window.api.readFile(`${streamsDir}/_meta.json`).then(raw => JSON.parse(raw)).catch(() => null),
       ])
+      if (gen !== reloadGenRef.current) return // a newer reload took over
       const folderMeta = meta?.[metaKey] ?? {}
       const videoMap: Record<string, Partial<VideoEntry>> = folderMeta.videoMap ?? {}
       const drafts: Record<string, import('../../types').ClipDraft> = folderMeta.clipDrafts ?? {}
@@ -1678,6 +1693,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         setCurrentVideoClip(null)
       }
       const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
+      if (gen !== reloadGenRef.current) return // a newer reload took over
       setSiblingFiles(videoFiles.map((f, i) => {
         const k = relKey(f.path)
         const entry = videoMap[k] ?? videoMap[f.name]
@@ -1717,6 +1733,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         }
       }
     } catch { /* swallow */ }
+    finally { if (gen === reloadGenRef.current) setSessionPanelLoading(false) }
   }, [config.streamsDir, config.streamMode, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName])
   // The effect that calls this sits below `selectedStreamFolder`, which it
   // also watches.
@@ -6838,6 +6855,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                           </div>
                           {isExtracting ? (
                             <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">Available when audio extraction is complete or cancelled</div>
+                          ) : sessionPanelLoading ? (
+                            /* PLR-35: a move to another stream shows this until its
+                               rows are in, never the previous stream's files. */
+                            <div className="px-3 py-4 min-h-[72px] flex items-center justify-center">
+                              <Loader2 size={14} className="animate-spin text-gray-400" />
+                            </div>
                           ) : siblingFiles.length === 0 && folderDrafts.length === 0 ? (
                             <div className="px-3 py-4 text-xs text-gray-400 text-center leading-relaxed">
                               {state.filePath ? 'No other videos in this folder' : 'Open a video to see siblings here'}

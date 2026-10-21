@@ -332,6 +332,7 @@
 
 - **PLR-35** [bug] [ui] [impact:2]
   Session Videos shows the previous stream's files for a few seconds after moving to another stream, until the new listing and its cloud-status check finish, so the panel names the wrong files for a moment. Seen 2026-10-20 with the player's next/prev. Clear the list the moment the target changes and show a loading state (spinner with reserved height, per the style guide) until the rows are in, or make the listing fast enough that no gap shows (today it is one recursive folder listing plus one cloud-status check per move).
+  Built 2026-10-21, awaiting review.
 
 ### Thumbnail editor
 
