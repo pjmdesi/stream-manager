@@ -313,7 +313,7 @@
 - **PLR-30** [bug] [impact:1]
   After adjusting the volume of an audio track in multi-track editing mode, the focus remains on the volume slider, taking over functionality of keyboard shortcuts. The focus on the sliders should only stick the the user focused it manually with the tab key, otherwise it should release focus immediately after lifting the mouse.
 
-- **PLR-31** [bug] [impact:3]
+- **PLR-31** [bug] [impact:3] [done]
   When attempting to go to a next/prev stream item in the player using the provided buttons, if that stream item in question does not have a hydrated video, it attempts to play that video instead of detecting that it is not hydrated and displays an error, then refuses the navigation. It should navigate anyway, and show that no videos could be opened since none of them are hydrated, and then offer to hydrate the primary video (the one that is auto-picked to be the one that opens at first).
 
   Similarly, when I select a stream item from the popup list, and select one which is not hydrated, SM triggers a hydration, but otherwise gives no feedback (I only know it got triggered because I see the windows notification). We need to give the same feedback as attempting to open from the streams page: show the "this file isn't hydrated" modal with the offer to begin the hydration.
