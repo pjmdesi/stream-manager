@@ -18,7 +18,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 - Moving to the previous or next stream when all of its videos are in the cloud no longer starts a download on its own or ends in an error. The player shows that stream with its videos and their cloud status; click one to download it, and again to open it once it has landed.
 
-- Session Videos no longer shows the previous stream's files for a moment after moving to another stream; it clears and shows a spinner until the new list is in.
+- Session Videos in the player fills in at once when a video opens or the stream changes, with each file's cloud status following a moment later; it used to wait a second or more on that check and showed the previous stream's files in the meantime.
 
 ## Cloud sync
 

@@ -5,7 +5,7 @@ import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, 
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
 import { useOpenItems } from '../../context/OpenItemsContext'
-import { rememberHydrationOne } from '../../lib/hydrationCache'
+import { getCachedHydration, rememberHydration, rememberHydrationOne, stalePaths } from '../../lib/hydrationCache'
 import { usePageActivity } from '../../context/PageActivityContext'
 import { isAnyModalOpen } from '../../lib/shortcuts'
 import { useStore } from '../../hooks/useStore'
@@ -1046,7 +1046,9 @@ const SESSION_CATEGORY_STYLES: Record<string, string> = {
 interface SiblingFile {
   path: string
   name: string
-  isLocal: boolean
+  /** true = on this PC, false = offloaded, undefined = not read yet (the
+   *  row shows its small spinner until the background check lands). */
+  isLocal: boolean | undefined
   category?: 'full' | 'short' | 'clip' | 'combined'
   fps?: number              // frames per second (from videoMap) — used for timecode display
   clipOf?: string           // source filename if this was produced by the clip exporter
@@ -1692,28 +1694,49 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       } else {
         setCurrentVideoClip(null)
       }
-      const localFlags = await window.api.checkLocalFiles(videoFiles.map(f => f.path))
-      if (gen !== reloadGenRef.current) return // a newer reload took over
-      setSiblingFiles(videoFiles.map((f, i) => {
+      // Rows go up as soon as the listing is in, with the cloud status the
+      // shared hydration cache already knows (an unknown one shows the
+      // row's small spinner). The Windows attribute read, a PowerShell
+      // start of about a second, used to run before any row was shown; it
+      // now runs afterwards for the stale paths only and updates the icons
+      // when it lands. The files grid works this way, which is why it
+      // paints at once (PLR-35 follow-up).
+      const paths = videoFiles.map(f => f.path)
+      const cached = getCachedHydration(paths)
+      const rowFor = (f: typeof videoFiles[number], isLocal: boolean | undefined): SiblingFile => {
         const k = relKey(f.path)
         const entry = videoMap[k] ?? videoMap[f.name]
         return {
           path: f.path,
           name: f.name,
-          isLocal: localFlags[i],
+          isLocal,
           category: entry?.category as SiblingFile['category'] | undefined,
           fps: entry?.fps,
           clipOf: entry?.clipOf,
           clipState: entry?.clipState,
           entry,
         }
-      }))
+      }
+      setSiblingFiles(videoFiles.map(f => rowFor(f, cached[f.path])))
+      setSessionPanelLoading(false)
       // The ready ring survives only on a row that is still listed and local.
-      setReadySessionPaths(prev => {
+      const pruneRings = (isLocalOf: (p: string) => boolean | undefined) => setReadySessionPaths(prev => {
         if (prev.size === 0) return prev
-        const keep = new Set([...prev].filter(p => videoFiles.some((f, i) => f.path === p && localFlags[i])))
+        const keep = new Set([...prev].filter(p => isLocalOf(p) === true))
         return keep.size === prev.size ? prev : keep
       })
+      pruneRings(p => cached[p])
+      const stale = stalePaths(paths)
+      if (stale.length > 0) {
+        void window.api.checkLocalFiles(stale).then(flags => {
+          const updates: Record<string, boolean> = {}
+          stale.forEach((p, i) => { updates[p] = flags[i] ?? true })
+          rememberHydration(updates)
+          if (gen !== reloadGenRef.current) return
+          setSiblingFiles(prev => prev.map(f => f.path in updates ? { ...f, isLocal: updates[f.path] } : f))
+          pruneRings(p => updates[p] ?? cached[p])
+        }).catch(() => {})
+      }
 
       // Apply saved per-track audio settings (mute / solo / volume) for the
       // currently-loaded file. Skips indices that don't exist in the source.
@@ -1981,6 +2004,8 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     })
   }, [guardedLoadFile])
   const handleSessionVideoClick = useCallback((item: SiblingFile, load: (p: string) => void) => {
+    // Status still being read: neither a download nor an open is safe yet.
+    if (cloudSyncActive && item.isLocal === undefined) return
     if (cloudSyncActive && !item.isLocal) {
       if (!hydratingSessionRef.current.has(item.path)) {
         setHydratingSessionPaths(prev => new Set(prev).add(item.path))
