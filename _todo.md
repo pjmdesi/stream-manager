@@ -17,16 +17,17 @@
 13. CONV-15
 14. SYNC-8
 15. PLR-31
-16. COMB-6
-17. CONV-4
-18. CONV-14
-19. THU-40
-20. STR-39
-21. STR-40
-22. STR-41
-23. APP-54
-24. CONV-25
-25. THU-42
+16. PLR-35
+17. COMB-6
+18. CONV-4
+19. CONV-14
+20. THU-40
+21. STR-39
+22. STR-40
+23. STR-41
+24. APP-54
+25. CONV-25
+26. THU-42
 
 ## Next up
 
@@ -318,6 +319,7 @@
   Similarly, when I select a stream item from the popup list, and select one which is not hydrated, SM triggers a hydration, but otherwise gives no feedback (I only know it got triggered because I see the windows notification). We need to give the same feedback as attempting to open from the streams page: show the "this file isn't hydrated" modal with the offer to begin the hydration.
 
   These interactions actually seem to have broken the cloud sync functionality as every cloud-based action I attempted after that hydration was triggered failed on the SM side.
+  Built 2026-10-20, awaiting review: navigation lands on the stream without loading a placeholder; the player view stays up with a disabled pane and a message, Session Videos lists the files for a click-to-download, the first clicked file opens when it lands, with no modal and no download on its own (decided 2026-10-20).
 
 - **PLR-32** [bug] [ui] [impact:1]
   When the zoom/pan is at or near max, the zoom indicator in the clipper toolbar disappears. It should not disappear. It should stay visible regardless of the values.
@@ -327,6 +329,9 @@
 
 - **PLR-34** [ui] [impact:2]
   The player shows nothing when a video track cannot be decoded on this PC. The video element has no error handler, so an H.265 file on a GPU without hardware HEVC decoding (Chromium has no software HEVC decoder) plays as audio over a black picture with no explanation, and any other unsupported codec does the same. Detect it (the element's error event, a zero videoWidth once metadata has loaded, or a MediaCapabilities probe of the file's codec before loading) and show a notice that names the codec, says this PC's GPU cannot decode it, and makes clear the file itself is fine (Windows' own player needs the Store extension for it; players such as VLC decode it in software). A notice only, no transcode fallback. Verified 2026-10-13 that on an HEVC-capable GPU the player needs no Store extension for H.265 and decodes AV1 everywhere.
+
+- **PLR-35** [bug] [ui] [impact:2]
+  Session Videos shows the previous stream's files for a few seconds after moving to another stream, until the new listing and its cloud-status check finish, so the panel names the wrong files for a moment. Seen 2026-10-20 with the player's next/prev. Clear the list the moment the target changes and show a loading state (spinner with reserved height, per the style guide) until the rows are in, or make the listing fast enough that no gap shows (today it is one recursive folder listing plus one cloud-status check per move).
 
 ### Thumbnail editor
 
@@ -529,7 +534,7 @@
 - **SYNC-10** [impact:3]
   Offload must skip files SM itself has in use, app-wide, instead of asking Windows and reporting the refusal as a failure. Seen 2026-10-07: a recording being archived by the converter showed "Failed, the cloud provider could not complete the operation, the file may be in use (0x80070187)" in the cloud sync panel, when SM knew it was reading that file. The panel should list such a file as "In use" (or pinned-style, like the displayed thumbnail) with the reason in the tooltip (open in the player, being converted, being combined, open in the thumbnail editor, being copied by an auto-rule) and not issue the dehydrate. The pieces exist: the renderer's `useInUse` (converter jobs plus open items, used to block deletes) and main's `getProtectedPaths` (displayed thumbnails) and `isConverterWritingPath`; the offload queue needs one check that consults them, in main, so every entry point (sidebar, grid, bulk) gets it.
 
-- **SYNC-8** [investigate] [impact:4]
+- **SYNC-8** [investigate] [impact:4] [done]
   Check the cloud copy when SM offloads a file. The 2026-10-06 loss (CONV-18) ended at the offload: the sync client reported the file in sync while the server held 1.25 MiB of a 26 GB file, `CfDehydratePlaceholder` trusts that flag, and the only complete copy was discarded without a word. (Seen 2026-10-07: dehydrating files the client was still uploading fails outright, so the gate holds when the client's bookkeeping is right; this check is for when it is not.) SM cannot see the server's size through CFAPI, but right after a dehydrate it can ask the provider for a small range at the END of the placeholder (`CfHydratePlaceholder` with an offset near the file's length); a provider whose copy is short fails that request at once. The design to investigate: after each successful dehydrate in the offload queue, request the last 64 KiB; on failure, mark the file in the cloud sync panel as "cloud copy incomplete" in red, keep it in the failed list, and name it in the panel's summary, so the user learns it the minute it happens (while a recycle-bin copy or the source may still exist) instead of days later. Open questions to settle first against Synology Drive: whether a range request hydrates only the range or the whole file (the cfapi notes say Synology streams the full file on hydrate, which would make the check cost a full download), whether the failure code distinguishes "short copy" from "offline", and what the request does to the placeholder's pinned state. If a cheap range check is not possible, the fallback is a pre-offload gate: refuse to dehydrate a file modified in the last N minutes and one the provider has not marked in sync, which would not have caught this case but narrows the window.
   Investigated 2026-10-20: on Synology a range request hydrates the whole file, so the post-offload tail check is out; the viable route is a check before each dehydrate of the placeholder's platform info (in-sync state, validated and modified bytes) and the file size the client registered in its identity blob against the file's length, which is the pair that diverged in the loss. Probe script: `scripts/probe-cf-placeholder.ps1`. Built 2026-10-20, awaiting review.
 

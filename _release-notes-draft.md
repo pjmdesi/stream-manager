@@ -14,6 +14,10 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - An archive whose result would be no smaller than the original no longer replaces it. The original stays, the larger file waits for two hours in case you want it anyway (Replace anyway on the row, behind a confirmation), and the row says what happened. A stream is marked archived only when its files were actually replaced.
 - Converting rows show the source size beside the source name, the output size growing beside the output name, an estimated final size (with its share of the source) from 5 percent on, and the time remaining. The Combine page shows the same while it runs.
 
+## Player
+
+- Moving to the previous or next stream when all of its videos are in the cloud no longer starts a download on its own or ends in an error. The player shows that stream with its videos and their cloud status; click one to download it, and again to open it once it has landed.
+
 ## Cloud sync
 
 - Offloading a file now checks the sync client's own record of it first. A file the client has not finished uploading, or whose cloud copy the client registered at a different size than the file on this PC, is kept here and its row in the Cloud sync window says why. Retry once the client has caught up.

@@ -1594,12 +1594,35 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // leave the popup editing the wrong video's chapter.
   useEffect(() => { setMarkerPopupId(null) }, [state.filePath])
 
-  const reloadSessionPanel = useCallback(async (fp: string | null) => {
-    if (!fp) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); return }
+  // The PLR-31 case: a stream chosen with no file loaded. The panel then
+  // lists that stream's videos (cloud status included) without the
+  // per-file parts (markers, clip lineage, saved audio settings). Callers
+  // that only know the file path (the streams-changed refresh, the clip
+  // export refresh) leave `selected` out and the ref supplies it, so a
+  // refresh while a download runs does not clear the panel.
+  const selectedStreamFolderRef = useRef<StreamFolder | null>(null)
+  // With nothing loaded, the first row the user clicks to download opens by
+  // itself when it lands: there is no review to interrupt, unlike the
+  // Session Videos rule for a playing video (ready ring, wait for a click).
+  // A later click keeps the ring; a file loading or a move to another
+  // stream drops the target, so a download never opens over something the
+  // user went on to. Decided 2026-10-20.
+  const autoOpenPathRef = useRef<string | null>(null)
+  const reloadSessionPanel = useCallback(async (fp: string | null, selected?: StreamFolder | null) => {
+    const folder = selected !== undefined ? selected : (fp ? null : selectedStreamFolderRef.current)
+    if (!fp && !folder) { setSiblingFiles([]); setFolderDrafts([]); setFolderPath(null); setCurrentVideoClip(null); folderMetaKeyRef.current = null; currentVideoKeyRef.current = null; setMarkers([]); setMarkerPopupId(null); return }
     // Find the stream folder (date-named ancestor or, in dump mode, derive
     // from filename) and compute the canonical _meta.json key for it.
-    const { dir, metaKey, streamsDir, isDump, date } = resolveStreamContext(fp, config.streamsDir)
-    const currentName = fp.replace(/.*[\\/]/, '')
+    const { dir, metaKey, streamsDir, isDump, date } = fp
+      ? resolveStreamContext(fp, config.streamsDir)
+      : {
+          dir: folder!.folderPath,
+          metaKey: folder!.relativePath,
+          streamsDir: (config.streamsDir || '').replace(/[\\/]+$/, ''),
+          isDump: config.streamMode === 'dump-folder',
+          date: folder!.date,
+        }
+    const currentName = fp ? fp.replace(/.*[\\/]/, '') : ''
     setFolderPath(dir)
     folderMetaKeyRef.current = metaKey
     try {
@@ -1633,14 +1656,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         const p = absPath.replace(/\\/g, '/')
         return p.startsWith(dirNormForKey + '/') ? p.slice(dirNormForKey.length + 1) : p.split('/').pop() ?? p
       }
-      const currentRelKey = relKey(fp)
+      const currentRelKey = fp ? relKey(fp) : null
       // Hydrate the current file's markers. Same key convention as videoMap
       // (relative path, basename fallback for legacy/dump entries).
       const allMarkers: Record<string, VideoMarker[]> = folderMeta.videoMarkers ?? {}
       currentVideoKeyRef.current = currentRelKey
-      setMarkers(allMarkers[currentRelKey] ?? allMarkers[currentName] ?? [])
+      setMarkers(currentRelKey ? (allMarkers[currentRelKey] ?? allMarkers[currentName] ?? []) : [])
       // Detect whether the currently-loaded file is a known clip output
-      const currentEntry = videoMap[currentRelKey] ?? videoMap[currentName]
+      const currentEntry = currentRelKey ? (videoMap[currentRelKey] ?? videoMap[currentName]) : undefined
       if (currentEntry?.clipOf && currentEntry?.clipState) {
         const sourceExists = videoFiles.some(f => f.name === currentEntry.clipOf)
         setCurrentVideoClip({ clipOf: currentEntry.clipOf, clipState: currentEntry.clipState, sourceExists })
@@ -1665,9 +1688,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
 
       // Apply saved per-track audio settings (mute / solo / volume) for the
       // currently-loaded file. Skips indices that don't exist in the source.
-      const savedSettings: Record<number, AudioTrackSetting> | undefined =
-        (folderMeta as StreamMeta).audioSettings?.[currentName] ??
-        (folderMeta as StreamMeta).audioSettings?.[currentRelKey]
+      const savedSettings: Record<number, AudioTrackSetting> | undefined = currentRelKey
+        ? ((folderMeta as StreamMeta).audioSettings?.[currentName] ??
+          (folderMeta as StreamMeta).audioSettings?.[currentRelKey])
+        : undefined
       if (savedSettings) {
         for (const [idxStr, s] of Object.entries(savedSettings)) {
           const i = Number(idxStr)
@@ -1680,11 +1704,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         }
       }
     } catch { /* swallow */ }
-  }, [config.streamsDir, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName])
-
-  useEffect(() => {
-    reloadSessionPanel(state.filePath)
-  }, [state.filePath, reloadSessionPanel])
+  }, [config.streamsDir, config.streamMode, setTrackMuted, setTrackSolo, setTrackVolume, setTrackColor, setTrackName])
+  // The effect that calls this sits below `selectedStreamFolder`, which it
+  // also watches.
 
   // Populate the full stream-folder list used by the Selected Stream
   // sidebar section. Re-runs when the streams root or mode changes and
@@ -1713,24 +1735,53 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
     [allStreamFolders],
   )
 
-  // The stream folder the currently-loaded video belongs to, or null if
-  // the user opened a video that isn't part of any stream item (e.g.
-  // dropped a one-off file from outside the streams root).
+  // PLR-31: the stream the user navigated to when none of its videos is on
+  // this PC. The player view then stays up with nothing loaded: the video
+  // pane is a disabled surface with a message, the sidebar shows the
+  // stream and lists its videos with their cloud status (click to download,
+  // click again to open), and nothing downloads on its own. Cleared the
+  // moment a file loads; the loaded file's folder is the truth then.
+  const [selectedStreamKey, setSelectedStreamKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (state.filePath) { setSelectedStreamKey(null); autoOpenPathRef.current = null }
+  }, [state.filePath])
+
+  // The stream folder the currently-loaded video belongs to, the stream the
+  // user navigated to with nothing loaded (PLR-31), or null if the user
+  // opened a video that isn't part of any stream item (e.g. dropped a
+  // one-off file from outside the streams root).
   const currentStreamFolder = useMemo(() => {
-    if (!state.filePath || !config.streamsDir) return null
+    if (!config.streamsDir) return null
+    if (!state.filePath) {
+      return selectedStreamKey ? (sortedStreamFolders.find(f => f.relativePath === selectedStreamKey) ?? null) : null
+    }
     const { metaKey } = resolveStreamContext(state.filePath, config.streamsDir)
     return (
       sortedStreamFolders.find(f => f.relativePath === metaKey) ??
       (folderPath ? sortedStreamFolders.find(f => f.folderPath === folderPath) : null) ??
       null
     )
-  }, [state.filePath, config.streamsDir, sortedStreamFolders, folderPath])
+  }, [state.filePath, config.streamsDir, sortedStreamFolders, folderPath, selectedStreamKey])
+  /** The PLR-31 state: a stream is selected and no file is loaded. */
+  const selectedStreamFolder = !state.filePath ? currentStreamFolder : null
+  // Ref first, reload second: the reload's other callers read the ref.
+  useEffect(() => { selectedStreamFolderRef.current = selectedStreamFolder }, [selectedStreamFolder])
+
+  useEffect(() => {
+    reloadSessionPanel(state.filePath, state.filePath ? null : selectedStreamFolder)
+  }, [state.filePath, selectedStreamFolder, reloadSessionPanel])
 
   // Nav subtext (nav redesign Pass C): the open item's stream title (or
   // its date when the title renders empty); the bare filename when the
   // open file is external to the library. Cleared when nothing is open.
   useEffect(() => {
-    if (!state.filePath) { setNavSubtext('player', null); return }
+    if (!state.filePath) {
+      // A stream selected with nothing loaded (PLR-31) still names itself.
+      setNavSubtext('player', currentStreamFolder
+        ? (renderStreamTitle(currentStreamFolder, sortedStreamFolders).trim() || currentStreamFolder.date)
+        : null)
+      return
+    }
     setNavSubtext('player', currentStreamFolder
       ? (renderStreamTitle(currentStreamFolder, sortedStreamFolders).trim() || currentStreamFolder.date)
       : (state.filePath.split(/[\\/]/).pop() ?? null))
@@ -1883,19 +1934,30 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       if (ev.type !== 'item' || !hydratingSessionRef.current.has(ev.path)) return
       if (ev.status === 'done' || ev.status === 'already-local') {
         setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(ev.path); return next })
-        setReadySessionPaths(prev => new Set(prev).add(ev.path))
         setSiblingFiles(prev => prev.map(f => f.path === ev.path ? { ...f, isLocal: true } : f))
+        // PLR-31: the first row clicked with nothing loaded opens itself,
+        // as long as nothing has loaded and no other stream was selected
+        // since (both clear the target).
+        if (autoOpenPathRef.current === ev.path && selectedStreamFolderRef.current) {
+          autoOpenPathRef.current = null
+          guardedLoadFile(ev.path)
+          return
+        }
+        setReadySessionPaths(prev => new Set(prev).add(ev.path))
       } else if (ev.status === 'failed') {
         // No ring — the cloud modal owns the failure (reason + retry).
         setHydratingSessionPaths(prev => { const next = new Set(prev); next.delete(ev.path); return next })
+        if (autoOpenPathRef.current === ev.path) autoOpenPathRef.current = null
       }
     })
-  }, [])
+  }, [guardedLoadFile])
   const handleSessionVideoClick = useCallback((item: SiblingFile, load: (p: string) => void) => {
     if (cloudSyncActive && !item.isLocal) {
       if (!hydratingSessionRef.current.has(item.path)) {
         setHydratingSessionPaths(prev => new Set(prev).add(item.path))
         enqueueHydrate([{ path: item.path, size: item.entry?.size ?? 0 }], false)
+        // First download clicked with nothing loaded: it opens when it lands.
+        if (selectedStreamFolderRef.current && autoOpenPathRef.current === null) autoOpenPathRef.current = item.path
       }
       return
     }
@@ -2041,9 +2103,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
   // Prefer a 'full' recording over exported child clips/shorts (same rule
   // as Streams page → "Send to Player") so jumping streams lands on the
   // source recording by default. Within that preference, the first
-  // *hydrated* video wins; if everything is a cloud placeholder we fall
-  // back to the preferred[0] and let loadFile's cloud download kick in.
-  const navigateToStream = useCallback(async (target: import('../../types').StreamFolder | null) => {
+  // *hydrated* video wins, then any hydrated video at all. If every video
+  // is a cloud placeholder the player loads nothing (loading one started a
+  // download through a plain read, with the Windows toast as the only
+  // feedback and an ffprobe error when that download was cancelled,
+  // PLR-31): it closes what is open and selects the stream instead, so the
+  // empty state shows its videos with their cloud status and the user
+  // picks what to download, if anything.
+  const navigateToStream = useCallback(async (target: StreamFolder | null) => {
     if (!target || target.videos.length === 0) return
     const videoMap = target.meta?.videoMap
     const folderNorm = target.folderPath.replace(/\\/g, '/').replace(/\/$/, '')
@@ -2058,14 +2125,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
       return cat === 'full' || cat === 'combined'
     })
     const preferred = fullVideos.length > 0 ? fullVideos : target.videos
-    let videoPath = preferred[0]
+    let videoPath: string | null = null
     try {
-      const localFlags = await window.api.checkLocalFiles(preferred)
-      const firstLocal = localFlags.findIndex(b => b)
-      if (firstLocal >= 0) videoPath = preferred[firstLocal]
-    } catch { /* fall back to preferred[0] */ }
-    guardedLoadFile(videoPath)
-  }, [guardedLoadFile])
+      const localFlags = await window.api.checkLocalFiles(target.videos)
+      const firstLocal = (list: string[]) => list.find(p => localFlags[target.videos.indexOf(p)]) ?? null
+      videoPath = firstLocal(preferred) ?? firstLocal(target.videos)
+    } catch { videoPath = preferred[0] /* status unknown: behave as before */ }
+    if (videoPath) { guardedLoadFile(videoPath); return }
+    if (state.filePath) closeVideo()
+    autoOpenPathRef.current = null
+    setSelectedStreamKey(target.relativePath)
+  }, [guardedLoadFile, closeVideo, state.filePath])
 
   // Session Videos hover popup (collapsed-sidebar only). Replaces the
   // squeezed inline list with a single icon trigger that pops out the
@@ -4473,7 +4543,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
 
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {!videoUrl ? (
+      {!videoUrl && !selectedStreamFolder ? (
         /* Empty state — mirrors the Thumbnails page overview: a page-title
            header, then a primary action area (the dropzone, in the slot the
            templates grid occupies there) followed by a Recent list. */
@@ -4555,7 +4625,29 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
         </>
       ) : (
         <div className="flex flex-1 overflow-hidden">
-          {/* Video + controls column */}
+          {!videoUrl ? (
+            /* PLR-31: a stream is selected but none of its videos is on this
+               PC. The player view stays up; the video column is a disabled
+               surface with the message, and the sidebar (Selected Stream,
+               Session Videos) does the work. Still a drop zone, so a file
+               dropped here opens as usual. */
+            <div className="flex flex-col flex-1 overflow-hidden">
+              <FileDropZone onFiles={handleFiles} accept={VIDEO_EXTENSIONS} className="flex-1 relative bg-black min-h-0" overlayLabel="Drop a video file here">
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center px-6 max-w-md">
+                    <Cloud size={28} className="mx-auto text-gray-500 mb-3" />
+                    <p className="text-sm text-gray-300">No videos from this stream are on this PC.</p>
+                    <p className="text-xs text-gray-400 mt-1">Click one in Session Videos to download it. It opens when it lands.</p>
+                  </div>
+                </div>
+              </FileDropZone>
+              <div className="bg-navy-800 border-t border-white/5 py-2 px-3 shrink-0 flex items-center justify-between text-xs text-gray-500 tabular-nums">
+                <span>00:00:00:00</span>
+                <span>--:--:--:--</span>
+              </div>
+            </div>
+          ) : (
+          /* Video + controls column */
           <div className="flex flex-col flex-1 overflow-hidden">
             {/* Video */}
             <FileDropZone onFiles={handleFiles} accept={VIDEO_EXTENSIONS} className="flex-1 relative bg-black min-h-0 group">
@@ -6518,6 +6610,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   for the video itself. */}
             </div>
           </div>
+          )}
 
           {/* Player sidebar — host for the contextual action buttons, the
               Selected Stream section, and Session Videos. Collapsed mode
@@ -6540,7 +6633,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   Was previously bundled into the Player Actions stack
                   below the Selected Stream section. Tooltips always
                   show so users can learn the keyboard shortcuts. */}
-              {videoUrl && (() => {
+              {(videoUrl || selectedStreamFolder) && (() => {
                 const topBtnBase = panelCollapsed
                   ? 'flex items-center justify-center h-8 w-8 rounded transition-colors shrink-0'
                   : 'flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-colors w-full text-left'
@@ -6549,10 +6642,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   : 'flex flex-col gap-1 p-2 shrink-0'
                 return (
                   <div className={`${topStackCls} border-b border-white/5`}>
-                    {videoInfo && (
+                    {/* With a stream selected and nothing loaded (PLR-31),
+                        Close Session leaves the player view the same way. */}
+                    {(videoInfo || selectedStreamFolder) && (
                       <Tooltip content="Close session" side="left">
                         <button
-                          onClick={() => closeVideo()}
+                          onClick={() => { if (videoInfo) closeVideo(); setSelectedStreamKey(null) }}
                           className={`${topBtnBase} text-red-400 border border-red-600/40 bg-red-900/30 hover:bg-red-900/50`}
                         >
                           <X size={14} className="shrink-0" />
@@ -6671,7 +6766,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                   video gets more vertical real estate. Each renders as
                   icon-only in collapsed mode (with the label as tooltip)
                   and icon + label in expanded mode. */}
-              {videoUrl && (() => {
+              {/* Session Videos renders for a loaded video and for a selected
+                  stream with nothing loaded (PLR-31); the action stack below
+                  it needs a video and stays hidden otherwise. */}
+              {(videoUrl || selectedStreamFolder) && (() => {
                 const isClipFile = !!currentVideoClip
                 const sourceMissing = isClipFile && !currentVideoClip!.sourceExists
                 const currentName = state.filePath?.replace(/.*[\\/]/, '') ?? ''
@@ -6865,6 +6963,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                         is a border-t matching the same `border-white/5`
                         style as the other section dividers in the
                         sidebar — no inner divider needed. */}
+                    {videoUrl && (
                     <div className={`${stackCls} border-t border-white/5`}>
                       {/* Clipping mode toggle — open and close live in the SAME
                           slot (style-guide rule: a mode's close button renders
@@ -6972,6 +7071,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                         </Tooltip>
                       )}
                     </div>
+                    )}
                   </>
                 )
               })()}
