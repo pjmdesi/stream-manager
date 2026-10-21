@@ -492,7 +492,7 @@
 - **COMB-5** [investigate]
   Check sources for timeline damage while combining, and decide whether conversions should too. Combining the 2024-10-09 recordings copied the two-second hole from 16-47-30 (see PLR-28) straight into the combined file, so the output fails in the player at the same spot and nothing warned about it. The combine already reads every source packet, so the detection is cheapest here: watch for a video timestamp jump far above one frame or an audio packet duration far above one AAC frame (ffmpeg's own stderr may already report the discontinuity; check what it logs on that file), then either warn in the completed row with the timecode (the output is still a faithful copy) or, as an option, repair in passing (re-time with a fill of the last frame plus silence, which a copy cannot do and a re-encode can). The converter's lossless copy would carry the same hole; a re-encode may heal it by accident. Decide per path, and share one detector with PLR-28 rather than three copies. Not queued; filed 2026-10-01.
 
-- **COMB-6** [ui] [impact:1]
+- **COMB-6** [ui] [impact:1] [done]
   Add a line for external files to indicate that they are external and to keep a consistent height for task rows. This would go in place of the stream item title/link. It would not need to link to anything.
   Built 2026-10-21, awaiting review.
 
