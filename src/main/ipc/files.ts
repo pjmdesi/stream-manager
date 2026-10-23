@@ -7,6 +7,7 @@ import { isInFlightWrite } from '../services/inFlightWrites'
 import { registerRowThumbIPC } from '../services/rowThumbs'
 import { getStreamsDir } from './store'
 import { OFFLINE_MASK } from '../services/cfapi'
+import { logsDir } from '../services/appLogs'
 
 const activeDownloadPollers = new Map<string, ReturnType<typeof setInterval>>()
 
@@ -336,6 +337,9 @@ export function registerFilesIPC(): void {
   ipcMain.handle('files:openUrl', async (_event, url: string) => {
     await shell.openExternal(url)
   })
+
+  // The shared logs folder (APP-20), for the Settings button that opens it.
+  ipcMain.handle('logs:getDir', async (): Promise<string> => logsDir())
 
   ipcMain.handle('files:openInExplorer', async (_event, filePath: string) => {
     try {

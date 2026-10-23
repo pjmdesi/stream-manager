@@ -6,12 +6,34 @@ import os from 'os'
 import { suspendProcess, resumeProcess, clipProvenanceComment, requireFfmpegBin } from '../services/ffmpegService'
 import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
 import { trackChild } from '../services/ffmpegChildren'
+import { v4 as uuidv4 } from 'uuid'
+import { getStreamsDir, getStreamMode } from './store'
+import { streamKeyOfFile } from '../../shared/streamKey'
+import { openJobLog, startJobLog, endJobLog, noteJobPaused, noteJobResumed, noteJobProgress, type JobLogFields } from '../services/conversionLog'
 
 // Single-slot active run — the Combine page runs one job at a time. Lets
 // combine:cancel kill the ffmpeg child, combine:pause/resume suspend it
 // (same NtSuspendProcess mechanism as conversion jobs), and the close
-// handler tell a cancel apart from a genuine failure.
-let activeCombine: { cancelled: boolean; paused: boolean; kill: () => void; pause: () => void; resume: () => void } | null = null
+// handler tell a cancel apart from a genuine failure. `logId` names the
+// run in the conversion log (CONV-4).
+let activeCombine: { logId: string; cancelled: boolean; paused: boolean; kill: () => void; pause: () => void; resume: () => void } | null = null
+
+/** What the conversion log records a combine as: its inputs, the output,
+ *  and the stream the output (or failing that, the first input) lives in. */
+function combineLogFields(files: string[], outputPath: string): JobLogFields {
+  const streamsDir = getStreamsDir()
+  const stream = streamsDir && getStreamMode() !== 'dump-folder'
+    ? (streamKeyOfFile(streamsDir, outputPath) ?? (files[0] ? streamKeyOfFile(streamsDir, files[0]) : null))
+    : null
+  const sizeOf = (p: string): number | undefined => { try { return fs.statSync(p).size } catch { return undefined } }
+  return {
+    kind: 'combine',
+    stream,
+    inputs: files.map(f => ({ path: f, bytes: sizeOf(f) })),
+    output: outputPath,
+    preset: null,
+  }
+}
 
 export function registerCombineIPC(): void {
   ipcMain.handle('combine:cancel', async () => {
@@ -27,12 +49,14 @@ export function registerCombineIPC(): void {
     if (!activeCombine || activeCombine.paused) return
     activeCombine.paused = true
     activeCombine.pause()
+    noteJobPaused(activeCombine.logId)
   })
 
   ipcMain.handle('combine:resume', async () => {
     if (!activeCombine?.paused) return
     activeCombine.paused = false
     activeCombine.resume()
+    noteJobResumed(activeCombine.logId)
   })
 
   ipcMain.handle(
@@ -108,7 +132,16 @@ export function registerCombineIPC(): void {
 
         const proc = spawn(ffmpegBin, args)
         proc.stdin?.end()
+        const logId = uuidv4()
+        openJobLog(logId, combineLogFields(files, outputPath))
+        startJobLog(logId, { encodeArgs: args.join(' '), durationSec: totalDurationSec })
+        // The log's end line for everything that is not a cancel.
+        const fail = (err: Error) => {
+          endJobLog(logId, 'error', { error: err.message })
+          reject(err)
+        }
         const runState = {
+          logId,
           cancelled: false,
           paused: false,
           kill: () => { try { proc.kill('SIGKILL') } catch (_) {} },
@@ -142,7 +175,9 @@ export function registerCombineIPC(): void {
               const outSec = parseInt(match[1]) / 1_000_000
               const sizeMatch = text.match(/total_size=(\d+)/)
               const outputBytes = sizeMatch ? parseInt(sizeMatch[1]) : undefined
-              send(Math.min(99, Math.round((outSec / totalDurationSec) * 100)), outputBytes)
+              const percent = Math.min(99, Math.round((outSec / totalDurationSec) * 100))
+              send(percent, outputBytes)
+              noteJobProgress(logId, percent)
             }
           }
         })
@@ -166,6 +201,7 @@ export function registerCombineIPC(): void {
             // anyway: a cancel after a stall is exactly when it matters.
             console.log('[combine] cancelled; ffmpeg stderr tail:\n' + stderrTail)
             cleanupPartialOutput()
+            endJobLog(logId, 'cancelled')
             reject(new Error('cancelled'))
           } else if (code === 0) {
             // A clean exit is not a whole file: read it back, then give it
@@ -176,15 +212,18 @@ export function registerCombineIPC(): void {
               // copy concat lands within a few seconds of the summed inputs.
               const check = await verifyFinishedOutput(writePath, totalDurationSec, Math.max(5, totalDurationSec * 0.02))
               if (!check.ok) {
-                reject(new Error(`Output check failed: ${check.reason}. The file was kept as "${path.basename(writePath)}" for inspection.`))
+                fail(new Error(`Output check failed: ${check.reason}. The file was kept as "${path.basename(writePath)}" for inspection.`))
                 return
               }
               try {
                 await commitOutput(writePath, outputPath, { replaceExisting: false })
               } catch (e: any) {
-                reject(new Error(`The combined file could not be renamed into place (${e.message}). It was kept as "${path.basename(writePath)}".`))
+                fail(new Error(`The combined file could not be renamed into place (${e.message}). It was kept as "${path.basename(writePath)}".`))
                 return
               }
+              let outputBytes: number | undefined
+              try { outputBytes = fs.statSync(outputPath).size } catch { /* the record goes without */ }
+              endJobLog(logId, 'done', { outputBytes })
               send(100)
               resolve()
             })()
@@ -192,7 +231,7 @@ export function registerCombineIPC(): void {
             cleanupPartialOutput()
             // Last stderr lines carry ffmpeg's actual complaint.
             const detail = stderrTail.trim().split('\n').slice(-6).join('\n')
-            reject(new Error(`ffmpeg exited with code ${code}${detail ? `:\n${detail}` : ''}`))
+            fail(new Error(`ffmpeg exited with code ${code}${detail ? `:\n${detail}` : ''}`))
           }
         })
 
@@ -200,7 +239,7 @@ export function registerCombineIPC(): void {
           if (activeCombine === runState) activeCombine = null
           try { fs.unlinkSync(listPath) } catch (_) {}
           cleanupPartialOutput()
-          reject(err)
+          fail(err)
         })
       })
     }

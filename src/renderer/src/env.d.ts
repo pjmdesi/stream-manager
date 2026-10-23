@@ -73,6 +73,7 @@ declare global {
       mkdir(dirPath: string): Promise<void>
       openUrl(url: string): Promise<void>
       openInExplorer(filePath: string): Promise<void>
+      getLogsDir(): Promise<string>
       readFile(filePath: string): Promise<string>
       saveScreenshot(destPath: string, base64Data: string): Promise<string>
       trashFile(filePath: string): Promise<void>

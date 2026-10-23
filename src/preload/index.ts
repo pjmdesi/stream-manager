@@ -96,6 +96,9 @@ contextBridge.exposeInMainWorld('api', {
   openInExplorer: (filePath: string) =>
     ipcRenderer.invoke('files:openInExplorer', filePath),
 
+  getLogsDir: () =>
+    ipcRenderer.invoke('logs:getDir'),
+
   readFile: (filePath: string) =>
     ipcRenderer.invoke('files:readFile', filePath),
 

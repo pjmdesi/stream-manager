@@ -12,6 +12,11 @@ import { expectSelfWrite } from '../services/selfWrites'
 import { broadcast } from '../services/broadcast'
 import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from '../services/mediaOutput'
 import { requestOrphanSweep, type ChildOwner } from '../services/ffmpegChildren'
+import {
+  openJobLog, dropJobLog, startJobLog, endJobLog, noteDownloadStart, noteDownloadEnd,
+  noteJobPaused, noteJobResumed, noteJobProgress, pruneConversionLog, type JobLogFields, type JobLogProbe,
+} from '../services/conversionLog'
+import type { VideoInfo } from '../services/ffmpegService'
 
 /** Where ffmpeg actually writes a job's output: `<outputFile>.tmp`, invisible
  *  to sync clients until the finished file is verified and renamed into
@@ -290,6 +295,43 @@ function jobOwner(id: string): ChildOwner {
   return { id: `job:${id}`, isLive: () => { const j = jobs.get(id); return !!j && isActiveJob(j) } }
 }
 
+/** What the conversion log records a job as (services/conversionLog.ts):
+ *  its kind, the stream that owns its input, the files and the preset. */
+function jobLogFields(job: ConversionJob): JobLogFields {
+  const streamsDir = getStreamsDir()
+  const stream = streamsDir && getStreamMode() !== 'dump-folder'
+    ? (streamKeyOfFile(streamsDir, job.inputFile) ?? streamKeyOfFile(streamsDir, job.outputFile))
+    : null
+  const kind: JobLogFields['kind'] = job.isClipExport
+    ? 'clip-export'
+    : job.replaceInput || job.groupCompletionHook?.type === 'archiveMarkAsArchived'
+      ? 'archive'
+      : 'conversion'
+  const preset = job.preset
+  return {
+    kind,
+    stream,
+    inputs: [{ path: job.inputFile, bytes: job.inputSize }],
+    output: job.outputFile,
+    preset: preset
+      ? { id: preset.id, name: preset.name, builtin: preset.isBuiltin, source: preset.source, args: preset.ffmpegArgs }
+      : null,
+  }
+}
+
+/** The probe facts the log keeps about an input. */
+function probeForLog(info: VideoInfo | null): JobLogProbe | null {
+  if (!info) return null
+  return {
+    durationSec: Number(info.duration) || undefined,
+    width: info.width || undefined,
+    height: info.height || undefined,
+    videoCodec: info.videoCodec,
+    fps: info.fps ? Math.round(info.fps * 100) / 100 : undefined,
+    audioTracks: info.audioTracks?.length,
+  }
+}
+
 // ── Job-completion waiters ────────────────────────────────────────────────
 // The `done` promise handed to callers (auto-rules awaits it to mark a rule
 // applied) is keyed by JOB ID and survives re-queues: a job that bounces
@@ -401,6 +443,10 @@ async function ensureHydrated(jobId: string): Promise<void> {
     if (!cur || cur.status !== 'queued') return
 
     setJobStatus(jobId, 'downloading')
+    // The log takes the job on here: a download that fails or is cancelled
+    // is work the app did for it, and the record says so.
+    openJobLog(jobId, jobLogFields(job))
+    noteDownloadStart(jobId)
     const flag = { cancelled: false }
     downloadCancelFlags.set(jobId, flag)
     cancellers.set(jobId, () => { flag.cancelled = true })
@@ -414,6 +460,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
 
     downloadCancelFlags.delete(jobId)
     cancellers.delete(jobId)
+    noteDownloadEnd(jobId)
 
     if (waited.outcome === 'failed') {
       // The download itself failed (provider error or no progress). Fail
@@ -424,6 +471,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
         jobs.set(jobId, { ...cur2, status: 'error', error: `Cloud download failed: ${waited.reason}` })
         broadcast('converter:jobError', { jobId, error: `Cloud download failed: ${waited.reason}` })
       }
+      endJobLog(jobId, 'error', { error: `Cloud download failed: ${waited.reason}` })
       hydEv.failed(waited.reason)
       maybeFireGroupHook(jobId)
       scheduleNext()
@@ -438,6 +486,7 @@ async function ensureHydrated(jobId: string): Promise<void> {
       if (cur2) {
         jobs.set(jobId, { ...cur2, status: 'cancelled' })
         broadcast('converter:jobStatus', { jobId, status: 'cancelled' })
+        endJobLog(jobId, 'cancelled')
         // NO jobError here — cancelling is a user action, and the error
         // event overwrote the row's 'cancelled' state with a red error,
         // losing the Requeue affordance.
@@ -918,6 +967,7 @@ export async function startConversionJob(
   const id = job.id || uuidv4()
   const newJob: ConversionJob = { ...withInputSize(job), id, status: 'running', progress: 0 }
   jobs.set(id, newJob)
+  openJobLog(id, jobLogFields(newJob))
   // The renderer's row for this job may be its own optimistic entry, made
   // before the input was ever stat'ed; push the record so the row carries
   // the input size (the source size beside the name, the "% of source").
@@ -938,6 +988,7 @@ export async function startConversionJob(
     if (j) jobs.set(id, { ...j, progress: percent })
     broadcast('converter:jobProgress', { jobId: id, percent, outputBytes })
     notifyJobProgress(id, percent)
+    noteJobProgress(id, percent)
   }
 
   // Completion settles through the id-keyed waiter so the `done` promise
@@ -1020,6 +1071,7 @@ export async function startConversionJob(
       }
       const outputSize = fileSizeOrZero(replacedPath ?? job.outputFile)
       jobs.set(id, { ...cur, status: 'done', progress: 100, outputSize })
+      endJobLog(id, 'done', { outputBytes: outputSize })
       cancellers.delete(id)
       pausers.delete(id)
       resumers.delete(id)
@@ -1037,6 +1089,7 @@ export async function startConversionJob(
     })() }
     const handleError = (err: Error, opts?: { keepOutput?: boolean }) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
+      endJobLog(id, 'error', { error: err.message })
       cancellers.delete(id)
       pausers.delete(id)
       resumers.delete(id)
@@ -1080,6 +1133,7 @@ export async function startConversionJob(
         if (!(await inputIsLocal())) {
           if (!stillWanted()) return
           setStatus('downloading')
+          noteDownloadStart(id)
           const flag = { cancelled: false }
           downloadCancelFlags.set(id, flag)
           // Cancel handler available during the download wait — the cancel IPC
@@ -1097,6 +1151,7 @@ export async function startConversionJob(
           const { waitForCloudFile } = await import('../services/cloudHydrateWait')
           const waited = await waitForCloudFile(job.inputFile, { isCancelled: () => flag.cancelled })
           downloadCancelFlags.delete(id)
+          noteDownloadEnd(id)
           if (waited.outcome === 'failed') {
             hydEv.failed(waited.reason)
             handleError(new Error(`Cloud download failed: ${waited.reason}`))
@@ -1110,6 +1165,7 @@ export async function startConversionJob(
             pausers.delete(id)
             resumers.delete(id)
             broadcast('converter:jobStatus', { jobId: id, status: 'cancelled' })
+            endJobLog(id, 'cancelled')
             // Abort the OS-level recall too — a dehydrate command cancels
             // an in-progress hydration (the only control CFAPI offers;
             // there is no pause). The streams watcher MUST be paused
@@ -1160,6 +1216,8 @@ export async function startConversionJob(
               broadcast('converter:jobStatus', { jobId: id, status: 'queued', autoStart: true })
             }
             cancellers.delete(id)
+            // Nothing ran: the log forgets the job until it starts again.
+            dropJobLog(id)
             scheduleNext()
             return
           }
@@ -1184,7 +1242,8 @@ export async function startConversionJob(
           // quote inside the tag value (seen in a v2.7.0 archive).
           gpuArgs = `${gpuArgs} -metadata "encoded_by=Archived Stream — Stream Manager v${app.getVersion()}"`
         }
-        const duration = await probeFile(job.inputFile).then(info => Number(info.duration) || 0).catch(() => 0)
+        const probed = await probeFile(job.inputFile).catch(() => null)
+        const duration = Number(probed?.duration) || 0
         // The output should run as long as the input unless the preset
         // trims (a custom `-t`, `-to`, `-ss` or frame cap); then only the
         // finalized-file checks apply.
@@ -1194,7 +1253,9 @@ export async function startConversionJob(
         // verified file is renamed into place in handleComplete.
         if (!stillWanted()) return
         const writePath = writePathOf(job)
-        const result = runConversion(job.inputFile, writePath, withExplicitMuxer(gpuArgs, job.outputFile), duration, handleProgress, handleComplete, handleError, jobOwner(id))
+        const finalArgs = withExplicitMuxer(gpuArgs, job.outputFile)
+        startJobLog(id, { encodeArgs: finalArgs, probe: probeForLog(probed), durationSec: duration })
+        const result = runConversion(job.inputFile, writePath, finalArgs, duration, handleProgress, handleComplete, handleError, jobOwner(id))
         cancellers.set(id, result.cancel)
         pausers.set(id, result.pause)
         resumers.set(id, result.resume)
@@ -1337,6 +1398,7 @@ function keepOriginalForLargerOutput(id: string, inputBytes: number, outputBytes
   if (!cur) return
   const expiresAt = Date.now() + keptOutputWindowMs()
   jobs.set(id, { ...cur, status: 'done', progress: 100, outputSize: outputBytes, keptOriginal: { inputBytes, outputBytes, expiresAt } })
+  endJobLog(id, 'done', { outputBytes, keptOriginal: true })
   cancellers.delete(id)
   pausers.delete(id)
   resumers.delete(id)
@@ -1545,6 +1607,7 @@ function cancelJobs(jobIds: string[]): Map<string, string> {
     if (dlFlag) dlFlag.cancelled = true
     if (!j || j.status === 'done' || j.status === 'cancelled' || j.status === 'error') continue
     jobs.set(jobId, { ...j, status: 'cancelled' })
+    endJobLog(jobId, 'cancelled')
     // Settle any done-waiter (cancel resolves, it is a user action, not
     // an error) — essential for jobs cancelled while still QUEUED, whose
     // startConversionJob paths never ran to settle it. No-op if the
@@ -1609,6 +1672,8 @@ export function registerConverterIPC(): void {
   restorePendingJobs()
   // Delete partial outputs the previous quit could not (sync-client locks).
   sweepQuitPartials()
+  // Conversion log retention (CONV-4), before any job can write to it.
+  pruneConversionLog()
 
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
 
@@ -1921,9 +1986,11 @@ export function registerConverterIPC(): void {
       const j = jobs.get(id)
       if (j) jobs.set(id, { ...j, progress: percent })
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobProgress', { jobId: id, percent })
+      noteJobProgress(id, percent)
     }
     const onComplete = () => {
       jobs.set(id, { ...jobs.get(id)!, status: 'done', progress: 100 })
+      endJobLog(id, 'done', { outputBytes: fileSizeOrZero(job.outputFile) })
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobComplete', { jobId: id, outputPath: job.outputFile })
       notifyStreamOutput(job.outputFile)
@@ -1933,6 +2000,7 @@ export function registerConverterIPC(): void {
     }
     const onError = (err: Error) => {
       jobs.set(id, { ...jobs.get(id)!, status: 'error', error: err.message })
+      endJobLog(id, 'error', { error: err.message })
       cancellers.delete(id); pausers.delete(id); resumers.delete(id)
       if (win && !win.isDestroyed()) win.webContents.send('converter:jobError', { jobId: id, error: err.message })
       scheduleNext()
@@ -1963,6 +2031,10 @@ export function registerConverterIPC(): void {
     jobs.set(id, { ...atStart, status: 'running' })
     broadcast('converter:jobStatus', { jobId: id, status: 'running' })
     win?.webContents.send('converter:jobProgress', { jobId: id, percent: 0 })
+    // The log's start line covers both phases: the segment copies below
+    // and the encode that joins them.
+    openJobLog(id, jobLogFields(atStart))
+    startJobLog(id, { encodeArgs: outputArgs.join(' '), probe: probeForLog(fileInfo), durationSec: totalDuration })
 
     // Temp directory — one MKV per segment will be stream-copied here
     const tempDir = path.join(os.tmpdir(), `sm-clip-${id}`)
@@ -1984,6 +2056,7 @@ export function registerConverterIPC(): void {
         cleanup()
         const j = jobs.get(id)
         if (j) jobs.set(id, { ...j, status: 'cancelled' })
+        endJobLog(id, 'cancelled')
         cancellers.delete(id); pausers.delete(id); resumers.delete(id)
         scheduleNext()
       })
@@ -2173,6 +2246,7 @@ export function registerConverterIPC(): void {
     const j = jobs.get(jobId)
     if (j) {
       jobs.set(jobId, { ...j, status: 'paused' })
+      noteJobPaused(jobId)
       // Broadcast the change — "Pause all" loops this IPC with no local
       // state update of its own, so without the event nothing in the UI
       // moved even though the jobs were genuinely suspended.
@@ -2185,6 +2259,7 @@ export function registerConverterIPC(): void {
     const j = jobs.get(jobId)
     if (j) {
       jobs.set(jobId, { ...j, status: 'running' })
+      noteJobResumed(jobId)
       broadcast('converter:jobStatus', { jobId, status: 'running' })
     }
   })

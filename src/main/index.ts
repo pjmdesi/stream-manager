@@ -114,6 +114,7 @@ import { registerNetIPC } from './ipc/net'
 import { registerThumbnailIPC } from './ipc/thumbnail'
 import { registerCloudSyncIPC } from './ipc/cloudSync'
 import { registerStreamRelayIPC } from './ipc/streamRelay'
+import { endOpenJobLogs } from './services/conversionLog'
 import { registerUpdateCheckIPC } from './services/updateCheck'
 import { tempManager } from './services/tempManager'
 import { fileWatcher } from './services/fileWatcher'
@@ -610,6 +611,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   fileWatcher.stop()
+  // Jobs still open in the conversion log end here as interrupted, so the
+  // quit reads as one rather than as a crash.
+  endOpenJobLogs('app closed')
   // No ffmpeg outlives the app: converter encodes the quit path has
   // already cancelled, plus Combine, the player's extractions and the
   // relay, which used to survive a quit and hold its port.
@@ -625,4 +629,4 @@ app.on('window-all-closed', () => {
 
 // Last guard for quits that skip window-all-closed. Idempotent: children
 // already gone are no longer registered.
-app.on('will-quit', () => { killAllChildren('quit') })
+app.on('will-quit', () => { endOpenJobLogs('app closed'); killAllChildren('quit') })

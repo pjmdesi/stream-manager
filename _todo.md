@@ -20,14 +20,13 @@
 16. PLR-35
 17. COMB-6
 18. CONV-4
-19. CONV-14
-20. THU-40
-21. STR-39
-22. STR-40
-23. STR-41
-24. APP-54
-25. CONV-25
-26. THU-42
+19. THU-40
+20. STR-39
+21. STR-40
+22. STR-41
+23. APP-54
+24. CONV-25
+25. THU-42
 
 ## Next up
 
@@ -403,11 +402,12 @@
 - **CONV-4** [impact:3]
   Implement a log system for conversions, combines, and exports. This will be a log file stored on the user's machine (possibly the user appdata folder). This will store all the relevant information for past conversions which could help the user find old files, understand which encoding options are best for their workflow, and provide data for other diagnoses. This log file could also be used for in-app tools such as a history panel for the converter/combine pages and a more accurate ETA estimation for conversion processes (these are separated into their own todo items below). This should log basically all actually started conversion processes (so it would exclude anything added to the queue, but then removed. Since no actual conversion happened, it would not be useful to record). Logging should include: stream item, file info (filename, metadata), encoding preset and the specifics thereof (if it was a default OOTB preset or a custom one and what the actual encoding settings were), the ETA of the conversion, whether it was cancelled or errored out (I don't believe we need to record if the user pauses and for how long, but it may be helpful in determining some statistics like), and all the relevant dates/times.
   Note (2026-09-03): this log lives in the shared logs location and uses the shared rotation helper, APP-20, like every other SM log.
+  Built 2026-10-23, awaiting review.
 
-- **CONV-5** [investigate] [blocked:CONV-4]
+- **CONV-5** [investigate] [blocked:CONV-4] [impact:2]
   If we implement a conversion log system, it may be possible to tune/smart-ify the completion ETA in the conversion nav item extra details section. Currently it parrots whatever ETA is the longest (whichever stream item currently has the largest ETA). This works okay now, but say 3 conversions are running concurrently, that means that as each one completes, the resource allocation for the remaining items may increase (even if slightly) which will affect the ETA for those items as they continue converting (reducing). It may be possible to provide a more accurate prediction of the ETA for a whole conversion process group based on historical statistics of conversions (the log system todo item above). This may need to involve an overall scoring system for a user's machine, and it would have to be a dynamic score weighted towards recent conversions (user's hardware may have changed, or they may have changed some configurations or background applications). This may be too complex and expensive for such a small improvement (a slightly more accurate ETA for multiple conversions), but I'd like to at least investigate anyway. An ETA that says 24 hours for 20 queued videos is better than saying 1 hour becuase only the *current* in-progress conversion tasks are counted.
 
-- **CONV-6** [blocked:CONV-4]
+- **CONV-6** [blocked:CONV-4] [impact:2]
   History panel for past conversions based on the logging system in the todo item above. This would provide a historical list of the conversions and clip exports a user has done. Each history item should include links to the output file and input file (if they exist), the stream item they are associated with (if applicable), a final status icon (completed, cancelled, errored out, etc.), and an accordion element which will expose the other details of the item when opened (Conversion time, encoding preset/settings, etc.). Not sure how we should handle duplicate entries like if a conversion process errors out for some reason and then the user tries again and it is then successful... probably show both.
 
 - **CONV-7** [investigate]
@@ -624,6 +624,7 @@
 
 - **APP-20**
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
+  The helper and the Settings button were built with CONV-4, 2026-10-23.
 
 - **APP-21** [investigate] [impact:4] [done]
   Single-authority audit: sweep the app for subsystems quietly running their own private copy of a shared concern, the pattern that has now bitten repeatedly. Known instances, all since fixed: the converter's private cloud-hydration loop that the cloud widget, files grid, and thumbnail fill-in never heard about (CONV-1); encode starts bypassing the concurrency scheduler (CONV-2); the out-of-sync panel's lazy tag-template sync (v2.4.0); the zoom shortcuts split between SM's handler and Electron's invisible default menu (APP-12). Method: inventory the cross-cutting concerns (cloud/hydration status, file-change notification, scheduling and caps, caching layers, config writes, event broadcast channels) and verify each has exactly ONE authority that every consumer routes through; anything found gets fixed inline if small or filed as its own item. Candidates to check first: ETA/elapsed calculations (converter nav extra vs converter page rows), per-page checkLocalFiles caching vs the shared hydrationCache, thumbnail generation triggers across surfaces, streams:changed emission sites, and any remaining direct getStore().set('config') writes that skip setConfigPartial's broadcast. Scope decided 2026-10-07 for the concentrated release: one bounded scan session whose findings are filed as tickets, not fixed in place; the queue was cut the same day to converter and combine work plus data-safety items (CONV-17, CONV-13, STR-37, CONV-15, CONV-16, SYNC-8, PLR-31, COMB-6, CONV-4, CONV-14), everything else parked in Next up. Scan done 2026-10-07, one session as decided. Verified single already: ETA and elapsed (ConversionContext feeds the nav extra and the converter rows), the locality gate before every probe (checkAlreadyArchived included), the three caches under one limit, main-to-renderer events (broadcast), the renderer's IPC bridge (preload only, zero direct ipcRenderer use), the ffmpeg path and the video list (APP-41), row thumbnails. Not single, filed as tickets: APP-47 (twelve renderer hydration checks bypass hydrationCache), APP-48 (four stream-key functions and about twelve folder-name regexes, with a dump-mode divergence masked by guards), APP-49 (sixteen private config casts in main with their own fallbacks, two streamMode reads with a different default, one config write that skips the broadcast), APP-50 (ten streams:changed emitters, four payload shapes, two audiences). Folded into CONV-17: no registry of ffmpeg children; Combine, audio and waveform extraction and the relay spawn outside the converter cap.
