@@ -14,7 +14,12 @@ import {
   Frame, BoxSelect,
   AlignStartVertical, AlignCenterVertical, AlignEndVertical,
   AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
-  FlipHorizontal2, FlipVertical2,
+  // The flip icons by their geometry, not the FlipHorizontal2/FlipVertical2
+  // aliases: lucide 1.52 moved those aliases onto each other's drawing, so
+  // the "horizontal" alias draws top and bottom triangles over a horizontal
+  // axis, which reads as a vertical flip (THU-40). The dashed centerline in
+  // these names is the axis the flip mirrors across.
+  TrianglesCenterlineDashedVertical, TrianglesCenterlineDashedHorizontal,
   ChevronDown, ChevronRight, Loader2, Radio, Palette, Upload,
   Layers as LayersIcon,
   Group as GroupIcon, Ungroup as UngroupIcon, Folder, Blend, ArrowDown,
@@ -9072,8 +9077,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                   {/* Flip ops act on every selected layer, one undo entry
                       per click. Lit when every selected layer is flipped. */}
                   {([
-                    ['x', <FlipHorizontal2 size={14} />, 'Flip horizontally', (l: ThumbnailLayer) => !!l.flipX],
-                    ['y', <FlipVertical2 size={14} />,   'Flip vertically',   (l: ThumbnailLayer) => !!l.flipY],
+                    ['x', <TrianglesCenterlineDashedVertical size={14} />,   'Flip horizontally', (l: ThumbnailLayer) => !!l.flipX],
+                    ['y', <TrianglesCenterlineDashedHorizontal size={14} />, 'Flip vertically',   (l: ThumbnailLayer) => !!l.flipY],
                   ] as const).map(([axis, icon, label, isLit]) => {
                     const allSelectedAreFlipped = selectedIds.every(id => {
                       const l = layers.find(ll => ll.id === id)

@@ -385,6 +385,7 @@
 
 - **THU-40** [ui] [bug]
   The flip vertical/horizontal buttons in the floating alignment panel seem to be swapped. The action matches the tooltip, but I don't think the icons are correct.
+  Built 2026-10-23, awaiting review.
 
 - **THU-41** [impact:2]
   Add setting to asset panel menu to show assets from streams on the same day
@@ -399,15 +400,15 @@
 - **CONV-3** [perf] [investigate]
   While conversions are running, the app gets slower and less responsive. Need to investigate to see if there's any way to prevent the conversions from affecting the app. No other apps on my machine seem to run slower while multiple conversions are happening, so it may be something in SM itself that is causing the slowness (maybe a background process that is continuously checking something while conversions run, like maybe the ETA calculations?).
 
-- **CONV-4** [impact:3]
+- **CONV-4** [impact:3] [done]
   Implement a log system for conversions, combines, and exports. This will be a log file stored on the user's machine (possibly the user appdata folder). This will store all the relevant information for past conversions which could help the user find old files, understand which encoding options are best for their workflow, and provide data for other diagnoses. This log file could also be used for in-app tools such as a history panel for the converter/combine pages and a more accurate ETA estimation for conversion processes (these are separated into their own todo items below). This should log basically all actually started conversion processes (so it would exclude anything added to the queue, but then removed. Since no actual conversion happened, it would not be useful to record). Logging should include: stream item, file info (filename, metadata), encoding preset and the specifics thereof (if it was a default OOTB preset or a custom one and what the actual encoding settings were), the ETA of the conversion, whether it was cancelled or errored out (I don't believe we need to record if the user pauses and for how long, but it may be helpful in determining some statistics like), and all the relevant dates/times.
   Note (2026-09-03): this log lives in the shared logs location and uses the shared rotation helper, APP-20, like every other SM log.
   Built 2026-10-23, awaiting review.
 
-- **CONV-5** [investigate] [blocked:CONV-4] [impact:2]
+- **CONV-5** [investigate] [impact:2]
   If we implement a conversion log system, it may be possible to tune/smart-ify the completion ETA in the conversion nav item extra details section. Currently it parrots whatever ETA is the longest (whichever stream item currently has the largest ETA). This works okay now, but say 3 conversions are running concurrently, that means that as each one completes, the resource allocation for the remaining items may increase (even if slightly) which will affect the ETA for those items as they continue converting (reducing). It may be possible to provide a more accurate prediction of the ETA for a whole conversion process group based on historical statistics of conversions (the log system todo item above). This may need to involve an overall scoring system for a user's machine, and it would have to be a dynamic score weighted towards recent conversions (user's hardware may have changed, or they may have changed some configurations or background applications). This may be too complex and expensive for such a small improvement (a slightly more accurate ETA for multiple conversions), but I'd like to at least investigate anyway. An ETA that says 24 hours for 20 queued videos is better than saying 1 hour becuase only the *current* in-progress conversion tasks are counted.
 
-- **CONV-6** [blocked:CONV-4] [impact:2]
+- **CONV-6** [impact:2]
   History panel for past conversions based on the logging system in the todo item above. This would provide a historical list of the conversions and clip exports a user has done. Each history item should include links to the output file and input file (if they exist), the stream item they are associated with (if applicable), a final status icon (completed, cancelled, errored out, etc.), and an accordion element which will expose the other details of the item when opened (Conversion time, encoding preset/settings, etc.). Not sure how we should handle duplicate entries like if a conversion process errors out for some reason and then the user tries again and it is then successful... probably show both.
 
 - **CONV-7** [investigate]
@@ -737,7 +738,7 @@
 
 - **APP-56** [investigate] [perf] [impact:2]
   The app sometimes stops answering hovers and clicks promptly for a stretch and then catches up; seen 2026-10-23 while testing CONV-4 on a dist build, and a dist launched from the Dev pane is slow until the UI has fully loaded. Candidates to measure before changing anything: main-process work that holds up the renderer's IPC (the library listing, 650 ms for 256 streams, re-runs on every player file change; a PowerShell attribute read is 440 to 640 ms; the launch path reads files synchronously), the renderer's render cost while running conversions report progress several times a second, and first-launch effects of a freshly written exe (Defender scanning it, V8 compiling cold). To settle first: whether it happens on the installed release build, only while a conversion runs or at any time, and whether Task Manager shows the main process or the renderer busy during a stall. Related: PLR-36.
-  Observed 2026-10-23 on the 2.7.1 release build and on a current dist: the release build shows little of it (a slight increase while a conversion runs); the dist stutters at idle, most of all for a few seconds right after the files grid's cloud status lands (scrolling the detail sidebar or the streams list shows it), and much more often while a conversion runs. Task Manager lists the app as four processes plus a background one, so which one is busy is not known yet.
+  Observed 2026-10-23 on the 2.7.1 release build and on a current dist: the release build shows little of it (a slight increase while a conversion runs); the dist stutters at idle, most of all for a few seconds right after the files grid's cloud status lands (scrolling the detail sidebar or the streams list shows it), and much more often while a conversion runs. Task Manager lists the app as four processes plus a background one, so which one is busy is not known yet. A later look showed no process above 10 percent during a stall, and the rows cannot be told apart by name, so Task Manager alone will not settle it. Deferred until the next release shows how much of an issue it is there.
 
 ### Onboarding & Setup
 
