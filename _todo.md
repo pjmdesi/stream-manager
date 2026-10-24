@@ -737,6 +737,7 @@
 
 - **APP-56** [investigate] [perf] [impact:2]
   The app sometimes stops answering hovers and clicks promptly for a stretch and then catches up; seen 2026-10-23 while testing CONV-4 on a dist build, and a dist launched from the Dev pane is slow until the UI has fully loaded. Candidates to measure before changing anything: main-process work that holds up the renderer's IPC (the library listing, 650 ms for 256 streams, re-runs on every player file change; a PowerShell attribute read is 440 to 640 ms; the launch path reads files synchronously), the renderer's render cost while running conversions report progress several times a second, and first-launch effects of a freshly written exe (Defender scanning it, V8 compiling cold). To settle first: whether it happens on the installed release build, only while a conversion runs or at any time, and whether Task Manager shows the main process or the renderer busy during a stall. Related: PLR-36.
+  Observed 2026-10-23 on the 2.7.1 release build and on a current dist: the release build shows little of it (a slight increase while a conversion runs); the dist stutters at idle, most of all for a few seconds right after the files grid's cloud status lands (scrolling the detail sidebar or the streams list shows it), and much more often while a conversion runs. Task Manager lists the app as four processes plus a background one, so which one is busy is not known yet.
 
 ### Onboarding & Setup
 

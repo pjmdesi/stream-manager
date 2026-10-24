@@ -1,6 +1,6 @@
 import { appendLogRecord, initLog, localIsoTime } from './appLogs'
 
-// The conversion log (CONV-4): `logs/conversions.log`, a record of every
+// The conversion log (CONV-4): `logs/sm-conversion-history.log`, a record of every
 // conversion, archive, clip export and combine the app actually ran. Each
 // job writes two records matched by `id`: a `start` record the moment its
 // encoder is about to run (what is being made from what, with which
@@ -13,12 +13,12 @@ import { appendLogRecord, initLog, localIsoTime } from './appLogs'
 // The callers (ipc/converter.ts, ipc/combine.ts) report what happens; the
 // timing bookkeeping lives here so neither grows a clock of its own.
 
-const LOG_NAME = 'conversions'
+const LOG_NAME = 'sm-conversion-history'
 const MAX_AGE_DAYS = 365
 
 /** The `#` lines at the top of the file, for whoever opens it. */
 const HEADER = [
-  'Stream Manager conversion log (https://stream-manager.app)',
+  'Stream Manager conversion history (https://stream-manager.app)',
   'One record per event, written as indented JSON with a blank line after each.',
   'Every conversion, archive, clip export and combine writes a "start" record',
   'when its encoder begins and an "end" record when it finishes; the two share',
