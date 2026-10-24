@@ -551,6 +551,21 @@ contextBridge.exposeInMainWorld('api', {
   youtubeGetCompletedBroadcasts: () =>
     ipcRenderer.invoke('youtube:getCompletedBroadcasts'),
 
+  // The link picker's VOD list (STR-39): the on-disk copy, a sync that
+  // streams pages through `onYouTubeVodsPage` while it runs, and that
+  // page event.
+  youtubeGetVodCache: () =>
+    ipcRenderer.invoke('youtube:getVodCache'),
+
+  youtubeSyncVods: (mode: 'full' | 'delta') =>
+    ipcRenderer.invoke('youtube:syncVods', mode),
+
+  onYouTubeVodsPage: (cb: (page: { items: unknown[] }) => void) => {
+    const listener = (_e: unknown, page: { items: unknown[] }) => cb(page)
+    ipcRenderer.on('youtube:vods-page', listener)
+    return () => { ipcRenderer.removeListener('youtube:vods-page', listener) }
+  },
+
   youtubeGetVideoById: (videoId: string) =>
     ipcRenderer.invoke('youtube:getVideoById', videoId),
   youtubeGetVideosByIds: (ids: string[]) =>

@@ -228,8 +228,10 @@ export function BroadcastPicker({
 }
 
 /** Renders title + scheduled time. `compact` truncates the title so the
- *  closed-anchor state stays single-line. */
-function RowContent({
+ *  closed-anchor state stays single-line. Exported for the sidebar's
+ *  linked-video row and the link modal (STR-39), which replaced this
+ *  dropdown in the live streams page. */
+export function RowContent({
   broadcast,
   showDateOnly,
   compact,
@@ -265,13 +267,12 @@ function RowContent({
  *  data we already have. A broadcast in 'live' state that's the
  *  default will have actualStartTime but still no
  *  scheduledStartTime, so this check works across lifecycle states. */
-function isLikelyDefaultBroadcast(b: LiveBroadcast): boolean {
+export function isLikelyDefaultBroadcast(b: LiveBroadcast): boolean {
   return !b.snippet?.scheduledStartTime
 }
 
-/** "Today 7:00 PM" / "Tomorrow 8:30 PM" / "Jun 17 7:00 PM". */
 /** Date only, for past streams where the time isn't meaningful. */
-function formatDateOnly(iso: string): string {
+export function formatDateOnly(iso: string): string {
   const d = new Date(iso)
   if (isNaN(d.getTime())) return ''
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })

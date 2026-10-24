@@ -15,6 +15,10 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - Converting rows show the source size beside the source name, the output size growing beside the output name, an estimated final size (with its share of the source) from 5 percent on, and the time remaining. The Combine page shows the same while it runs.
 - Every conversion, archive, clip export and combine the app runs is now recorded in a log on this PC: the files, the preset and its settings, the timings, and how it ended. Settings, under System, has an Open logs folder button. Records are kept for a year.
 
+## Streams
+
+- Linking a YouTube video to a stream opens a picker window in place of the menu that grew upward from the sidebar's footer: search by title, rows with thumbnails and dates, and videos already linked to another stream behind a Show linked row. The channel's video list is kept on this PC, so the picker lists it at once and asks YouTube only for newer videos.
+
 ## Player
 
 - Moving to the previous or next stream when all of its videos are in the cloud no longer starts a download on its own or ends in an error. The player shows that stream with its videos and their cloud status; click one to download it, and again to open it once it has landed.

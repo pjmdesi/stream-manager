@@ -164,10 +164,31 @@ export interface LiveBroadcast {
     gameTitle?: string
     categoryId?: string
     tags?: string[]
+    /** Largest thumbnail YouTube offers for it; the link picker's rows. */
+    thumbnailUrl?: string
   }
   status: {
     lifeCycleStatus: string
     privacyStatus: string
+  }
+}
+
+/** A liveBroadcasts list item in the app's shape: the typed fields only,
+ *  so the cached VOD list stays small, plus the thumbnail URL. */
+function toLiveBroadcast(item: any): LiveBroadcast {
+  return {
+    id: item.id,
+    snippet: {
+      title: item.snippet?.title ?? '',
+      description: item.snippet?.description ?? '',
+      scheduledStartTime: item.snippet?.scheduledStartTime,
+      actualStartTime: item.snippet?.actualStartTime,
+      thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
+    },
+    status: {
+      lifeCycleStatus: item.status?.lifeCycleStatus ?? '',
+      privacyStatus: item.status?.privacyStatus ?? '',
+    },
   }
 }
 
@@ -257,7 +278,11 @@ export async function getLiveBroadcasts(
       for (const item of (r.value?.items ?? [])) {
         // Skip completed broadcasts — the mine=true query returns all states including past ones
         if (item.status?.lifeCycleStatus === 'complete') continue
-        if (!seen.has(item.id)) { seen.add(item.id); broadcasts.push(item) }
+        if (!seen.has(item.id)) {
+          seen.add(item.id)
+          item.snippet.thumbnailUrl = pickThumbUrl(item.snippet?.thumbnails)
+          broadcasts.push(item)
+        }
       }
     } else {
       const msg: string = (r.reason as any)?.message ?? 'Unknown error'
@@ -304,6 +329,7 @@ export async function getBroadcastById(
   )
   const item = data?.items?.[0]
   if (!item) return null
+  item.snippet.thumbnailUrl = pickThumbUrl(item.snippet?.thumbnails)
   const extrasMap = await fetchVideoExtras([broadcastId], clientId, clientSecret)
   const extras = extrasMap.get(broadcastId)
   if (extras?.tags) item.snippet.tags = extras.tags
@@ -339,6 +365,7 @@ export async function getVideoById(
       // undefined, so the symmetric mismatch check sees `'' === ''`
       // and the Pull button never appears.
       categoryId: item.snippet.categoryId ?? undefined,
+      thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
     },
     status: {
       lifeCycleStatus: 'complete',
@@ -377,6 +404,7 @@ export async function getVideosByIds(
           actualStartTime: item.snippet?.publishedAt,
           tags: item.snippet?.tags ?? [],
           categoryId: item.snippet?.categoryId ?? undefined,
+          thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
         },
         status: {
           lifeCycleStatus: 'complete',
@@ -606,14 +634,46 @@ export async function getCompletedBroadcasts(
 
   // Hydrate tags + categoryId from the videos resource (the
   // liveBroadcasts snippet doesn't carry either).
+  await hydrateVideoExtras(broadcasts, clientId, clientSecret)
+
+  return broadcasts
+}
+
+/** One page of the channel's completed broadcasts, newest first, in the
+ *  app's shape and without the tags lookup: the link picker (STR-39)
+ *  shows pages as they land and fills tags in afterwards. One quota unit
+ *  per page. */
+export async function getCompletedBroadcastsPage(
+  pageToken: string | undefined,
+  clientId: string,
+  clientSecret: string
+): Promise<{ items: LiveBroadcast[]; nextPageToken?: string }> {
+  const params: Record<string, string> = { part: 'snippet,status', broadcastStatus: 'completed', maxResults: '50' }
+  if (pageToken) params.pageToken = pageToken
+  const data = await ytRequest(
+    `/liveBroadcasts?${new URLSearchParams(params)}`,
+    { method: 'GET' },
+    clientId, clientSecret
+  )
+  return {
+    items: (data?.items ?? []).map(toLiveBroadcast),
+    nextPageToken: data?.nextPageToken || undefined,
+  }
+}
+
+/** Fills tags and categoryId in place from the videos resource, which the
+ *  liveBroadcasts snippet does not carry. One quota unit per 50 ids. */
+export async function hydrateVideoExtras(
+  broadcasts: LiveBroadcast[],
+  clientId: string,
+  clientSecret: string
+): Promise<void> {
   const extrasMap = await fetchVideoExtras(broadcasts.map(b => b.id), clientId, clientSecret)
   for (const b of broadcasts) {
     const extras = extrasMap.get(b.id)
     if (extras?.tags) b.snippet.tags = extras.tags
     if (extras?.categoryId) b.snippet.categoryId = extras.categoryId
   }
-
-  return broadcasts
 }
 
 export interface VideoStatus {

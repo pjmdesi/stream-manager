@@ -1,0 +1,202 @@
+import React, { useMemo, useState } from 'react'
+import { Search, Loader2, AlertTriangle, Link2, Check, Radio, Film } from 'lucide-react'
+import type { LiveBroadcast } from '../../types'
+import { Modal } from '../ui/Modal'
+import { Button } from '../ui/Button'
+import { Input } from '../ui/Input'
+import { Tooltip } from '../ui/Tooltip'
+import { formatScheduledTime } from '../../lib/formatScheduledTime'
+import { formatDateOnly, isLikelyDefaultBroadcast, type BroadcastLinkRef } from '../ui/BroadcastPicker'
+
+/** Where the channel-wide video list stands (STR-39). `loading` is the
+ *  first walk of the channel with pages still landing; `checking` is the
+ *  one-request look for videos newer than the cache; `newIds` are what
+ *  that look found, listed first. */
+export interface VodListState {
+  phase: 'idle' | 'loading' | 'ready'
+  checking: boolean
+  newIds: string[]
+  error: string | null
+}
+
+interface LinkVideoModalProps {
+  isOpen: boolean
+  onClose: () => void
+  /** A past stream links a video; an upcoming one a scheduled broadcast. */
+  kind: 'video' | 'broadcast'
+  items: LiveBroadcast[]
+  currentId: string
+  /** Other stream items' links into this list, keyed by broadcast id;
+   *  those rows hide behind the last row until asked for. */
+  otherFolderLinks: BroadcastLinkRef[]
+  state: VodListState
+  onPick: (id: string) => void
+}
+
+/**
+ * The link picker (STR-39): a modal in place of the sidebar's drop-up. A
+ * search field, rows with a thumbnail, title and date, the current link
+ * marked, videos already linked to another stream hidden behind the
+ * list's last row. Rows never move once shown: the list has a fixed
+ * height, a status line of fixed height sits above it, and new videos
+ * land under that line, at the top, where the one you came for is.
+ */
+export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherFolderLinks, state, onPick }: LinkVideoModalProps) {
+  const [query, setQuery] = useState('')
+  const [showLinked, setShowLinked] = useState(false)
+  const noun = kind === 'video' ? 'video' : 'broadcast'
+
+  const linkMap = useMemo(() => {
+    const m = new Map<string, BroadcastLinkRef[]>()
+    for (const link of otherFolderLinks) {
+      const arr = m.get(link.broadcastId) ?? []
+      arr.push(link)
+      m.set(link.broadcastId, arr)
+    }
+    return m
+  }, [otherFolderLinks])
+
+  const words = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const matches = (b: LiveBroadcast) => {
+    if (words.length === 0) return true
+    const title = (b.snippet?.title ?? '').toLowerCase()
+    return words.every(w => title.includes(w))
+  }
+  // Linked elsewhere, and not the current link: hidden until asked for.
+  const isHiddenLink = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
+  const hiddenCount = items.filter(b => isHiddenLink(b) && matches(b)).length
+  const visible = items.filter(b => matches(b) && (showLinked || !isHiddenLink(b)))
+  const newSet = new Set(state.newIds)
+
+  const close = () => { setQuery(''); setShowLinked(false); onClose() }
+  const pick = (id: string) => { setQuery(''); setShowLinked(false); onPick(id) }
+
+  const statusLine = (() => {
+    if (state.error) {
+      return (
+        <span className="flex items-center gap-1.5 text-red-400">
+          <AlertTriangle size={12} className="shrink-0" />
+          <span className="truncate">YouTube did not answer: {state.error}</span>
+        </span>
+      )
+    }
+    if (kind === 'broadcast') {
+      return state.phase === 'loading'
+        ? <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin shrink-0" /> Loading scheduled broadcasts</span>
+        : <span>Scheduled broadcasts on your channel</span>
+    }
+    if (state.phase === 'loading') {
+      return <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin shrink-0" /> Loading your videos from YouTube</span>
+    }
+    if (state.checking) {
+      return <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin shrink-0" /> Checking for new videos</span>
+    }
+    if (state.newIds.length > 0) {
+      return <span className="text-gray-200">{state.newIds.length} new {state.newIds.length === 1 ? 'video' : 'videos'} since last time</span>
+    }
+    return <span>Up to date</span>
+  })()
+
+  const emptyLine = (() => {
+    if (state.phase === 'loading' && items.length === 0) return null
+    if (visible.length > 0) return null
+    if (words.length > 0) return `No ${noun}s match.`
+    if (hiddenCount > 0) return `Every ${noun} is linked to another stream.`
+    return kind === 'video' ? 'No videos found on your channel.' : 'No scheduled broadcasts on your channel.'
+  })()
+
+  return (
+    <Modal
+      isOpen={isOpen}
+      onClose={close}
+      title={kind === 'video' ? 'Link a YouTube video' : 'Link a scheduled broadcast'}
+      width="lg"
+      footer={<Button onClick={close}>Close</Button>}
+    >
+      <div className="flex flex-col gap-2">
+        <Input
+          value={query}
+          onChange={e => setQuery(e.target.value)}
+          placeholder="Search by title"
+          inputPrefix={<Search size={13} />}
+          aria-label="Search by title"
+        />
+        {/* Fixed-height status line: its text changes, its space does not. */}
+        <div className="h-8 flex items-center text-[11px] text-gray-400 min-w-0">
+          {statusLine}
+        </div>
+        {/* Fixed-height list: the modal keeps its size while pages land. */}
+        <div className="h-[55vh] overflow-y-auto rounded-lg border border-white/10 bg-navy-900">
+          {visible.map(b => {
+            const isCurrent = b.id === currentId
+            const links = linkMap.get(b.id) ?? []
+            const title = b.snippet?.title?.trim() || `Untitled ${noun}`
+            const start = b.snippet?.actualStartTime ?? b.snippet?.scheduledStartTime ?? ''
+            const when = start ? (kind === 'video' ? formatDateOnly(start) : formatScheduledTime(start)) : ''
+            return (
+              <button
+                key={b.id}
+                type="button"
+                onClick={() => pick(b.id)}
+                className={`flex items-center gap-3 w-full px-3 py-2 text-left transition-colors border-b border-white/5 last:border-b-0 ${
+                  isCurrent ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
+                }`}
+              >
+                <div className="w-[72px] aspect-video shrink-0 rounded overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
+                  {b.snippet?.thumbnailUrl
+                    ? <img src={b.snippet.thumbnailUrl} loading="lazy" alt="" className="w-full h-full object-cover" />
+                    : <Film size={14} />}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs text-gray-200 line-clamp-2 break-words leading-snug">{title}</p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
+                    {when && <span className="text-[10px] text-gray-400 tabular-nums">{when}</span>}
+                    {newSet.has(b.id) && (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40">New</span>
+                    )}
+                    {isCurrent && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40">
+                        <Check size={9} /> Linked to this stream
+                      </span>
+                    )}
+                    {kind === 'broadcast' && isLikelyDefaultBroadcast(b) && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-gray-300 border border-gray-300/40">
+                        <Radio size={9} /> Default livestream
+                      </span>
+                    )}
+                    {links.length > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-amber-300 border border-amber-300/40">
+                        <Link2 size={9} />
+                        {links.length > 1 ? `Linked to ${links.length} other streams` : `Linked to: ${links[0].folderTitle || links[0].folderDate}`}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </button>
+            )
+          })}
+          {emptyLine && (
+            <p className="px-3 py-6 text-xs text-gray-400 italic text-center">{emptyLine}</p>
+          )}
+          {state.phase === 'loading' && (
+            <div className="flex items-center justify-center gap-1.5 px-3 py-3 text-[11px] text-gray-400">
+              <Loader2 size={12} className="animate-spin" /> Loading more
+            </div>
+          )}
+          {hiddenCount > 0 && state.phase !== 'loading' && (
+            <Tooltip content={showLinked ? `Hide the ${noun}s linked to other streams` : `List the ${noun}s already linked to other streams too`} triggerClassName="block">
+              <button
+                type="button"
+                onClick={() => setShowLinked(v => !v)}
+                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors border-t border-white/5"
+              >
+                <Link2 size={12} />
+                {showLinked ? `Hide linked ${noun}s` : `Show linked ${noun}s (${hiddenCount})`}
+              </button>
+            </Tooltip>
+          )}
+        </div>
+      </div>
+    </Modal>
+  )
+}

@@ -39,7 +39,8 @@ import { TemplateBodyEditor, MergeFieldPicker, MERGE_FIELD_CHIP_CLASS } from '..
 import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
-import { BroadcastPicker, BroadcastLinkRef } from '../ui/BroadcastPicker'
+import { RowContent as BroadcastRowContent, BroadcastLinkRef } from '../ui/BroadcastPicker'
+import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
 import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
@@ -620,7 +621,20 @@ export function StreamsPage({
   // bandwidth on page mount.
   const [ytBroadcasts, setYtBroadcasts] = useState<LiveBroadcast[]>([])
   const [ytVods, setYtVods] = useState<LiveBroadcast[]>([])
-  const [ytVodsLoaded, setYtVodsLoaded] = useState(false)
+  // The link modal's view of the VOD list (STR-39), mirrored in a ref so
+  // the loader below reads the current phase without re-creating itself.
+  const [ytVodList, setYtVodList] = useState<VodListState>({ phase: 'idle', checking: false, newIds: [], error: null })
+  const ytVodListRef = useRef(ytVodList)
+  const patchVodList = useCallback((patch: Partial<VodListState>) => {
+    ytVodListRef.current = { ...ytVodListRef.current, ...patch }
+    setYtVodList(ytVodListRef.current)
+  }, [])
+  /** When the channel was last walked in full (from the cache or a walk). */
+  const ytVodsFetchedAtRef = useRef<number | null>(null)
+  /** Last look for newer videos; one per minute is plenty. */
+  const ytVodsDeltaAtRef = useRef(0)
+  /** A full walk running behind a cached list: its pages are not shown. */
+  const ytVodsBackgroundWalkRef = useRef(false)
   const [ytBroadcastsLoading, setYtBroadcastsLoading] = useState(false)
   // Out-of-sync panel: remote snapshot per linked video id + check state +
   // current thumbnail hash per folder (for the thumbnail-needs-push field).
@@ -1064,21 +1078,91 @@ export function StreamsPage({
     window.api.getTwitchTagTemplates?.().then(setTwitchTagTemplates).catch(() => {})
   }, [refreshTwitchChannel])
 
-  // Lazy-load all completed VODs on first open of a past-stream picker.
-  // Idempotent — guarded by ytVodsLoaded so repeat opens are no-ops.
-  const loadAllVods = useCallback(async () => {
-    if (ytVodsLoaded || ytBroadcastsLoading) return
-    setYtBroadcastsLoading(true)
-    try {
-      const items: LiveBroadcast[] = await window.api.youtubeGetCompletedBroadcasts()
-      setYtVods(items)
-      setYtVodsLoaded(true)
-    } catch (err) {
-      console.warn('Failed to load YouTube VODs', err)
-    } finally {
-      setYtBroadcastsLoading(false)
+  // The link modal's VOD list (STR-39), brought up to date when the modal
+  // opens for a past stream. First time in a session: the on-disk copy
+  // lists at once (its entries flagged `cached`, good for picking, not
+  // for comparing) and one request asks for anything newer; with no copy
+  // the channel is walked page by page, the pages landing through
+  // onYouTubeVodsPage, and cached at the end. Later opens look for newer
+  // videos again, at most once a minute. A copy older than a day is
+  // walked again behind the list and patched in place.
+  const ensureVods = useCallback(() => {
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const now = Date.now()
+    const runDelta = async () => {
+      if (ytVodListRef.current.checking) return
+      if (now - ytVodsDeltaAtRef.current < 60_000) return
+      ytVodsDeltaAtRef.current = now
+      patchVodList({ checking: true, error: null })
+      try {
+        const r = await window.api.youtubeSyncVods('delta')
+        if (r.items.length > 0) {
+          setYtVods(prev => {
+            const fresh = new Map(r.items.map(v => [v.id, v]))
+            return [...r.items, ...prev.filter(v => !fresh.has(v.id))]
+          })
+        }
+        patchVodList({ checking: false, newIds: r.items.map(v => v.id) })
+      } catch (err: any) {
+        patchVodList({ checking: false, error: err?.message ?? String(err) })
+      }
     }
-  }, [ytVodsLoaded, ytBroadcastsLoading])
+    const runFull = async (background: boolean) => {
+      ytVodsBackgroundWalkRef.current = background
+      if (!background) patchVodList({ phase: 'loading', error: null })
+      try {
+        const r = await window.api.youtubeSyncVods('full')
+        ytVodsFetchedAtRef.current = r.fetchedAt
+        // The walk replaces every cached entry; entries it did not return
+        // stay only when they came from somewhere fresh (a pasted URL's
+        // video, a lookup by id).
+        setYtVods(prev => {
+          const fresh = new Map(r.items.map(v => [v.id, v]))
+          return [...prev.filter(v => !fresh.has(v.id) && !v.cached), ...r.items]
+        })
+        patchVodList({ phase: 'ready' })
+      } catch (err: any) {
+        console.warn('Failed to load YouTube VODs', err)
+        patchVodList({ phase: 'ready', error: err?.message ?? String(err) })
+      } finally {
+        ytVodsBackgroundWalkRef.current = false
+      }
+    }
+    const st = ytVodListRef.current
+    if (st.phase === 'idle') {
+      patchVodList({ phase: 'loading', error: null })
+      window.api.youtubeGetVodCache().then(cache => {
+        if (!cache) { void runFull(false); return }
+        ytVodsFetchedAtRef.current = cache.fetchedAt
+        setYtVods(prev => {
+          const have = new Set(prev.map(v => v.id))
+          return [...prev, ...cache.items.filter(v => !have.has(v.id)).map(v => ({ ...v, cached: true }))]
+        })
+        patchVodList({ phase: 'ready' })
+        void runDelta()
+        if (now - cache.fetchedAt > DAY_MS) void runFull(true)
+      }).catch(() => { void runFull(false) })
+      return
+    }
+    if (st.phase === 'ready') {
+      void runDelta()
+      const fetchedAt = ytVodsFetchedAtRef.current
+      if (fetchedAt && now - fetchedAt > DAY_MS && !ytVodsBackgroundWalkRef.current) void runFull(true)
+    }
+  }, [patchVodList])
+  // Pages of a first walk land here, appended in the order they come
+  // (newest first), so the modal fills in without moving a row already
+  // shown. A walk behind a cached list keeps its pages to itself.
+  useEffect(() => {
+    return window.api.onYouTubeVodsPage(({ items }) => {
+      if (ytVodsBackgroundWalkRef.current) return
+      setYtVods(prev => {
+        const have = new Set(prev.map(v => v.id))
+        const add = items.filter(v => !have.has(v.id))
+        return add.length > 0 ? [...prev, ...add] : prev
+      })
+    })
+  }, [])
 
   // Per-video privacy + livestream-vs-VOD status for every linked YT video.
   // Refreshed whenever the set of linked ids changes. Drives the row's
@@ -4407,7 +4491,8 @@ export function StreamsPage({
               setYtBroadcasts={setYtBroadcasts}
               broadcastLinks={broadcastLinks}
               ytBroadcastsLoading={ytBroadcastsLoading}
-              onLoadAllVods={loadAllVods}
+              onLoadAllVods={ensureVods}
+              ytVodList={ytVodList}
               defaultBroadcastTime={config.defaultBroadcastTime || '19:00'}
               claudeEnabled={claudeEnabled}
               onSendFileToPlayer={handleSendFileToPlayer}
@@ -6309,7 +6394,7 @@ function SidebarDetail({
   folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, prevStream, nextStream, onPickStream, onClose, onUpdateMeta: onUpdateMetaRaw, onUpdateMetaFor, cloudSyncActive,
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
-  ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, defaultBroadcastTime, claudeEnabled,
+  ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, ytVodList, defaultBroadcastTime, claudeEnabled,
   onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
@@ -6379,7 +6464,10 @@ function SidebarDetail({
   setYtBroadcasts: React.Dispatch<React.SetStateAction<LiveBroadcast[]>>
   broadcastLinks: BroadcastLinkRef[]
   ytBroadcastsLoading: boolean
+  /** Brings the VOD list up to date for the link modal (STR-39). */
   onLoadAllVods: () => void
+  /** Where that list stands, for the modal's status line. */
+  ytVodList: VodListState
   /** Default time-of-day (24h "HH:MM") pre-filled in the create-broadcast
    *  form. From config.defaultBroadcastTime. */
   defaultBroadcastTime: string
@@ -7235,6 +7323,8 @@ function SidebarDetail({
   const isPastStream = folder.date < todayStr()
   const linkedId = meta?.ytVideoId ?? ''
   const broadcastPool = isPastStream ? ytVods : ytBroadcasts
+  // The link modal (STR-39), opened from the footer's Link / Change button.
+  const [linkPickerOpen, setLinkPickerOpen] = useState(false)
 
   // Defer non-critical on-open YouTube fetches past the sidebar slide so their
   // setYt* updates — which re-render the (unmemoized) streams list — don't land
@@ -7251,7 +7341,9 @@ function SidebarDetail({
     // Known-deleted on YouTube — the lookup can never succeed; the link
     // section shows the missing-video warning instead.
     if (linkedVideoMissing) return
-    if (broadcastPool.some(b => b.id === linkedId)) return
+    // A cached copy (STR-39) lists and picks fine; the comparisons below
+    // want the fresh record, so it is fetched and takes the copy's place.
+    if (broadcastPool.some(b => b.id === linkedId && !b.cached)) return
     let cancelled = false
     const timer = setTimeout(() => {
       // The linked broadcast isn't in its pool, so fetch it and add it. Past
@@ -7267,7 +7359,9 @@ function SidebarDetail({
       const lookup = isPastStream
         ? window.api.youtubeGetVideoById(linkedId).then(video => {
             if (cancelled || !video) return
-            setYtVods(prev => prev.some(v => v.id === video.id) ? prev : [video, ...prev])
+            setYtVods(prev => prev.some(v => v.id === video.id)
+              ? prev.map(v => v.id === video.id ? video : v)
+              : [video, ...prev])
           })
         : window.api.youtubeGetBroadcastById(linkedId).then(bc => {
             if (cancelled || !bc) return
@@ -7332,7 +7426,7 @@ function SidebarDetail({
   }, [ytConnected, linkedId, quotaExceeded, setYtBroadcasts, setYtVods, deferMs])
 
   const selectedBroadcast = useMemo(
-    () => broadcastPool.find(b => b.id === linkedId) ?? null,
+    () => broadcastPool.find(b => b.id === linkedId && !b.cached) ?? null,
     [broadcastPool, linkedId],
   )
 
@@ -8667,39 +8761,70 @@ function SidebarDetail({
                 <span>The linked YouTube video is no longer available. It may have been deleted on YouTube. Unlink to clear it.</span>
               </div>
             )}
-            <BroadcastPicker
-              value={linkedId}
-              onChange={id => onUpdateMeta({ ytVideoId: id })}
-              broadcasts={broadcastPool}
+            {/* The linked video, and the button that opens the link modal
+                (STR-39). The drop-up that used to sit here grew upward
+                from the footer and reflowed as the list loaded. When the
+                pool cannot see the linked id (a quota outage blocked the
+                fetch, or only a cached copy is in), the row is drawn from
+                local meta so the link does not read as missing;
+                selectedBroadcast, which drives the mismatch dots, stays
+                null so nothing pretends to be in sync. */}
+            <div className={`flex items-center gap-2 bg-navy-900 border border-white/10 rounded-lg ps-3 pe-1.5 py-1.5 ${quotaExceeded ? 'opacity-70' : ''}`}>
+              <div className="flex-1 min-w-0">
+                {selectedBroadcast ? (
+                  <BroadcastRowContent broadcast={selectedBroadcast} showDateOnly={isPastStream} compact />
+                ) : linkedId ? (
+                  <BroadcastRowContent
+                    broadcast={{
+                      id: linkedId,
+                      snippet: {
+                        // The template body resolved, so the cached title
+                        // reads as the rendered string, not placeholders;
+                        // else the pushed snapshot, else the bare id.
+                        title: applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
+                          || meta?.ytLastPushedTitle?.trim()
+                          || `Video ${linkedId}`,
+                        description: '',
+                        scheduledStartTime: !isPastStream && meta?.scheduledTime
+                          ? `${folder.date}T${meta.scheduledTime}:00`
+                          : undefined,
+                      },
+                      status: { lifeCycleStatus: '', privacyStatus: '' },
+                    }}
+                    showDateOnly={isPastStream}
+                    compact
+                  />
+                ) : (
+                  <span className="text-xs text-gray-400">{isPastStream ? 'No video linked' : 'No broadcast linked'}</span>
+                )}
+              </div>
+              <Tooltip content="Picking is disabled while the YouTube quota is exhausted." open={quotaExceeded ? undefined : false} triggerClassName="shrink-0">
+                <Button
+                  size="sm"
+                  disabled={quotaExceeded || (!isPastStream && ytBroadcastsLoading)}
+                  onClick={() => {
+                    if (isPastStream) onLoadAllVods()
+                    setLinkPickerOpen(true)
+                  }}
+                >
+                  {linkedId ? 'Change' : 'Link'}
+                </Button>
+              </Tooltip>
+            </div>
+            {quotaExceeded && !selectedBroadcast && linkedId && (
+              <p className="mt-1 text-[10px] text-gray-400 italic">Cached — refresh blocked while YouTube quota is exhausted</p>
+            )}
+            <LinkVideoModal
+              isOpen={linkPickerOpen}
+              onClose={() => setLinkPickerOpen(false)}
+              kind={isPastStream ? 'video' : 'broadcast'}
+              items={broadcastPool}
+              currentId={linkedId}
               otherFolderLinks={otherFolderLinks}
-              loading={ytBroadcastsLoading}
-              placeholder={isPastStream ? 'Pick a YouTube video…' : 'Pick a scheduled broadcast…'}
-              emptyLabel={isPastStream ? '— No VODs loaded yet —' : '— No upcoming broadcasts —'}
-              showDateOnly={isPastStream}
-              onOpen={isPastStream ? onLoadAllVods : undefined}
-              dropUp
-              // When linked but the broadcast pool can't see the id
-              // (e.g. quota outage blocked the fetch on stream open),
-              // render the trigger from local meta so the user sees
-              // their cached title + time instead of "not linked".
-              // selectedBroadcast — used elsewhere for mismatch dots —
-              // stays null so we don't pretend everything is in sync.
-              triggerFallback={!selectedBroadcast && linkedId ? {
-                // Resolve the template body so the cached title shows
-                // the rendered string (e.g. "Elden Ring [PART 5]") not
-                // raw placeholders. Falls back to the snapshot (which
-                // is already rendered) or the bare video id.
-                title: applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
-                  || meta?.ytLastPushedTitle?.trim()
-                  || `Video ${linkedId}`,
-                scheduledIso: !isPastStream && meta?.scheduledTime
-                  ? `${folder.date}T${meta.scheduledTime}:00`
-                  : undefined,
-              } : undefined}
-              disableOpen={quotaExceeded}
-              triggerHint={quotaExceeded
-                ? 'Cached — refresh blocked while YouTube quota is exhausted'
-                : undefined}
+              state={isPastStream
+                ? ytVodList
+                : { phase: ytBroadcastsLoading ? 'loading' : 'ready', checking: false, newIds: [], error: null }}
+              onPick={id => { onUpdateMeta({ ytVideoId: id }); setLinkPickerOpen(false) }}
             />
 
             {/* Date mismatch warning — only for upcoming broadcasts.

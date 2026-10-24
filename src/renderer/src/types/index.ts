@@ -608,11 +608,17 @@ export interface LiveBroadcast {
     gameTitle?: string
     categoryId?: string
     tags?: string[]
+    /** Largest thumbnail YouTube offers for it; the link picker's rows. */
+    thumbnailUrl?: string
   }
   status: {
     lifeCycleStatus: string
     privacyStatus: string
   }
+  /** Renderer only: the entry came from the on-disk VOD cache (STR-39),
+   *  good enough to list and pick, not to compare against local meta. A
+   *  lookup by id replaces it with a fresh one. */
+  cached?: boolean
 }
 
 /** A channel video as needed to import it into a stream item — mirrors the

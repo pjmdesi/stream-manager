@@ -5,7 +5,7 @@ import path from 'path'
 import crypto from 'crypto'
 import Store from 'electron-store'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos, getCompletedBroadcastsPage, hydrateVideoExtras, type LiveBroadcast } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
 import { getConfig, getConfigDecrypted } from './store'
 
@@ -29,6 +29,62 @@ const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: stri
   name: 'yt-status-cache',
   defaults: { statuses: {} },
 })
+
+// The channel's completed broadcasts as the link picker last saw them
+// (STR-39), newest first, so a later open lists them at once and only
+// asks YouTube what is newer. `fetchedAt` is the last FULL walk of the
+// channel; a delta sync prepends and leaves it alone. Same disposable
+// standing as the status cache: cleared on disconnect, never in
+// _meta.json.
+const ytVodCache = new Store<{ items: LiveBroadcast[]; fetchedAt: number | null }>({
+  name: 'yt-vod-cache',
+  defaults: { items: [], fetchedAt: null },
+})
+
+/** A sync already running for a mode; a second caller shares its result
+ *  instead of paging the channel twice. */
+const vodSyncInFlight = new Map<'full' | 'delta', Promise<{ items: LiveBroadcast[]; fetchedAt: number }>>()
+
+/** Walks the channel's completed broadcasts. `full` replaces the cache,
+ *  sending each page to the window as it lands so the modal can show it;
+ *  `delta` stops at the first id the cache already holds and prepends
+ *  what came before it. The tags lookup runs after the list is in, so
+ *  the first rows are one request away. */
+async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) => void): Promise<{ items: LiveBroadcast[]; fetchedAt: number }> {
+  const { clientId, clientSecret } = getCreds()
+  const cached = ytVodCache.get('items') ?? []
+  const known = new Set(cached.map(v => v.id))
+  const collected: LiveBroadcast[] = []
+  let pageToken: string | undefined
+  let pages = 0
+  // A delta that never meets a known id (the cache is from another
+  // channel, or the order changed) stops after a few pages; the next full
+  // walk sets things straight.
+  const maxPages = mode === 'delta' ? 4 : Infinity
+  let reachedKnown = false
+  do {
+    const page = await getCompletedBroadcastsPage(pageToken, clientId, clientSecret)
+    pages++
+    const fresh: LiveBroadcast[] = []
+    for (const item of page.items) {
+      if (mode === 'delta' && known.has(item.id)) { reachedKnown = true; break }
+      fresh.push(item)
+    }
+    collected.push(...fresh)
+    if (mode === 'full' && fresh.length > 0) send(fresh)
+    pageToken = reachedKnown ? undefined : page.nextPageToken
+  } while (pageToken && pages < maxPages)
+  if (collected.length > 0) await hydrateVideoExtras(collected, clientId, clientSecret)
+  if (mode === 'full') {
+    const fetchedAt = Date.now()
+    ytVodCache.set('items', collected)
+    ytVodCache.set('fetchedAt', fetchedAt)
+    return { items: collected, fetchedAt }
+  }
+  const fetchedAt = ytVodCache.get('fetchedAt') ?? 0
+  if (collected.length > 0) ytVodCache.set('items', [...collected, ...cached])
+  return { items: collected, fetchedAt }
+}
 
 export function registerYouTubeIPC(): void {
   // Dev-only: re-apply the persisted force-quota flag on every launch
@@ -85,6 +141,8 @@ export function registerYouTubeIPC(): void {
     // them made a disconnect look half-connected (privacy icons still
     // showing after a restart), and a different account could connect next.
     try { ytStatusCache.set('statuses', {}) } catch { /* best-effort */ }
+    // The VOD list belongs to the channel that was connected.
+    try { ytVodCache.set('items', []); ytVodCache.set('fetchedAt', null) } catch { /* best-effort */ }
     // Mirror of youtube:connected — lets the nav alert (and anything else
     // watching) react immediately instead of on the next page visit.
     broadcast('youtube:disconnected')
@@ -235,6 +293,33 @@ export function registerYouTubeIPC(): void {
       return await getCompletedBroadcasts(clientId, clientSecret)
     } catch (e: any) {
       console.error('[YT main] getCompletedBroadcasts — error:', e.message)
+      throw e
+    }
+  })
+
+  // The link picker's VOD list (STR-39): what the cache holds, and a sync
+  // that pages the channel (streamed to the window as `youtube:vods-page`
+  // on a full walk).
+  ipcMain.handle('youtube:getVodCache', async (): Promise<{ items: LiveBroadcast[]; fetchedAt: number } | null> => {
+    const items = ytVodCache.get('items') ?? []
+    const fetchedAt = ytVodCache.get('fetchedAt')
+    if (items.length === 0 || !fetchedAt) return null
+    return { items, fetchedAt }
+  })
+
+  ipcMain.handle('youtube:syncVods', async (event, mode: 'full' | 'delta') => {
+    const running = vodSyncInFlight.get(mode)
+    if (running) return running
+    const sender = event.sender
+    const send = (items: LiveBroadcast[]) => {
+      if (!sender.isDestroyed()) sender.send('youtube:vods-page', { items })
+    }
+    const run = syncVods(mode, send).finally(() => vodSyncInFlight.delete(mode))
+    vodSyncInFlight.set(mode, run)
+    try {
+      return await run
+    } catch (e: any) {
+      console.error(`[YT main] syncVods (${mode}) — error:`, e.message)
       throw e
     }
   })

@@ -265,6 +265,9 @@ declare global {
       youtubeCreateBroadcast(params: { title: string; description: string; scheduledStartTime: string; privacyStatus: 'public' | 'unlisted' | 'private' }): Promise<LiveBroadcast>
       youtubeGetDefaultStreamKey(): Promise<{ streamId: string; streamName: string; ingestionAddress: string } | null>
       youtubeGetCompletedBroadcasts(): Promise<LiveBroadcast[]>
+      youtubeGetVodCache(): Promise<{ items: LiveBroadcast[]; fetchedAt: number } | null>
+      youtubeSyncVods(mode: 'full' | 'delta'): Promise<{ items: LiveBroadcast[]; fetchedAt: number }>
+      onYouTubeVodsPage(cb: (page: { items: LiveBroadcast[] }) => void): () => void
       youtubeGetVideoById(videoId: string): Promise<LiveBroadcast | null>
       youtubeGetVideosByIds(ids: string[]): Promise<LiveBroadcast[]>
       youtubeGetBroadcastById(broadcastId: string): Promise<LiveBroadcast | null>
