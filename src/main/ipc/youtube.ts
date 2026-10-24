@@ -36,10 +36,13 @@ const ytStatusCache = new Store<{ statuses: Record<string, { privacyStatus: stri
 // channel; a delta sync prepends and leaves it alone. Same disposable
 // standing as the status cache: cleared on disconnect, never in
 // _meta.json.
-const ytVodCache = new Store<{ items: LiveBroadcast[]; fetchedAt: number | null }>({
+const ytVodCache = new Store<{ items: LiveBroadcast[]; fetchedAt: number | null; version: number }>({
   name: 'yt-vod-cache',
-  defaults: { items: [], fetchedAt: null },
+  defaults: { items: [], fetchedAt: null, version: 0 },
 })
+/** Bumped when the cached shape changes; an older cache is walked again.
+ *  2: row-sized thumbnail URLs. */
+const VOD_CACHE_VERSION = 2
 
 /** A sync already running for a mode; a second caller shares its result
  *  instead of paging the channel twice. */
@@ -79,6 +82,7 @@ async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) =
     const fetchedAt = Date.now()
     ytVodCache.set('items', collected)
     ytVodCache.set('fetchedAt', fetchedAt)
+    ytVodCache.set('version', VOD_CACHE_VERSION)
     return { items: collected, fetchedAt }
   }
   const fetchedAt = ytVodCache.get('fetchedAt') ?? 0
@@ -304,6 +308,7 @@ export function registerYouTubeIPC(): void {
     const items = ytVodCache.get('items') ?? []
     const fetchedAt = ytVodCache.get('fetchedAt')
     if (items.length === 0 || !fetchedAt) return null
+    if (ytVodCache.get('version') !== VOD_CACHE_VERSION) return null
     return { items, fetchedAt }
   })
 

@@ -183,7 +183,7 @@ function toLiveBroadcast(item: any): LiveBroadcast {
       description: item.snippet?.description ?? '',
       scheduledStartTime: item.snippet?.scheduledStartTime,
       actualStartTime: item.snippet?.actualStartTime,
-      thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
+      thumbnailUrl: pickRowThumbUrl(item.snippet?.thumbnails),
     },
     status: {
       lifeCycleStatus: item.status?.lifeCycleStatus ?? '',
@@ -280,7 +280,7 @@ export async function getLiveBroadcasts(
         if (item.status?.lifeCycleStatus === 'complete') continue
         if (!seen.has(item.id)) {
           seen.add(item.id)
-          item.snippet.thumbnailUrl = pickThumbUrl(item.snippet?.thumbnails)
+          item.snippet.thumbnailUrl = pickRowThumbUrl(item.snippet?.thumbnails)
           broadcasts.push(item)
         }
       }
@@ -329,7 +329,7 @@ export async function getBroadcastById(
   )
   const item = data?.items?.[0]
   if (!item) return null
-  item.snippet.thumbnailUrl = pickThumbUrl(item.snippet?.thumbnails)
+  item.snippet.thumbnailUrl = pickRowThumbUrl(item.snippet?.thumbnails)
   const extrasMap = await fetchVideoExtras([broadcastId], clientId, clientSecret)
   const extras = extrasMap.get(broadcastId)
   if (extras?.tags) item.snippet.tags = extras.tags
@@ -365,7 +365,7 @@ export async function getVideoById(
       // undefined, so the symmetric mismatch check sees `'' === ''`
       // and the Pull button never appears.
       categoryId: item.snippet.categoryId ?? undefined,
-      thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
+      thumbnailUrl: pickRowThumbUrl(item.snippet?.thumbnails),
     },
     status: {
       lifeCycleStatus: 'complete',
@@ -404,7 +404,7 @@ export async function getVideosByIds(
           actualStartTime: item.snippet?.publishedAt,
           tags: item.snippet?.tags ?? [],
           categoryId: item.snippet?.categoryId ?? undefined,
-          thumbnailUrl: pickThumbUrl(item.snippet?.thumbnails),
+          thumbnailUrl: pickRowThumbUrl(item.snippet?.thumbnails),
         },
         status: {
           lifeCycleStatus: 'complete',
@@ -447,6 +447,14 @@ export interface YouTubeImportVideo {
 function pickThumbUrl(thumbs: any): string | undefined {
   if (!thumbs) return undefined
   return (thumbs.maxres ?? thumbs.standard ?? thumbs.high ?? thumbs.medium ?? thumbs.default)?.url
+}
+
+/** A row-sized thumbnail URL (320 px wide) for lists of videos. The
+ *  larger sizes are not always there to download even when the API
+ *  lists them, and a 72 px row has no use for a 1280 px image. */
+function pickRowThumbUrl(thumbs: any): string | undefined {
+  if (!thumbs) return undefined
+  return (thumbs.medium ?? thumbs.default ?? thumbs.high ?? thumbs.standard ?? thumbs.maxres)?.url
 }
 
 /** ISO-8601 duration (PT#H#M#S) → seconds. */

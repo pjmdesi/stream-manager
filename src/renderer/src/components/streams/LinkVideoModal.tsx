@@ -4,7 +4,7 @@ import type { LiveBroadcast } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
-import { Tooltip } from '../ui/Tooltip'
+import { TogglePill } from '../ui/TogglePill'
 import { formatScheduledTime } from '../../lib/formatScheduledTime'
 import { formatDateOnly, isLikelyDefaultBroadcast, type BroadcastLinkRef } from '../ui/BroadcastPicker'
 
@@ -36,10 +36,11 @@ interface LinkVideoModalProps {
 /**
  * The link picker (STR-39): a modal in place of the sidebar's drop-up. A
  * search field, rows with a thumbnail, title and date, the current link
- * marked, videos already linked to another stream hidden behind the
- * list's last row. Rows never move once shown: the list has a fixed
- * height, a status line of fixed height sits above it, and new videos
- * land under that line, at the top, where the one you came for is.
+ * marked, videos already linked to another stream left out until the
+ * filter pill above the list says otherwise. Rows never move once
+ * shown: the list has a fixed height, a status line of fixed height
+ * sits above it, and new videos land under that line, at the top, where
+ * the one you came for is.
  */
 export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherFolderLinks, state, onPick }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
@@ -62,10 +63,11 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
     const title = (b.snippet?.title ?? '').toLowerCase()
     return words.every(w => title.includes(w))
   }
-  // Linked elsewhere, and not the current link: hidden until asked for.
-  const isHiddenLink = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
-  const hiddenCount = items.filter(b => isHiddenLink(b) && matches(b)).length
-  const visible = items.filter(b => matches(b) && (showLinked || !isHiddenLink(b)))
+  // Linked elsewhere, and not the current link: left out until the
+  // filter pill asks for them.
+  const isLinkedElsewhere = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
+  const linkedCount = items.filter(b => isLinkedElsewhere(b) && matches(b)).length
+  const visible = items.filter(b => matches(b) && (showLinked || !isLinkedElsewhere(b)))
   const newSet = new Set(state.newIds)
 
   const close = () => { setQuery(''); setShowLinked(false); onClose() }
@@ -101,7 +103,7 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
     if (state.phase === 'loading' && items.length === 0) return null
     if (visible.length > 0) return null
     if (words.length > 0) return `No ${noun}s match.`
-    if (hiddenCount > 0) return `Every ${noun} is linked to another stream.`
+    if (linkedCount > 0) return `Every ${noun} is linked to another stream.`
     return kind === 'video' ? 'No videos found on your channel.' : 'No scheduled broadcasts on your channel.'
   })()
 
@@ -121,9 +123,21 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
           inputPrefix={<Search size={13} />}
           aria-label="Search by title"
         />
-        {/* Fixed-height status line: its text changes, its space does not. */}
-        <div className="h-8 flex items-center text-[11px] text-gray-400 min-w-0">
-          {statusLine}
+        {/* Fixed-height status row: the line's text changes, its space
+            does not; the filter pill on the right lists the videos other
+            streams already own. */}
+        <div className="h-8 flex items-center justify-between gap-3 text-[11px] text-gray-400 min-w-0">
+          <div className="min-w-0 flex items-center">{statusLine}</div>
+          {linkedCount > 0 && (
+            <TogglePill
+              checked={showLinked}
+              onChange={setShowLinked}
+              tooltip={showLinked
+                ? `Leave out the ${linkedCount} ${noun}s already linked to other streams`
+                : `Also list the ${linkedCount} ${noun}s already linked to other streams`}
+              label={`Show already linked ${noun}s (${linkedCount})`}
+            />
+          )}
         </div>
         {/* Fixed-height list: the modal keeps its size while pages land. */}
         <div className="h-[55vh] overflow-y-auto rounded-lg border border-white/10 bg-navy-900">
@@ -142,11 +156,7 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
                   isCurrent ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
                 }`}
               >
-                <div className="w-[72px] aspect-video shrink-0 rounded overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
-                  {b.snippet?.thumbnailUrl
-                    ? <img src={b.snippet.thumbnailUrl} loading="lazy" alt="" className="w-full h-full object-cover" />
-                    : <Film size={14} />}
-                </div>
+                <RowThumb url={b.snippet?.thumbnailUrl} />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-200 line-clamp-2 break-words leading-snug">{title}</p>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
@@ -183,20 +193,22 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
               <Loader2 size={12} className="animate-spin" /> Loading more
             </div>
           )}
-          {hiddenCount > 0 && state.phase !== 'loading' && (
-            <Tooltip content={showLinked ? `Hide the ${noun}s linked to other streams` : `List the ${noun}s already linked to other streams too`} triggerClassName="block">
-              <button
-                type="button"
-                onClick={() => setShowLinked(v => !v)}
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs text-gray-400 hover:text-gray-200 hover:bg-white/5 transition-colors border-t border-white/5"
-              >
-                <Link2 size={12} />
-                {showLinked ? `Hide linked ${noun}s` : `Show linked ${noun}s (${hiddenCount})`}
-              </button>
-            </Tooltip>
-          )}
         </div>
       </div>
     </Modal>
+  )
+}
+
+/** A row's thumbnail, or the placeholder box when there is no URL or the
+ *  load fails: the browser's broken-image glyph never shows (style
+ *  guide, every image has a fallback). */
+function RowThumb({ url }: { url?: string }) {
+  const [failed, setFailed] = useState(false)
+  return (
+    <div className="w-[72px] aspect-video shrink-0 rounded overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
+      {url && !failed
+        ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => setFailed(true)} />
+        : <Film size={14} />}
+    </div>
   )
 }
