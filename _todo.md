@@ -735,6 +735,9 @@
 - **APP-55** [impact:1] [ui]
   Dev builds get a way to reset one-time notices. The notice before the first archive (2.7.1) is remembered in config once the user continues, so a tester cannot bring it back without editing the config file, and the same will apply to any one-time notice added later. Add a Reset one-time notices control in Settings, shown only in _DEV builds (the branch badge already knows), that clears those flags.
 
+- **APP-56** [investigate] [perf] [impact:2]
+  The app sometimes stops answering hovers and clicks promptly for a stretch and then catches up; seen 2026-10-23 while testing CONV-4 on a dist build, and a dist launched from the Dev pane is slow until the UI has fully loaded. Candidates to measure before changing anything: main-process work that holds up the renderer's IPC (the library listing, 650 ms for 256 streams, re-runs on every player file change; a PowerShell attribute read is 440 to 640 ms; the launch path reads files synchronously), the renderer's render cost while running conversions report progress several times a second, and first-launch effects of a freshly written exe (Defender scanning it, V8 compiling cold). To settle first: whether it happens on the installed release build, only while a conversion runs or at any time, and whether Task Manager shows the main process or the renderer busy during a stall. Related: PLR-36.
+
 ### Onboarding & Setup
 
 - **ONB-1** [investigate]

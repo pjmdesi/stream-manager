@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight, ScrollText } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { formatBytes } from '../../lib/formatBytes'
@@ -132,9 +132,6 @@ const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   // connected via Integrations — see the `sections` filter.
   { id: 'ai', label: 'AI Suggestions', icon: <Bot size={14} />, keys: ['aiPreventRepeatSuggestions'] },
   { id: 'cache', label: 'Cache', icon: <HardDrive size={14} />, keys: ['audioCacheLimit'] },
-  // Logs holds no setting: it says what the app records and opens the
-  // folder (APP-20, CONV-4).
-  { id: 'logs', label: 'Logs', icon: <ScrollText size={14} />, keys: [] },
   { id: 'system', label: 'System', icon: <MonitorCog size={14} />, keys: ['checkForUpdates', 'startWithWindows', 'startMinimized', 'startMinimizedOnlyAtStartup'] },
   { id: 'devtools', label: 'Dev Tools', icon: <FlaskConical size={14} />, keys: ['slowAnimations', 'devForceYouTubeQuotaExceeded'], dev: true },
 ]
@@ -880,27 +877,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           )}
         </Section>
 
-        {/* Logs: the shared logs folder (APP-20). The copy says what is
-            recorded and that it stays on this PC; the button opens the
-            folder, and the path beside it says where that is. */}
-        <Section id="logs" icon={<ScrollText size={14} />} title="Logs" registerRef={registerSection}>
-          <div className="flex flex-col gap-1.5 text-xs text-gray-400 leading-relaxed">
-            <p>Stream Manager keeps a record of every conversion, archive, clip export and combine it runs: the files, the preset and its settings, the timings, and how it ended. Records are kept for a year. Nothing in this folder leaves this PC.</p>
-          </div>
-          <div className="flex items-center gap-3 min-w-0">
-            <Button
-              variant="ghost"
-              size="sm"
-              icon={<FolderOpen size={13} />}
-              onClick={() => { if (logsDir) window.api.openInExplorer(logsDir) }}
-              disabled={!logsDir}
-            >
-              Open logs folder
-            </Button>
-            <TruncatedText text={logsDir || '…'} className="truncate text-xs font-mono text-gray-500" triggerClassName="flex-1 min-w-0" />
-          </div>
-        </Section>
-
         {/* System */}
         <Section id="system" icon={<MonitorCog size={14} />} title="System" registerRef={registerSection}>
           <Checkbox
@@ -937,6 +913,24 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               disabled={import.meta.env.DEV || !local.startWithWindows || !local.startMinimized}
               label={<div><div className="text-sm font-medium text-gray-200">Only when launched at startup {dirtyDot('startMinimizedOnlyAtStartup')}</div><div className="text-xs text-gray-400">Hide to tray only when Windows launched the app at startup. Launching it manually opens the window as usual.</div></div>}
             />
+          </div>
+          {/* The shared logs folder (APP-20, CONV-4): what is recorded, the
+              button that opens the folder, and where it is. */}
+          <div className="flex flex-col gap-1">
+            <span className="text-sm font-medium text-gray-200">Logs</span>
+            <p className="text-xs text-gray-400">Stream Manager logs details of all conversion jobs. Records are removed after 1 year.</p>
+            <div className="flex items-center gap-3 min-w-0">
+              <Button
+                variant="ghost"
+                size="sm"
+                icon={<FolderOpen size={13} />}
+                onClick={() => { if (logsDir) window.api.openInExplorer(logsDir) }}
+                disabled={!logsDir}
+              >
+                Open logs folder
+              </Button>
+              <TruncatedText text={logsDir || '…'} className="truncate text-xs font-mono text-gray-400" triggerClassName="flex-1 min-w-0" />
+            </div>
           </div>
         </Section>
 

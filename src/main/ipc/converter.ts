@@ -14,7 +14,7 @@ import { tempOutputPath, muxerForPath, verifyFinishedOutput, commitOutput } from
 import { requestOrphanSweep, type ChildOwner } from '../services/ffmpegChildren'
 import {
   openJobLog, dropJobLog, startJobLog, endJobLog, noteDownloadStart, noteDownloadEnd,
-  noteJobPaused, noteJobResumed, noteJobProgress, pruneConversionLog, type JobLogFields, type JobLogProbe,
+  noteJobPaused, noteJobResumed, noteJobProgress, initConversionLog, type JobLogFields, type JobLogProbe,
 } from '../services/conversionLog'
 import type { VideoInfo } from '../services/ffmpegService'
 
@@ -1672,8 +1672,9 @@ export function registerConverterIPC(): void {
   restorePendingJobs()
   // Delete partial outputs the previous quit could not (sync-client locks).
   sweepQuitPartials()
-  // Conversion log retention (CONV-4), before any job can write to it.
-  pruneConversionLog()
+  // The conversion log (CONV-4): created, and pruned, before any job can
+  // write to it.
+  initConversionLog()
 
   ipcMain.handle('converter:getBuiltinPresets', async () => BUILTIN_PRESETS)
 

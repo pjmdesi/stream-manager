@@ -1,14 +1,14 @@
-import { appendLogRecord, localIsoTime, pruneLogByAge } from './appLogs'
+import { appendLogRecord, ensureLogFile, localIsoTime, pruneLogByAge } from './appLogs'
 
-// The conversion log (CONV-4): `logs/conversions.jsonl`, a record of every
+// The conversion log (CONV-4): `logs/conversions.log`, a record of every
 // conversion, archive, clip export and combine the app actually ran. Each
-// job writes two lines matched by `id`: a `start` line the moment its
+// job writes two records matched by `id`: a `start` record the moment its
 // encoder is about to run (what is being made from what, with which
-// settings) and an `end` line when it finishes (the outcome and the
+// settings) and an `end` record when it finishes (the outcome and the
 // timings). A `start` with no later `end` for the same id is a job the app
 // did not live to finish. A job that never reached its encoder (a download
-// that failed or was cancelled) gets both lines at once. Queued jobs that
-// were removed before running write nothing. Kept for a year.
+// that failed or was cancelled) gets both records at once. Queued jobs
+// that were removed before running write nothing. Kept for a year.
 //
 // The callers (ipc/converter.ts, ipc/combine.ts) report what happens; the
 // timing bookkeeping lives here so neither grows a clock of its own.
@@ -194,9 +194,11 @@ export function endOpenJobLogs(reason: string): void {
   for (const id of [...states.keys()]) endJobLog(id, 'interrupted', { reason })
 }
 
-/** Launch-time retention. Synchronous, so it runs before any job can add
- *  a line the rewrite would lose. */
-export function pruneConversionLog(): void {
+/** Launch: the file exists from the first run, and records past their
+ *  year go. Synchronous, so it runs before any job can add a record the
+ *  rewrite would lose. */
+export function initConversionLog(): void {
+  ensureLogFile(LOG_NAME)
   pruneLogByAge(LOG_NAME, MAX_AGE_DAYS)
 }
 
