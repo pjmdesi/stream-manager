@@ -1,10 +1,13 @@
 import React, { useMemo, useState } from 'react'
-import { Search, Loader2, AlertTriangle, Link2, Check, Radio, Film } from 'lucide-react'
+import { Search, Loader2, AlertTriangle, Link2, Check, Radio, Film, Globe, Lock, Link as LinkIcon, ExternalLink } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
+import { Tooltip } from '../ui/Tooltip'
 import { TogglePill } from '../ui/TogglePill'
+import { TruncatedText } from '../ui/TruncatedText'
+import { rowActionClass } from '../ui/rowAction'
 import { formatScheduledTime } from '../../lib/formatScheduledTime'
 import { formatDateOnly, isLikelyDefaultBroadcast, type BroadcastLinkRef } from '../ui/BroadcastPicker'
 
@@ -27,7 +30,7 @@ interface LinkVideoModalProps {
   items: LiveBroadcast[]
   currentId: string
   /** Other stream items' links into this list, keyed by broadcast id;
-   *  those rows hide behind the last row until asked for. */
+   *  those rows stay out until the filter pill asks for them. */
   otherFolderLinks: BroadcastLinkRef[]
   state: VodListState
   onPick: (id: string) => void
@@ -35,12 +38,13 @@ interface LinkVideoModalProps {
 
 /**
  * The link picker (STR-39): a modal in place of the sidebar's drop-up. A
- * search field, rows with a thumbnail, title and date, the current link
- * marked, videos already linked to another stream left out until the
- * filter pill above the list says otherwise. Rows never move once
- * shown: the list has a fixed height, a status line of fixed height
- * sits above it, and new videos land under that line, at the top, where
- * the one you came for is.
+ * search field, rows of one height with the thumbnail flush to the row's
+ * edges, the title, date and privacy, the current link pinned at the top
+ * of the list so it stays in view for comparison, and videos already
+ * linked to another stream left out until the filter pill above the
+ * list says otherwise. Rows never move once shown: the list has a fixed
+ * height, a status line of fixed height sits above it, and new videos
+ * land under that line, at the top, where the one you came for is.
  */
 export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherFolderLinks, state, onPick }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
@@ -67,7 +71,10 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
   // filter pill asks for them.
   const isLinkedElsewhere = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
   const linkedCount = items.filter(b => isLinkedElsewhere(b) && matches(b)).length
-  const visible = items.filter(b => matches(b) && (showLinked || !isLinkedElsewhere(b)))
+  // The current link is pinned above the list whatever the search says,
+  // so the comparison it is there for never scrolls away.
+  const current = currentId ? items.find(b => b.id === currentId) ?? null : null
+  const visible = items.filter(b => b.id !== currentId && matches(b) && (showLinked || !isLinkedElsewhere(b)))
   const newSet = new Set(state.newIds)
 
   const close = () => { setQuery(''); setShowLinked(false); onClose() }
@@ -104,15 +111,88 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
     if (visible.length > 0) return null
     if (words.length > 0) return `No ${noun}s match.`
     if (linkedCount > 0) return `Every ${noun} is linked to another stream.`
+    if (current) return `No other ${noun}s on your channel.`
     return kind === 'video' ? 'No videos found on your channel.' : 'No scheduled broadcasts on your channel.'
   })()
+
+  const renderRow = (b: LiveBroadcast, pinned: boolean) => {
+    const isCurrent = b.id === currentId
+    const links = linkMap.get(b.id) ?? []
+    const title = b.snippet?.title?.trim() || `Untitled ${noun}`
+    const start = b.snippet?.actualStartTime ?? b.snippet?.scheduledStartTime ?? ''
+    const when = start ? (kind === 'video' ? formatDateOnly(start) : formatScheduledTime(start)) : ''
+    const privacy = b.status?.privacyStatus
+    const PrivacyIcon = privacy === 'unlisted' ? LinkIcon : privacy === 'private' ? Lock : privacy === 'public' ? Globe : null
+    const privacyLabel = privacy === 'public' ? 'Public' : privacy === 'unlisted' ? 'Unlisted' : privacy === 'private' ? 'Private' : null
+    // Studio's edit page for a video; the live control room for a
+    // broadcast that has not happened yet.
+    const studioUrl = `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`
+    return (
+      <div
+        key={b.id}
+        className={`flex items-stretch h-16 border-b border-white/5 ${
+          pinned ? 'sticky top-0 z-10 bg-navy-800 border-b-white/10' : isCurrent ? 'bg-white/10' : ''
+        }`}
+      >
+        <button
+          type="button"
+          onClick={() => pick(b.id)}
+          className="flex flex-1 min-w-0 items-stretch text-left transition-colors hover:bg-white/5"
+        >
+          <RowThumb url={b.snippet?.thumbnailUrl} />
+          <div className="flex-1 min-w-0 px-3 flex flex-col justify-center gap-1">
+            <TruncatedText text={title} className="truncate text-xs text-gray-200" />
+            <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap text-[10px] text-gray-400">
+              {when && <span className="tabular-nums shrink-0">{when}</span>}
+              {PrivacyIcon && privacyLabel && (
+                <span className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>
+              )}
+              {newSet.has(b.id) && (
+                <span className="px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40 shrink-0">New</span>
+              )}
+              {isCurrent && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40 shrink-0">
+                  <Check size={9} /> Linked to this stream
+                </span>
+              )}
+              {kind === 'broadcast' && isLikelyDefaultBroadcast(b) && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-gray-300 border border-gray-300/40 shrink-0">
+                  <Radio size={9} /> Default livestream
+                </span>
+              )}
+              {links.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-amber-300 border border-amber-300/40 min-w-0">
+                  <Link2 size={9} className="shrink-0" />
+                  <span className="truncate">
+                    {links.length > 1 ? `Linked to ${links.length} other streams` : `Linked to: ${links[0].folderTitle || links[0].folderDate}`}
+                  </span>
+                </span>
+              )}
+            </div>
+          </div>
+        </button>
+        <div className="flex items-center pe-2">
+          <Tooltip content="Open in YouTube Studio">
+            <button
+              type="button"
+              aria-label="Open in YouTube Studio"
+              onClick={() => { void window.api.openUrl(studioUrl) }}
+              className={rowActionClass('gray', 'sm')}
+            >
+              <ExternalLink size={12} />
+            </button>
+          </Tooltip>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Modal
       isOpen={isOpen}
       onClose={close}
       title={kind === 'video' ? 'Link a YouTube video' : 'Link a scheduled broadcast'}
-      width="lg"
+      width="xl"
       footer={<Button onClick={close}>Close</Button>}
     >
       <div className="flex flex-col gap-2">
@@ -141,50 +221,8 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
         </div>
         {/* Fixed-height list: the modal keeps its size while pages land. */}
         <div className="h-[55vh] overflow-y-auto rounded-lg border border-white/10 bg-navy-900">
-          {visible.map(b => {
-            const isCurrent = b.id === currentId
-            const links = linkMap.get(b.id) ?? []
-            const title = b.snippet?.title?.trim() || `Untitled ${noun}`
-            const start = b.snippet?.actualStartTime ?? b.snippet?.scheduledStartTime ?? ''
-            const when = start ? (kind === 'video' ? formatDateOnly(start) : formatScheduledTime(start)) : ''
-            return (
-              <button
-                key={b.id}
-                type="button"
-                onClick={() => pick(b.id)}
-                className={`flex items-center gap-3 w-full px-3 py-2 text-left transition-colors border-b border-white/5 last:border-b-0 ${
-                  isCurrent ? 'bg-white/10 hover:bg-white/15' : 'hover:bg-white/5'
-                }`}
-              >
-                <RowThumb url={b.snippet?.thumbnailUrl} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs text-gray-200 line-clamp-2 break-words leading-snug">{title}</p>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 mt-0.5">
-                    {when && <span className="text-[10px] text-gray-400 tabular-nums">{when}</span>}
-                    {newSet.has(b.id) && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40">New</span>
-                    )}
-                    {isCurrent && (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-accent-300 border border-accent-300/40">
-                        <Check size={9} /> Linked to this stream
-                      </span>
-                    )}
-                    {kind === 'broadcast' && isLikelyDefaultBroadcast(b) && (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-gray-300 border border-gray-300/40">
-                        <Radio size={9} /> Default livestream
-                      </span>
-                    )}
-                    {links.length > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded text-amber-300 border border-amber-300/40">
-                        <Link2 size={9} />
-                        {links.length > 1 ? `Linked to ${links.length} other streams` : `Linked to: ${links[0].folderTitle || links[0].folderDate}`}
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </button>
-            )
-          })}
+          {current && renderRow(current, true)}
+          {visible.map(b => renderRow(b, false))}
           {emptyLine && (
             <p className="px-3 py-6 text-xs text-gray-400 italic text-center">{emptyLine}</p>
           )}
@@ -199,13 +237,14 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
   )
 }
 
-/** A row's thumbnail, or the placeholder box when there is no URL or the
- *  load fails: the browser's broken-image glyph never shows (style
- *  guide, every image has a fallback). */
+/** A row's thumbnail, flush to the row's top, bottom and left edges, or
+ *  the placeholder box when there is no URL or the load fails: the
+ *  browser's broken-image glyph never shows (style guide, every image
+ *  has a fallback). */
 function RowThumb({ url }: { url?: string }) {
   const [failed, setFailed] = useState(false)
   return (
-    <div className="w-[72px] aspect-video shrink-0 rounded overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
+    <div className="self-stretch aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
       {url && !failed
         ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => setFailed(true)} />
         : <Film size={14} />}
