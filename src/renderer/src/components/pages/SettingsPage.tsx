@@ -859,7 +859,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           <div className="flex items-center gap-3">
             <span className="text-xs text-gray-400">Currently using: <span className="font-semibold text-gray-300">{formatBytes(cacheSize)}</span></span>
             <Button
-              variant="ghost"
               size="sm"
               icon={<Trash2 size={13} />}
               loading={clearingCache}
@@ -921,7 +920,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             <p className="text-xs text-gray-400">Stream Manager logs details of all conversion jobs. Records are removed after 1 year.</p>
             <div className="flex items-center gap-3 min-w-0">
               <Button
-                variant="ghost"
                 size="sm"
                 icon={<FolderOpen size={13} />}
                 onClick={() => { if (logsDir) window.api.openInExplorer(logsDir) }}

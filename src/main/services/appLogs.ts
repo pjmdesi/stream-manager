@@ -3,14 +3,14 @@ import fs from 'fs'
 import path from 'path'
 
 // The one place the app writes logs (APP-20): `logs` under the config
-// directory, one `.log` file per log. A log is a run of JSON records, each
-// printed over several lines with a two-space indent and followed by a
-// blank line, so the file reads in any text editor and still parses: a
-// record opens with `{` at the start of a line and closes with `}` at the
-// start of a line, and the indent gives nothing else that shape. Every
-// record is stamped with `time` and the app version here, so pruning can
-// read any log the same way. Local only: nothing in this folder is sent
-// anywhere.
+// directory, one `.log` file per log. A log opens with a few `#` lines
+// that say what it is, then holds a run of JSON records, each printed over
+// several lines with a two-space indent and followed by a blank line, so
+// the file reads in any text editor and still parses: a record opens with
+// `{` at the start of a line and closes with `}` at the start of a line,
+// and the indent gives nothing else that shape. Every record is stamped
+// with `time` and the app version here, so pruning can read any log the
+// same way. Local only: nothing in this folder is sent anywhere.
 
 export function logsDir(): string {
   const dir = path.join(app.getPath('userData'), 'logs')
@@ -35,14 +35,39 @@ export function localIsoTime(ms = Date.now()): string {
     `${sign}${pad(Math.floor(abs / 60))}:${pad(abs % 60)}`
 }
 
-/** Creates the log when it does not exist yet, so the folder has the file
- *  before the first record is written. */
-export function ensureLogFile(name: string): void {
+/** Launch-time care for one log: the file exists with the current header
+ *  (so the folder is never empty and a reader knows what the file is),
+ *  records older than maxAgeDays are gone, and so is any text that is
+ *  not a whole record (a write the app did not live to finish). A rewrite
+ *  goes through a temp sibling that is flushed and then renamed over the
+ *  log (the shape of the _meta.json write), so a crash mid-rewrite leaves
+ *  either the old file or the new one. Synchronous and meant for launch,
+ *  before anything can append to the log. */
+export function initLog(name: string, opts: { header: string[]; maxAgeDays: number }): void {
   const file = logFilePath(name)
+  let text = ''
+  try { text = fs.readFileSync(file, 'utf-8') } catch { /* a new log */ }
+  const { header, records, dropped } = parseLogRecords(text)
+  const cutoff = Date.now() - opts.maxAgeDays * 86_400_000
+  const kept = records.filter(r => {
+    const t = typeof r.time === 'string' ? Date.parse(r.time) : NaN
+    return !Number.isFinite(t) || t >= cutoff
+  })
+  const headerCurrent = header.join('\n') === opts.header.join('\n')
+  if (text && headerCurrent && dropped === 0 && kept.length === records.length) return
+  const tmp = `${file}.tmp`
   try {
-    if (!fs.existsSync(file)) fs.writeFileSync(file, '', 'utf-8')
+    const fd = fs.openSync(tmp, 'w')
+    try {
+      fs.writeSync(fd, formatHeader(opts.header) + kept.map(formatRecord).join(''), null, 'utf-8')
+      fs.fsyncSync(fd)
+    } finally {
+      fs.closeSync(fd)
+    }
+    fs.renameSync(tmp, file)
   } catch (err) {
-    console.warn(`[logs] could not create ${name}.log:`, err)
+    console.warn(`[logs] could not write ${name}.log:`, err)
+    try { fs.unlinkSync(tmp) } catch { /* nothing to clean */ }
   }
 }
 
@@ -72,37 +97,10 @@ export function readLogRecords(name: string): Record<string, unknown>[] {
   return parseLogRecords(text).records
 }
 
-/** Drops the records whose `time` is older than maxAgeDays, and any text
- *  that is not a whole record, rewriting the file through a temp sibling
- *  that is flushed and then renamed over the log (the shape of the
- *  _meta.json write), so a crash mid-rewrite leaves either the old file
- *  or the new one. Synchronous and meant for launch, before anything can
- *  append to the log. */
-export function pruneLogByAge(name: string, maxAgeDays: number): void {
-  const file = logFilePath(name)
-  let text: string
-  try { text = fs.readFileSync(file, 'utf-8') } catch { return }
-  const { records, dropped } = parseLogRecords(text)
-  const cutoff = Date.now() - maxAgeDays * 86_400_000
-  const kept = records.filter(r => {
-    const t = typeof r.time === 'string' ? Date.parse(r.time) : NaN
-    return !Number.isFinite(t) || t >= cutoff
-  })
-  if (dropped === 0 && kept.length === records.length) return
-  const tmp = `${file}.tmp`
-  try {
-    const fd = fs.openSync(tmp, 'w')
-    try {
-      fs.writeSync(fd, kept.map(formatRecord).join(''), null, 'utf-8')
-      fs.fsyncSync(fd)
-    } finally {
-      fs.closeSync(fd)
-    }
-    fs.renameSync(tmp, file)
-  } catch (err) {
-    console.warn(`[logs] could not prune ${name}.log:`, err)
-    try { fs.unlinkSync(tmp) } catch { /* nothing to clean */ }
-  }
+/** The header as it sits in the file: each line behind `# `, then a blank
+ *  line. */
+function formatHeader(lines: string[]): string {
+  return lines.length ? lines.map(l => `# ${l}`).join('\n') + '\n\n' : ''
 }
 
 /** One record as it sits in the file: indented JSON and a blank line. */
@@ -110,11 +108,13 @@ function formatRecord(record: Record<string, unknown>): string {
   return JSON.stringify(record, null, 2) + '\n\n'
 }
 
-/** Splits a log's text into records: each is the lines from a `{` at the
- *  start of a line through the next `}` at the start of a line. Text that
- *  does not make a whole record (a cut-off write, a stray line) is
- *  counted in `dropped`. */
-export function parseLogRecords(text: string): { records: Record<string, unknown>[]; dropped: number } {
+/** Splits a log's text into its header lines (the `#` lines outside any
+ *  record, without the marker) and its records: each is the lines from a
+ *  `{` at the start of a line through the next `}` at the start of a
+ *  line. Text that is neither (a cut-off write, a stray line) is counted
+ *  in `dropped`. */
+export function parseLogRecords(text: string): { header: string[]; records: Record<string, unknown>[]; dropped: number } {
+  const header: string[] = []
   const records: Record<string, unknown>[] = []
   let dropped = 0
   let chunk: string[] | null = null
@@ -127,7 +127,8 @@ export function parseLogRecords(text: string): { records: Record<string, unknown
       continue
     }
     if (chunk === null) {
-      if (line.trim()) dropped++
+      if (line.startsWith('#')) header.push(line.replace(/^#\s?/, ''))
+      else if (line.trim()) dropped++
       continue
     }
     chunk.push(line)
@@ -137,5 +138,5 @@ export function parseLogRecords(text: string): { records: Record<string, unknown
     }
   }
   if (chunk !== null) dropped++
-  return { records, dropped }
+  return { header, records, dropped }
 }

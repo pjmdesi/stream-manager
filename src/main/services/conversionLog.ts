@@ -1,4 +1,4 @@
-import { appendLogRecord, ensureLogFile, localIsoTime, pruneLogByAge } from './appLogs'
+import { appendLogRecord, initLog, localIsoTime } from './appLogs'
 
 // The conversion log (CONV-4): `logs/conversions.log`, a record of every
 // conversion, archive, clip export and combine the app actually ran. Each
@@ -15,6 +15,17 @@ import { appendLogRecord, ensureLogFile, localIsoTime, pruneLogByAge } from './a
 
 const LOG_NAME = 'conversions'
 const MAX_AGE_DAYS = 365
+
+/** The `#` lines at the top of the file, for whoever opens it. */
+const HEADER = [
+  'Stream Manager conversion log (https://stream-manager.app)',
+  'One record per event, written as indented JSON with a blank line after each.',
+  'Every conversion, archive, clip export and combine writes a "start" record',
+  'when its encoder begins and an "end" record when it finishes; the two share',
+  'an id. A start with no later end for the same id is a job the app did not',
+  'live to finish. Times are local with their UTC offset. Records older than a',
+  'year are removed when the app starts.',
+]
 
 export type JobLogKind = 'conversion' | 'archive' | 'clip-export' | 'combine'
 export type JobLogOutcome = 'done' | 'error' | 'cancelled' | 'interrupted'
@@ -194,12 +205,11 @@ export function endOpenJobLogs(reason: string): void {
   for (const id of [...states.keys()]) endJobLog(id, 'interrupted', { reason })
 }
 
-/** Launch: the file exists from the first run, and records past their
- *  year go. Synchronous, so it runs before any job can add a record the
- *  rewrite would lose. */
+/** Launch: the file exists from the first run with its header, and
+ *  records past their year go. Synchronous, so it runs before any job can
+ *  add a record the rewrite would lose. */
 export function initConversionLog(): void {
-  ensureLogFile(LOG_NAME)
-  pruneLogByAge(LOG_NAME, MAX_AGE_DAYS)
+  initLog(LOG_NAME, { header: HEADER, maxAgeDays: MAX_AGE_DAYS })
 }
 
 function writeStart(s: JobLogState): void {
