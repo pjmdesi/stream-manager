@@ -383,7 +383,7 @@
 - **THU-39** [impact:1]
   Group collapse / expand state should be recorded in the thumbnail JSON so they return to the same state when repoeneing.
 
-- **THU-40** [ui] [bug]
+- **THU-40** [ui] [bug] [done]
   The flip vertical/horizontal buttons in the floating alignment panel seem to be swapped. The action matches the tooltip, but I don't think the icons are correct.
   Built 2026-10-23, awaiting review.
 
