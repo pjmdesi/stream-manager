@@ -41,7 +41,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
 import { RowContent as BroadcastRowContent, BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
-import { Globe, Lock, Link as LinkIcon, Link2 } from 'lucide-react'
+import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
@@ -8742,17 +8742,6 @@ function SidebarDetail({
                     </button>
                   </Tooltip>
                 )}
-                {(selectedBroadcast || linkedVideoMissing) && (
-                  <Tooltip content="Unlink from broadcast">
-                  <button
-                    type="button"
-                    onClick={() => onUpdateMeta({ ytVideoId: '' })}
-                    className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1"
-                  >
-                    <X size={11} /> Unlink
-                  </button>
-                  </Tooltip>
-                )}
               </div>
             </div>
             {linkedVideoMissing && (
@@ -8810,6 +8799,23 @@ function SidebarDetail({
                   {linkedId ? 'Change' : 'Link'}
                 </Button>
               </Tooltip>
+              {/* Unlink sits in the row with Change, as the red icon
+                  button, so the link's two actions share one spot. */}
+              {linkedId && (
+                <Tooltip content={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'} triggerClassName="shrink-0 self-stretch flex">
+                  <Button
+                    size="sm"
+                    variant="danger"
+                    // An icon's line box is shorter than text, so the
+                    // tooltip trigger stretches to the row's height and
+                    // the button fills it, matching Change.
+                    className="px-2 h-full"
+                    icon={<Unlink size={13} />}
+                    aria-label={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'}
+                    onClick={() => onUpdateMeta({ ytVideoId: '' })}
+                  />
+                </Tooltip>
+              )}
             </div>
             {quotaExceeded && !selectedBroadcast && linkedId && (
               <p className="mt-1 text-[10px] text-gray-400 italic">Cached — refresh blocked while YouTube quota is exhausted</p>
