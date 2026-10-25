@@ -260,17 +260,21 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
             </div>
           </div>
         </div>
-        {current && (
-          <div>
-            <div className={`${sectionLabel} mb-1 min-h-[22px]`}>
-              <LucideYoutube size={11} className="text-red-400/70" />
-              {kind === 'video' ? 'Linked YouTube video' : 'Linked YouTube broadcast'}
-            </div>
-            <div className="rounded-lg border border-white/10 bg-navy-900 overflow-hidden">
-              {renderRow(current, true)}
-            </div>
+        {/* Always drawn, with a placeholder row when nothing is linked:
+            the modal keeps one height from stream to stream, so the nav
+            buttons above stay put (style guide: a button clicked more
+            than once stays where it was). */}
+        <div>
+          <div className={`${sectionLabel} mb-1 min-h-[22px]`}>
+            <LucideYoutube size={11} className="text-red-400/70" />
+            {kind === 'video' ? 'Linked YouTube video' : 'Linked YouTube broadcast'}
           </div>
-        )}
+          <div className="rounded-lg border border-white/10 bg-navy-900 overflow-hidden">
+            {current
+              ? renderRow(current, true)
+              : <VideoRow kind={kind} broadcast={null} placeholderTitle={currentId ? 'Loading the linked video' : 'No linked video or broadcast'} />}
+          </div>
+        </div>
         <div className="flex flex-col gap-2">
           <Input
             value={query}
