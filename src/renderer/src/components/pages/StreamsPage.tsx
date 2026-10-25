@@ -10245,7 +10245,10 @@ function BroadcastTimePrivacyRow({
   // One lockup for the broadcast's own settings, the Series group's
   // shape: the segments share one border and sit on one 30 px line
   // (text-xs plus py-1.5 plus the border, the other inputs' height).
-  const segment = 'flex items-center gap-1 px-2 border-r border-white/10'
+  // Privacy comes first: a past stream shows it alone, so leading with
+  // it keeps it in the same place when the user steps from a past
+  // stream to an upcoming one, whose date and time follow it.
+  const segment = 'flex items-center gap-1 px-2 border-l border-white/10'
   return (
     <div className={`flex flex-col gap-1 min-w-0 ${flush ? 'pt-1.5' : ''}`}>
       <span className={`text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 ${flush ? 'px-2' : ''}`}>
@@ -10257,6 +10260,15 @@ function BroadcastTimePrivacyRow({
       <div className={`flex items-stretch max-w-full h-[30px] bg-navy-900/70 overflow-hidden ${
         flush ? 'border-t border-white/10' : 'border border-white/10 rounded-lg'
       }`}>
+        {/* The labels need more room beside the date and time than on
+            their own, so the lockup with those gives them up sooner. */}
+        <PrivacySegments
+          value={privacy}
+          onChange={onPrivacyChange}
+          disabled={disabled}
+          loading={privacyLoading}
+          expandClass={showTime ? '@[520px]:grid-cols-[1fr] @[520px]:ms-0' : '@[360px]:grid-cols-[1fr] @[360px]:ms-0'}
+        />
         {showTime && date && onDateClick && (
           <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={date} /></div>} side="top" triggerClassName="flex">
             <button
@@ -10282,15 +10294,6 @@ function BroadcastTimePrivacyRow({
             />
           </div>
         )}
-        {/* The labels need more room beside the date and time than on
-            their own, so the lockup with those gives them up sooner. */}
-        <PrivacySegments
-          value={privacy}
-          onChange={onPrivacyChange}
-          disabled={disabled}
-          loading={privacyLoading}
-          expandClass={showTime ? '@[520px]:grid-cols-[1fr] @[520px]:ms-0' : '@[360px]:grid-cols-[1fr] @[360px]:ms-0'}
-        />
         {trailing && <div className="flex items-center gap-0.5 px-1 border-l border-white/10">{trailing}</div>}
       </div>
     </div>
