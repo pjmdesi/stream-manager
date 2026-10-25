@@ -8796,6 +8796,9 @@ function SidebarDetail({
               <VideoRow
                 kind={isPastStream ? 'video' : 'broadcast'}
                 placeholderTitle="No linked video or broadcast"
+                // The one loading sign for the section: the record of a
+                // linked video is still on its way.
+                loading={!!linkedId && !selectedBroadcast && !linkedVideoMissing}
                 links={linkedId ? {
                   watchUrl: `https://youtu.be/${linkedId}`,
                   studioUrl: `https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`,
@@ -8867,6 +8870,25 @@ function SidebarDetail({
                     onPrivacyChange={setNewBroadcastPrivacy}
                     disabled={creatingBroadcast}
                   />
+                </div>
+              )}
+              {/* An unlinked stream's paste-a-link field, in the strip
+                  shape the Broadcast options take (label row, then a
+                  30 px field under a hairline), so the box has the same
+                  geometry linked or not. */}
+              {!linkedId && (
+                <div className="border-t border-white/5">
+                  <div className="flex flex-col gap-1 min-w-0 pt-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 px-2">Link by URL or ID</span>
+                    <div className="h-[30px] bg-navy-900/70 border-t border-white/10">
+                      <input
+                        value={manualUrl}
+                        onChange={e => handleManualUrlChange(e.target.value)}
+                        placeholder="Paste a YouTube URL or video ID"
+                        className="w-full h-full bg-transparent text-gray-200 text-xs px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/40 placeholder-gray-500"
+                      />
+                    </div>
+                  </div>
                 </div>
               )}
             </div>
@@ -8941,34 +8963,18 @@ function SidebarDetail({
               )
             })()}
 
-            {/* Unlinked-state alternatives: paste URL + (future-dated
-                streams only) inline create-broadcast. Both fall away
-                once the user picks (or pastes/creates) a broadcast so
-                the linked-state UI stays clean. */}
-            {!linkedId && (
-              <>
-                <div className="flex flex-col gap-1">
-                  <input
-                    value={manualUrl}
-                    onChange={e => handleManualUrlChange(e.target.value)}
-                    placeholder="Or paste a URL or Video ID"
-                    className="w-full bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg px-2 py-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 placeholder-gray-500"
-                  />
-                  {manualUrlLoading && (
-                    <p className="text-[10px] text-gray-400 flex items-center gap-1">
-                      <Loader2 size={10} className="animate-spin shrink-0" />
-                      Looking up video…
-                    </p>
-                  )}
-                  {manualUrlError && (
-                    <p className="text-[10px] text-red-400 flex items-center gap-1">
-                      <AlertTriangle size={10} className="shrink-0" />
-                      {manualUrlError}
-                    </p>
-                  )}
-                </div>
-
-              </>
+            {/* What the URL strip in the box is doing or found wrong. */}
+            {!linkedId && manualUrlLoading && (
+              <p className="text-[10px] text-gray-400 flex items-center gap-1">
+                <Loader2 size={10} className="animate-spin shrink-0" />
+                Looking up video…
+              </p>
+            )}
+            {!linkedId && manualUrlError && (
+              <p className="text-[10px] text-red-400 flex items-center gap-1">
+                <AlertTriangle size={10} className="shrink-0" />
+                {manualUrlError}
+              </p>
             )}
             {/* What the last Push to YouTube said while it was creating
                 the broadcast; cleared by the next push. */}
@@ -10304,7 +10310,8 @@ function BroadcastTimePrivacyRow({
  *  pattern: nothing drops down to clip against the box this sits in.
  *  The labels slide away to the icons alone where the sidebar is narrow
  *  (CollapsibleLabel, as the icon buttons do); the tooltips keep the
- *  names. */
+ *  names. While the value loads the segments only wait, dimmed: the
+ *  item's thumbnail is the section's one loading sign. */
 function PrivacySegments({ value, onChange, disabled, loading, expandClass = '@[360px]:grid-cols-[1fr] @[360px]:ms-0' }: {
   value: PrivacyValue
   onChange: (next: PrivacyValue) => void
@@ -10331,7 +10338,7 @@ function PrivacySegments({ value, onChange, disabled, loading, expandClass = '@[
                 i < PRIVACY_OPTIONS.length - 1 ? 'border-r border-white/10' : ''
               } ${selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
             >
-              {loading && opt.value === value ? <Loader2 size={11} className="animate-spin" /> : <Icon size={11} />}
+              <Icon size={11} />
               <CollapsibleLabel expandClass={expandClass} collapsedMarginStart="-ms-1">{opt.label}</CollapsibleLabel>
             </button>
           </Tooltip>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload, Copy, Check } from 'lucide-react'
+import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload, Copy, Check, Loader2 } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { TruncatedText } from '../ui/TruncatedText'
 import { Tooltip } from '../ui/Tooltip'
@@ -12,9 +12,12 @@ import { formatDateOnly } from '../ui/BroadcastPicker'
  *  on one line, the date and privacy on the next, and a third line for
  *  chips when the row has any; the lines sit centered in the row either
  *  way. */
-export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '', links }: {
+export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '', links, loading }: {
   broadcast: LiveBroadcast | null
   kind: 'video' | 'broadcast'
+  /** The record is still loading: the thumbnail box shows a spinner,
+   *  the section's one loading sign. */
+  loading?: boolean
   /** The third line; left out when nothing is passed. */
   chips?: React.ReactNode
   /** Buttons at the row's right, vertically centered. */
@@ -83,7 +86,7 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
 
   const body = (
     <>
-      <RowThumb url={broadcast?.snippet?.thumbnailUrl} locked={privacy === 'private'} onFailed={onThumbFailed} />
+      <RowThumb url={broadcast?.snippet?.thumbnailUrl} locked={privacy === 'private'} loading={loading} onFailed={onThumbFailed} />
       <div className="flex-1 min-w-0 px-3 py-1 flex flex-col justify-center gap-0.5">
         <TruncatedText text={title} className={`truncate text-xs ${broadcast ? 'text-gray-200' : 'text-gray-400'}`} />
         {/* Wraps when the row is narrow (the sidebar at its narrowest);
@@ -188,14 +191,15 @@ export function RowChip({ tone, icon, children, className = '' }: {
  *  has a fallback). A private video's placeholder carries the lock,
  *  since its signed thumbnail URL is the one that expires. A new URL
  *  gets a new try. */
-function RowThumb({ url, locked, onFailed }: { url?: string; locked?: boolean; onFailed?: () => void }) {
+function RowThumb({ url, locked, loading, onFailed }: { url?: string; locked?: boolean; loading?: boolean; onFailed?: () => void }) {
   const [failed, setFailed] = useState(false)
   useEffect(() => { setFailed(false) }, [url])
   return (
     <div className="h-16 self-start aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
       {url && !failed
         ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => { setFailed(true); onFailed?.() }} />
-        : locked ? <Lock size={14} /> : <Film size={14} />}
+        : loading ? <Loader2 size={14} className="animate-spin" />
+          : locked ? <Lock size={14} /> : <Film size={14} />}
     </div>
   )
 }
