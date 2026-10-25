@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react'
-import { Search, Loader2, AlertTriangle, Link2, Check, Radio, ExternalLink, ImageOff } from 'lucide-react'
+import { Search, Loader2, AlertTriangle, Link2, Radio, ExternalLink, ImageOff } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -133,8 +133,11 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId
   })()
 
   const renderRow = (b: LiveBroadcast, boxed: boolean) => {
-    const isCurrent = b.id === currentId
     const links = linkMap.get(b.id) ?? []
+    const isNew = newSet.has(b.id)
+    const isDefaultBroadcast = kind === 'broadcast' && !b.snippet?.scheduledStartTime
+    // The current link needs no chip of its own: its box says what it is.
+    const hasChips = isNew || isDefaultBroadcast || links.length > 0
     // Studio's edit page for a video; the live control room for a
     // broadcast that has not happened yet.
     const studioUrl = `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`
@@ -147,20 +150,17 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId
         onThumbFailed={onThumbFailed ? () => onThumbFailed(b.id) : undefined}
         // The hover tint belongs to the whole row, Studio button included.
         className={`transition-colors hover:bg-white/5 ${boxed ? 'bg-white/5' : 'border-b border-white/5'}`}
-        chips={
+        chips={hasChips ? (
           <>
-            {newSet.has(b.id) && <RowChip tone="accent">New</RowChip>}
-            {isCurrent && <RowChip tone="accent" icon={<Check size={9} />}>Linked to this stream</RowChip>}
-            {kind === 'broadcast' && !b.snippet?.scheduledStartTime && (
-              <RowChip tone="gray" icon={<Radio size={9} />}>Default livestream</RowChip>
-            )}
+            {isNew && <RowChip tone="accent">New</RowChip>}
+            {isDefaultBroadcast && <RowChip tone="gray" icon={<Radio size={9} />}>Default livestream</RowChip>}
             {links.length > 0 && (
               <RowChip tone="amber" icon={<Link2 size={9} />}>
                 {links.length > 1 ? `Linked to ${links.length} other streams` : `Linked to: ${links[0].folderTitle || links[0].folderDate}`}
               </RowChip>
             )}
           </>
-        }
+        ) : undefined}
         actions={
           <Tooltip content="Open in YouTube Studio">
             <button

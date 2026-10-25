@@ -9,15 +9,13 @@ import { formatDateOnly } from '../ui/BroadcastPicker'
  *  picker (STR-39) and in the sidebar's linked-video footer: 64 px tall,
  *  the thumbnail flush to the row's top, bottom and left edges, the title
  *  on one line, the date and privacy on the next, and a third line for
- *  chips. The chip line keeps its height even when empty, so the title
- *  and the date sit at the same place in every row; a row that never
- *  carries chips passes `chips={null}` and centers its two lines. */
+ *  chips when the row has any; the lines sit centered in the row either
+ *  way. */
 export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '' }: {
   broadcast: LiveBroadcast | null
   kind: 'video' | 'broadcast'
-  /** The third line. `null` leaves it out; undefined or empty keeps the
-   *  line's space. */
-  chips?: React.ReactNode | null
+  /** The third line; left out when nothing is passed. */
+  chips?: React.ReactNode
   /** Buttons at the row's right, vertically centered. */
   actions?: React.ReactNode
   /** Makes the thumbnail and text a button. */
@@ -45,8 +43,10 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
             <span className="inline-flex items-center gap-1"><PrivacyIcon size={10} /> {privacyLabel}</span>
           )}
         </div>
-        {chips !== null && (
-          <div className="h-[18px] flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap text-[10px]">
+        {chips && (
+          // leading-none: a chip is its text plus padding and border, so
+          // an inherited line height would push it past the line's box.
+          <div className="h-[18px] flex items-center gap-1.5 min-w-0 overflow-hidden whitespace-nowrap text-[10px] leading-none">
             {chips}
           </div>
         )}
@@ -78,7 +78,7 @@ export function RowChip({ tone, icon, children, className = '' }: {
       ? 'text-amber-300 border-amber-300/40'
       : 'text-gray-300 border-gray-300/40'
   return (
-    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border min-w-0 ${toneCls} ${className}`}>
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded border min-w-0 leading-none ${toneCls} ${className}`}>
       {icon && <span className="shrink-0 flex">{icon}</span>}
       <span className="truncate">{children}</span>
     </span>

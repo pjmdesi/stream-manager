@@ -8769,7 +8769,6 @@ function SidebarDetail({
                   the link against. */}
               <VideoRow
                 kind={isPastStream ? 'video' : 'broadcast'}
-                chips={null}
                 placeholderTitle={isPastStream ? 'No video linked' : 'No broadcast linked'}
                 broadcast={selectedBroadcast ?? (linkedId ? {
                   id: linkedId,
