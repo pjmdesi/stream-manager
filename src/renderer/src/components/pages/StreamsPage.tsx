@@ -10226,9 +10226,11 @@ function BroadcastTimePrivacyRow({
     both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', pulseColor: 'rgba(168, 85, 247, 0.7)', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits, pushing will overwrite YouTube’s.' },
     unknown: { cls: 'bg-gray-400',     pulseColor: 'rgba(156, 163, 175, 0.7)', tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracking was added.' },
   }
-  const renderDot = (dir?: 'local' | 'remote' | 'both' | 'unknown') => dir
+  // The dots sit by the label, one per field that differs, each tooltip
+  // naming its field; beside the fields they crowded the lockup.
+  const renderDot = (field: string, dir?: 'local' | 'remote' | 'both' | 'unknown') => dir
     ? (
-      <Tooltip content={dotConfig[dir].tip} side="top">
+      <Tooltip key={field} content={`${field}: ${dotConfig[dir].tip}`} side="top">
         <span
           className={`inline-block w-1.5 h-1.5 rounded-full mismatch-dot-pulse ${dotConfig[dir].cls}`}
           style={{ ['--pulse-color' as any]: dotConfig[dir].pulseColor }}
@@ -10242,7 +10244,12 @@ function BroadcastTimePrivacyRow({
   const segment = 'flex items-center gap-1 px-2 border-r border-white/10'
   return (
     <div className={`flex flex-col gap-1 min-w-0 ${flush ? 'pt-1.5' : ''}`}>
-      <span className={`text-[10px] uppercase tracking-wide text-gray-400 ${flush ? 'px-2' : ''}`}>Broadcast options</span>
+      <span className={`text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 ${flush ? 'px-2' : ''}`}>
+        Broadcast options
+        {renderDot('Date', dateMismatch)}
+        {renderDot('Time', timeMismatch)}
+        {renderDot('Privacy', privacyMismatch)}
+      </span>
       <div className={`flex items-stretch max-w-full h-[30px] bg-navy-900/70 overflow-hidden ${
         flush ? 'border-t border-white/10' : 'border border-white/10 rounded-lg'
       }`}>
@@ -10255,7 +10262,6 @@ function BroadcastTimePrivacyRow({
             >
               {date}
               <PencilLine size={9} />
-              {renderDot(dateMismatch)}
             </button>
           </Tooltip>
         )}
@@ -10266,13 +10272,13 @@ function BroadcastTimePrivacyRow({
               value={time}
               onChange={e => onTimeChange(e.target.value)}
               disabled={disabled}
-              className="bg-transparent text-xs focus:outline-none disabled:opacity-50"
+              // color-scheme keeps the native clock icon and its picker
+              // dark, as the other time inputs do.
+              className="bg-transparent text-xs focus:outline-none disabled:opacity-50 [color-scheme:dark]"
             />
-            {renderDot(timeMismatch)}
           </div>
         )}
         <PrivacySegments value={privacy} onChange={onPrivacyChange} disabled={disabled} loading={privacyLoading} />
-        {privacyMismatch && <div className="flex items-center pe-2">{renderDot(privacyMismatch)}</div>}
         {trailing && <div className="flex items-center gap-0.5 px-1 border-l border-white/10">{trailing}</div>}
       </div>
     </div>
