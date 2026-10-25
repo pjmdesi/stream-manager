@@ -17,7 +17,9 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 ## Streams
 
-- Linking a YouTube video to a stream opens a picker window in place of the menu that grew upward from the sidebar's footer: search by title, rows with thumbnails and dates, and videos already linked to another stream behind a Show linked row. The channel's video list is kept on this PC, so the picker lists it at once and asks YouTube only for newer videos.
+- Linking a YouTube video to a stream opens a picker window in place of the menu that grew upward from the sidebar's footer. It shows the stream and its current link at the top, then a search field and the channel's videos as rows with a thumbnail, the date, the privacy, whether it is a livestream, and the video id; the privacy opens the video and the id opens it in YouTube Studio, each with a copy button. Videos already linked to another stream stay behind a filter. The stream and episode arrows work inside the window, so links can be checked stream after stream. The channel's video list is kept on this PC, so the picker lists it at once and asks YouTube only for newer videos.
+- For a stream with no link, the picker leads with its best guess at the right video, marked Best match, with the reasons beside it: the length, the title, the tags and the date, or the uploaded file's name for an upload.
+- The sidebar footer shows the linked video as the same row the picker uses, with the date, privacy and id, and its Broadcast options (privacy, and for an upcoming stream the date and time) as one group under it. Link, Change and Unlink sit on the heading. For an upcoming stream with no link, Push to YouTube creates the broadcast with those options and pushes the details; the separate Create broadcast button is gone.
 
 ## Player
 

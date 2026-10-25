@@ -8854,6 +8854,26 @@ function SidebarDetail({
                 />
                 </div>
               )}
+              {/* An unlinked stream's paste-a-link field, in the strip
+                  shape the Broadcast options take (label row, then a
+                  30 px field under a hairline), so the box has the same
+                  geometry linked or not. It comes before the options a
+                  future stream adds below it. */}
+              {!linkedId && (
+                <div className="border-t border-white/5">
+                  <div className="flex flex-col gap-1 min-w-0 pt-1.5">
+                    <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 px-2">Link by URL or ID</span>
+                    <div className="h-[30px] bg-navy-900/70 border-t border-white/10">
+                      <input
+                        value={manualUrl}
+                        onChange={e => handleManualUrlChange(e.target.value)}
+                        placeholder="Paste a YouTube URL or video ID"
+                        className="w-full h-full bg-transparent text-gray-200 text-xs px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/40 placeholder-gray-500"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* An unlinked future stream: the same lockup holds the
                   time and privacy the broadcast will be created with
                   when Push to YouTube runs; there is no Create button. */}
@@ -8870,25 +8890,6 @@ function SidebarDetail({
                     onPrivacyChange={setNewBroadcastPrivacy}
                     disabled={creatingBroadcast}
                   />
-                </div>
-              )}
-              {/* An unlinked stream's paste-a-link field, in the strip
-                  shape the Broadcast options take (label row, then a
-                  30 px field under a hairline), so the box has the same
-                  geometry linked or not. */}
-              {!linkedId && (
-                <div className="border-t border-white/5">
-                  <div className="flex flex-col gap-1 min-w-0 pt-1.5">
-                    <span className="text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5 px-2">Link by URL or ID</span>
-                    <div className="h-[30px] bg-navy-900/70 border-t border-white/10">
-                      <input
-                        value={manualUrl}
-                        onChange={e => handleManualUrlChange(e.target.value)}
-                        placeholder="Paste a YouTube URL or video ID"
-                        className="w-full h-full bg-transparent text-gray-200 text-xs px-2 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-red-500/40 placeholder-gray-500"
-                      />
-                    </div>
-                  </div>
                 </div>
               )}
             </div>
