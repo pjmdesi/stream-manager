@@ -68,12 +68,12 @@ export function StreamNavButtons({
   const btnCls = `${BTN_BASE} ${v.btn}`
   const titleOf = (f: StreamFolder) => renderStreamTitle(f, folders).trim() || f.folderName
 
-  // Episode group: hidden for a single-episode series (nothing to walk),
-  // shown disabled for a standalone stream as a visible affordance, the
+  // Episode group: always drawn, disabled when there is nothing to walk,
+  // so the stream pair keeps its place from one stream to the next (it
+  // used to jump when a stream without a series hid the pair). The
   // picker only once the chevrons alone would mean many clicks.
-  const standalone = isStandalone(current.meta)
-  const showEpisodes = !!series.prev || !!series.next || standalone
-  const showPicker = showEpisodes && series.siblings.length > 2
+  const showEpisodes = true
+  const showPicker = series.siblings.length > 2
 
   // Jump-to-episode picker: click the List button, pick a row or click
   // outside to close; closes when the current stream changes so a click

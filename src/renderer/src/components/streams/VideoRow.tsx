@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { TruncatedText } from '../ui/TruncatedText'
+import { Tooltip } from '../ui/Tooltip'
 import { formatScheduledTime } from '../../lib/formatScheduledTime'
 import { formatDateOnly } from '../ui/BroadcastPicker'
 
@@ -11,7 +12,7 @@ import { formatDateOnly } from '../ui/BroadcastPicker'
  *  on one line, the date and privacy on the next, and a third line for
  *  chips when the row has any; the lines sit centered in the row either
  *  way. */
-export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '' }: {
+export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '', onOpenWatch, onOpenStudio }: {
   broadcast: LiveBroadcast | null
   kind: 'video' | 'broadcast'
   /** The third line; left out when nothing is passed. */
@@ -24,6 +25,11 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   /** The title shown when there is no broadcast (an unlinked footer). */
   placeholderTitle?: string
   className?: string
+  /** When given, the id on the second line opens the video on YouTube
+   *  and the privacy opens it in Studio. Only for a row that is not
+   *  itself a button. */
+  onOpenWatch?: () => void
+  onOpenStudio?: () => void
 }) {
   const title = broadcast ? (broadcast.snippet?.title?.trim() || `Untitled ${kind}`) : (placeholderTitle ?? '')
   const start = broadcast?.snippet?.actualStartTime ?? broadcast?.snippet?.scheduledStartTime ?? ''
@@ -32,23 +38,52 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   const PrivacyIcon = privacy === 'unlisted' ? LinkIcon : privacy === 'private' ? Lock : privacy === 'public' ? Globe : null
   const privacyLabel = privacy === 'public' ? 'Public' : privacy === 'unlisted' ? 'Unlisted' : privacy === 'private' ? 'Private' : null
 
+  // The second line: date, kind, privacy, id, with a dot between them.
+  // The privacy and the id are links in the footer, text in the picker.
+  const linkCls = 'hover:text-gray-200 hover:underline underline-offset-2 transition-colors'
+  const meta: React.ReactNode[] = []
+  if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
+  if (broadcast?.isLivestream != null) {
+    meta.push(
+      <span key="kind" className="inline-flex items-center gap-1 shrink-0">
+        {broadcast.isLivestream ? <Radio size={10} /> : <Upload size={10} />}
+        {broadcast.isLivestream ? 'Livestream' : 'Upload'}
+      </span>
+    )
+  }
+  if (PrivacyIcon && privacyLabel) {
+    meta.push(onOpenStudio
+      ? (
+        <Tooltip key="privacy" content="Open in YouTube Studio" side="top" triggerClassName="inline-flex shrink-0">
+          <button type="button" onClick={onOpenStudio} className={`inline-flex items-center gap-1 ${linkCls}`}>
+            <PrivacyIcon size={10} /> {privacyLabel}
+          </button>
+        </Tooltip>
+      )
+      : <span key="privacy" className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>)
+  }
+  if (broadcast) {
+    meta.push(onOpenWatch
+      ? (
+        <Tooltip key="id" content="Open on YouTube" side="top" triggerClassName="inline-flex min-w-0">
+          <button type="button" onClick={onOpenWatch} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
+        </Tooltip>
+      )
+      : <span key="id" className="font-mono truncate">{broadcast.id}</span>)
+  }
+
   const body = (
     <>
       <RowThumb url={broadcast?.snippet?.thumbnailUrl} locked={privacy === 'private'} onFailed={onThumbFailed} />
       <div className="flex-1 min-w-0 px-3 flex flex-col justify-center gap-0.5">
         <TruncatedText text={title} className={`truncate text-xs ${broadcast ? 'text-gray-200' : 'text-gray-400'}`} />
-        <div className="h-[14px] flex items-center gap-2 text-[10px] text-gray-400 whitespace-nowrap overflow-hidden">
-          {when && <span className="tabular-nums shrink-0">{when}</span>}
-          {PrivacyIcon && privacyLabel && (
-            <span className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>
-          )}
-          {broadcast?.isLivestream != null && (
-            <span className="inline-flex items-center gap-1 shrink-0">
-              {broadcast.isLivestream ? <Radio size={10} /> : <Upload size={10} />}
-              {broadcast.isLivestream ? 'Livestream' : 'Upload'}
-            </span>
-          )}
-          {broadcast && <span className="font-mono truncate">{broadcast.id}</span>}
+        <div className="h-[14px] flex items-center gap-1.5 text-[10px] text-gray-400 whitespace-nowrap overflow-hidden">
+          {meta.map((item, i) => (
+            <React.Fragment key={i}>
+              {i > 0 && <span className="shrink-0 select-none" aria-hidden>•</span>}
+              {item}
+            </React.Fragment>
+          ))}
         </div>
         {chips && (
           // leading-none: a chip is its text plus padding and border, so

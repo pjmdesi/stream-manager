@@ -42,8 +42,9 @@ import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types
 import { BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
 import { VideoRow } from '../streams/VideoRow'
+import { CopyLinkButton } from '../ui/CopyLinkButton'
 import { TogglePill } from '../ui/TogglePill'
-import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
+import { Globe, Lock, Link as LinkIcon, Link2, Unlink, Copy } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
@@ -7449,7 +7450,6 @@ function SidebarDetail({
 
   // Transient "Copied!" state for the copy-broadcast-URL button.
   // Resets via timeout — see copyBroadcastUrl below.
-  const [copiedUrl, setCopiedUrl] = useState(false)
   // In-use guard for the Lightbox's delete control — the files grid
   // already blocks deleting a file that's open elsewhere (e.g. in the
   // thumbnail editor); the Lightbox applies the same rule.
@@ -8796,7 +8796,9 @@ function SidebarDetail({
                   the link against. */}
               <VideoRow
                 kind={isPastStream ? 'video' : 'broadcast'}
-                placeholderTitle={isPastStream ? 'No video linked' : 'No broadcast linked'}
+                placeholderTitle="No linked video or broadcast"
+                onOpenWatch={linkedId ? () => { void window.api.openUrl(`https://youtu.be/${linkedId}`) } : undefined}
+                onOpenStudio={linkedId ? () => { void window.api.openUrl(`https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`) } : undefined}
                 broadcast={selectedBroadcast ?? (linkedId ? {
                   id: linkedId,
                   snippet: {
@@ -8845,22 +8847,10 @@ function SidebarDetail({
                   disabled={!selectedBroadcast}
                   privacyLoading={!displayedPrivacy}
                   trailing={
-                    <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          if (!selectedBroadcast) return
-                          try {
-                            await navigator.clipboard.writeText(`https://youtu.be/${selectedBroadcast.id}`)
-                            setCopiedUrl(true)
-                            setTimeout(() => setCopiedUrl(false), 1500)
-                          } catch { /* clipboard refused — ignore */ }
-                        }}
-                        className="p-1.5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors shrink-0"
-                      >
-                        {copiedUrl ? <Check size={14} className="text-green-400" /> : <Link2 size={14} />}
-                      </button>
-                    </Tooltip>
+                    <>
+                      <CopyLinkButton url={`https://youtu.be/${linkedId}`} label="Copy video link" icon={<Copy size={12} />} text="Link" disabled={!selectedBroadcast} />
+                      <CopyLinkButton url={`https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`} label="Copy Studio link" icon={<Copy size={12} />} text="Studio" disabled={!selectedBroadcast} />
+                    </>
                   }
                 />
                 </div>
@@ -10202,13 +10192,11 @@ function BroadcastTimePrivacyRow({
   disabled, privacyLoading,
   trailing,
 }: {
-  /** Stream date as the row's FIRST field — a button opening the same
-   *  reschedule modal as the header's date button (sidebar-reorg phase c:
-   *  the date becomes verifiable right where the push happens; the header
-   *  copy stays because the broadcast row is hidden when YouTube is
-   *  inactive). Deliberately never disabled with the row — the date is SM
-   *  identity, editable regardless of push/link state, same as the header.
-   *  Hidden with showTime: schedule edits are rejected for past/live. */
+  /** Stream date as the lockup's FIRST segment — a button opening the
+   *  same reschedule modal as the header's date button. Deliberately
+   *  never disabled with the rest — the date is SM identity, editable
+   *  regardless of push/link state, same as the header. Hidden with
+   *  showTime: schedule edits are rejected for past/live. */
   date?: string
   onDateClick?: () => void
   dateMismatch?: 'local' | 'remote' | 'both' | 'unknown'
@@ -10216,26 +10204,28 @@ function BroadcastTimePrivacyRow({
   onTimeChange: (v: string) => void
   timeMismatch?: 'local' | 'remote' | 'both' | 'unknown'
   /** True when the staged date + time sits in the past — tints the
-   *  input's border red to anchor the warning text under the row. */
+   *  time red to anchor the warning text under the row. */
   timeInvalid?: boolean
   showTime?: boolean
   privacy: PrivacyValue
   onPrivacyChange: (v: PrivacyValue) => void
   privacyMismatch?: 'local' | 'remote' | 'both' | 'unknown'
   disabled?: boolean
-  /** True while the real privacy value is still resolving — shows a
-   *  "Loading…" placeholder instead of a possibly-wrong fallback value. */
+  /** True while the real privacy value is still resolving — the
+   *  segments wait, dimmed, instead of showing a possibly-wrong value. */
   privacyLoading?: boolean
+  /** Controls in the lockup's last segment: the copy-link buttons for a
+   *  linked item, Create broadcast for an unlinked future one. */
   trailing?: React.ReactNode
 }) {
   // Same dot palette + tooltip copy as MetaRow. Kept inline here rather
   // than imported from MetaRow because MetaRow's render shape (label +
-  // single child below) doesn't fit two side-by-side fields.
+  // single child below) doesn't fit a lockup of segments.
   const dotConfig: Record<'local' | 'remote' | 'both' | 'unknown', { cls: string; pulseColor: string; tip: string }> = {
     local:   { cls: 'bg-blue-400',     pulseColor: 'rgba(96, 165, 250, 0.7)',  tip: 'You changed this in SM since last sync — push to update YouTube.' },
-    remote:  { cls: 'bg-orange-400',   pulseColor: 'rgba(251, 146, 60, 0.7)',  tip: 'YouTube has a newer value than what SM last sync’d — pull to update SM, or push to overwrite YouTube with your local value.' },
-    both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', pulseColor: 'rgba(168, 85, 247, 0.7)', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits; pushing will overwrite YouTube’s.' },
-    unknown: { cls: 'bg-gray-400',     pulseColor: 'rgba(156, 163, 175, 0.7)', tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracker was added.' },
+    remote:  { cls: 'bg-orange-400',   pulseColor: 'rgba(251, 146, 60, 0.7)',  tip: 'YouTube has a newer value than what SM last sync’d — pull to update SM, or push to overwrite YouTube with the SM value.' },
+    both:    { cls: 'bg-gradient-to-br from-blue-400 to-orange-400', pulseColor: 'rgba(168, 85, 247, 0.7)', tip: 'Both SM and YouTube have changed since the last sync — pulling will overwrite your local edits, pushing will overwrite YouTube’s.' },
+    unknown: { cls: 'bg-gray-400',     pulseColor: 'rgba(156, 163, 175, 0.7)', tip: 'Doesn’t match YouTube. Direction unknown — this stream hasn’t been sync’d since the per-field tracking was added.' },
   }
   const renderDot = (dir?: 'local' | 'remote' | 'both' | 'unknown') => dir
     ? (
@@ -10247,131 +10237,81 @@ function BroadcastTimePrivacyRow({
       </Tooltip>
     )
     : null
-  const labelCls = 'text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5'
+  // One lockup for the broadcast's own settings, the Series group's
+  // shape: the segments share one border and sit on one 30 px line
+  // (text-xs plus py-1.5 plus the border, the other inputs' height).
+  const segment = 'flex items-center gap-1 px-2 border-r border-white/10'
   return (
-    <div className="flex items-end gap-2 flex-wrap">
-      {/* Each field stacks label-then-input with no gap and uses
-          items-end on the label row so the label baseline sits exactly
-          at the input's top edge — matches MetaRow's tight spacing
-          (the YouTube Title pattern) every other field uses. */}
-      {showTime && date && onDateClick && (
-        <div className="flex flex-col">
-          <span className={`${labelCls} min-h-[16px] items-end`}>Date {renderDot(dateMismatch)}</span>
-          <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={date} /></div>} side="top">
+    <div className="flex flex-col gap-1 min-w-0">
+      <span className="text-[10px] uppercase tracking-wide text-gray-400">Broadcast options</span>
+      <div className="flex items-stretch max-w-full h-[30px] bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+        {showTime && date && onDateClick && (
+          <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={date} /></div>} side="top" triggerClassName="flex">
             <button
               type="button"
               onClick={onDateClick}
-              // py-1.5 matches PrivacyDropdown's height exactly — the time
-              // input's pt-[5px] pb-1 compensates for NATIVE chrome a plain
-              // button doesn't have, so copying it left this 3px short.
-              className="bg-navy-900 border border-white/10 text-gray-200 font-mono tabular-nums text-xs rounded-lg px-2 py-1.5 flex items-center gap-1 hover:text-accent-300 hover:border-accent-500/40 transition-colors focus:outline-none focus:ring-2 focus:ring-accent-500/40"
+              className={`${segment} text-gray-200 font-mono tabular-nums text-xs hover:text-accent-300 transition-colors`}
             >
               {date}
               <PencilLine size={9} />
+              {renderDot(dateMismatch)}
             </button>
           </Tooltip>
-        </div>
-      )}
-      {showTime && (
-        <div className="flex flex-col">
-          <span className={`${labelCls} min-h-[16px] items-end`}>Broadcast time {renderDot(timeMismatch)}</span>
-          <input
-            type="time"
-            value={time}
-            onChange={e => onTimeChange(e.target.value)}
-            disabled={disabled}
-            // Asymmetric padding compensates for native time-input chrome
-            // so the input height lines up with the PrivacyDropdown next to
-            // it (pt-[5px] pb-1 → both rest on the same baseline).
-            className={`bg-navy-900 border ${timeInvalid ? 'border-red-500/60' : 'border-white/10'} text-gray-200 text-xs rounded-lg px-2 pt-[5px] pb-1 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50 [color-scheme:dark]`}
-          />
-        </div>
-      )}
-      <div className="flex flex-col">
-        <span className={`${labelCls} min-h-[16px] items-end`}>Privacy {renderDot(privacyMismatch)}</span>
-        <PrivacyDropdown
-          value={privacy}
-          onChange={onPrivacyChange}
-          disabled={disabled}
-          loading={privacyLoading}
-        />
+        )}
+        {showTime && (
+          <div className={`${segment} ${timeInvalid ? 'text-red-400' : 'text-gray-200'}`}>
+            <input
+              type="time"
+              value={time}
+              onChange={e => onTimeChange(e.target.value)}
+              disabled={disabled}
+              className="bg-transparent text-xs focus:outline-none disabled:opacity-50"
+            />
+            {renderDot(timeMismatch)}
+          </div>
+        )}
+        <PrivacySegments value={privacy} onChange={onPrivacyChange} disabled={disabled} loading={privacyLoading} />
+        {privacyMismatch && <div className="flex items-center pe-2">{renderDot(privacyMismatch)}</div>}
+        {trailing && <div className="flex items-center gap-0.5 px-1 border-l border-white/10">{trailing}</div>}
       </div>
-      {/* Trailing control centers against the INPUT band (30px: text-xs
-          line + py-1.5 + border), not the full row height — the labels
-          above the fields would otherwise drag it visually low. */}
-      {trailing && <div className="self-end flex items-center h-[30px]">{trailing}</div>}
     </div>
   )
 }
 
-function PrivacyDropdown({
-  value, onChange, disabled, loading,
-}: {
+/** Privacy as a three-way radio, the Settings page's first-day picker
+ *  pattern: nothing drops down to clip against the box this sits in.
+ *  The labels give way to the icons alone where the sidebar is narrow;
+ *  the tooltips keep the names. */
+function PrivacySegments({ value, onChange, disabled, loading }: {
   value: PrivacyValue
   onChange: (next: PrivacyValue) => void
   disabled?: boolean
   loading?: boolean
 }) {
-  const [open, setOpen] = useState(false)
-  const containerRef = useRef<HTMLDivElement>(null)
-  const current = PRIVACY_OPTIONS.find(o => o.value === value) ?? PRIVACY_OPTIONS[0]
-
-  // Close on outside click. The container ref scopes the check so
-  // clicking inside the menu still selects a value.
-  useEffect(() => {
-    if (!open) return
-    const onDown = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
-        setOpen(false)
-      }
-    }
-    document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
-  }, [open])
-
-  const CurrentIcon = current.Icon
   return (
-    <div ref={containerRef} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen(v => !v)}
-        disabled={disabled}
-        className="flex items-center gap-1.5 bg-navy-900 border border-white/10 text-gray-200 text-xs rounded-lg pl-2 pr-1.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-red-500/40 disabled:opacity-50"
-      >
-        {loading ? (
-          <>
-            <Loader2 size={11} className="shrink-0 text-gray-400 animate-spin" />
-            <span className="text-gray-400">Loading…</span>
-          </>
-        ) : (
-          <>
-            <CurrentIcon size={11} className="shrink-0 text-gray-400" />
-            <span>{current.label}</span>
-          </>
-        )}
-        <ChevronDown size={10} className={`text-gray-400 transition-transform ${open ? 'rotate-180' : ''}`} />
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 z-20 min-w-full bg-navy-800 border border-white/10 rounded-lg shadow-lg overflow-hidden">
-          {PRIVACY_OPTIONS.map(opt => {
-            const OptIcon = opt.Icon
-            const active = opt.value === value
-            return (
-              <button
-                key={opt.value}
-                type="button"
-                onClick={() => { onChange(opt.value); setOpen(false) }}
-                className={`flex items-center gap-1.5 w-full px-2 py-1.5 text-xs text-left transition-colors ${
-                  active ? 'bg-white/10 text-gray-100' : 'text-gray-300 hover:bg-white/5'
-                }`}
-              >
-                <OptIcon size={11} className="shrink-0 text-gray-400" />
-                <span>{opt.label}</span>
-              </button>
-            )
-          })}
-        </div>
-      )}
+    <div className={`flex items-stretch ${disabled || loading ? 'opacity-50' : ''}`} role="radiogroup" aria-label="Privacy">
+      {PRIVACY_OPTIONS.map((opt, i) => {
+        const selected = opt.value === value && !loading
+        const Icon = opt.Icon
+        return (
+          <Tooltip key={opt.value} content={opt.label} side="top" triggerClassName="flex">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              aria-label={opt.label}
+              disabled={disabled || loading}
+              onClick={() => onChange(opt.value)}
+              className={`flex items-center gap-1 px-2 text-xs transition-colors disabled:cursor-not-allowed ${
+                i < PRIVACY_OPTIONS.length - 1 ? 'border-r border-white/10' : ''
+              } ${selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
+            >
+              {loading && opt.value === value ? <Loader2 size={11} className="animate-spin" /> : <Icon size={11} />}
+              <span className="hidden @[420px]:inline">{opt.label}</span>
+            </button>
+          </Tooltip>
+        )
+      })}
     </div>
   )
 }
@@ -10810,7 +10750,11 @@ function RescheduleModal({
                   </div>
                   <div className="flex items-center gap-1.5">
                     <label className="text-[10px] text-gray-400 shrink-0">Privacy</label>
-                    <PrivacyDropdown value={pushPrivacy} onChange={setPushPrivacy} disabled={pushing} />
+                    {/* The same three-way radio the footer's Broadcast
+                        options use; @container so its labels show here. */}
+                    <div className="@container flex items-stretch h-[30px] bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+                      <PrivacySegments value={pushPrivacy} onChange={setPushPrivacy} disabled={pushing} />
+                    </div>
                   </div>
                 </div>
               )}
