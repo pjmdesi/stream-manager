@@ -71,6 +71,7 @@
 39. STR-49
 40. STR-50
 41. STR-51
+42. APP-58
 
 ## Improvement ideas
 
@@ -216,7 +217,7 @@
   Improve the Linked Video dropdown in the detail sidebar footer. Currently, it loads some items, then after a second or two, loads in everything after reading from the YouTube API. This causes a massive reflow and has more than once caused me to click the wrong thing. It also makes it impossible to try to find the correct item when everything gets loaded in. Some changes to improve the UX:
   1. Don't show already linked items by default, then add a button in the dropdown menu to show these items. It should be a small button at the bottom of the menu, pinned in place (normal users should never have to click it, but it should be there).
   2. Add a "recommended" item at the very bottom (since the menu opens upward almost exclusively due to its position, the bottom entry would be nearest the user's cursor). This should be SM's best guess at the item the user is probably going to want to link. We should use the metadata details to calculate a matching score based on how closely the stream item details match the YouTube entry details. The highest scoring item will show in this special slot with a star or other icon that says "this is probably the one you want". The date and title will prbably be the strongest items to match against, but the day may not be wholly reliable since the user might be posting a trimmed or edited version of a livestreams months after the actual livestream date. Title, tags, uploaded video filename (if that's available through the API), etc. Split 2026-10-12: this ticket is the reflow fix and item 1 (linked videos hidden behind a pinned "Show linked" button); item 2, the recommended entry, is STR-42, and the typed filter is STR-43.
-  Decision 2026-10-23: the drop-up is replaced by a modal picker (a search field, rows with thumbnail, title and date, videos linked to other streams behind a Show linked row at the end of the list; the channel's video list is cached on disk and checked for newer videos on open). Built 2026-10-23; review round 4 built 2026-10-25, awaiting review.
+  Decision 2026-10-23: the drop-up is replaced by a modal picker (a search field, rows with thumbnail, title and date, videos linked to other streams behind a Show linked row at the end of the list; the channel's video list is cached on disk and checked for newer videos on open). Built 2026-10-23; review round 5 built 2026-10-25, awaiting review.
 
 - **STR-40** [ui] [impact:1]
   Mark files the converter produced in the files grid. A recording, clip or combined file that came out of SM's converter is only recognizable by the suffix in its name, which is a weak tell. Show the converter's lightning bolt icon to the left of the name, where the archive icon sits, for every file SM converted (the provenance tag in the container already identifies clip exports and combines; converter outputs need the same stamp if they lack one). Files archived through the archive process keep the archive icon alone, since it implies the same and more. Filed 2026-10-12.
@@ -745,6 +746,9 @@
 
 - **APP-57** [ui] [impact:2]
   Sweep the app for images without a fallback. The link picker (STR-39) showed the browser's broken-image glyph for thumbnails whose large size YouTube listed but did not serve; the style guide now says every image renders a placeholder box when it has no source or fails to load. As of 2026-10-24 the renderer has 39 img tags across 12 files and one of them handles onError (ThumbImage). Check each live one (Launcher icons, Player, Thumbnails, the YouTube import and link modals, VideoThumb, Onboarding, App) and give it the placeholder; the legacy streams module's 16 are dead code and can wait for its removal.
+
+- **APP-58** [ui] [needs-design] [impact:2]
+  One way of opening things outside the app. External links are inconsistent and some are hidden: the stream row's date-column chip opens the video in YouTube Studio with nothing saying so, the live link is copied from a different-looking control in the sidebar footer, and the link picker's rows (STR-39) are the only place that uses the box-with-arrow icon, which the Launcher never did. Decide one treatment (the external-link icon reads well and stays), apply it to every control that opens a browser page or copies a link, and say what each one does.
 
 - **APP-56** [investigate] [perf] [impact:2]
   The app sometimes stops answering hovers and clicks promptly for a stretch and then catches up; seen 2026-10-23 while testing CONV-4 on a dist build, and a dist launched from the Dev pane is slow until the UI has fully loaded. Candidates to measure before changing anything: main-process work that holds up the renderer's IPC (the library listing, 650 ms for 256 streams, re-runs on every player file change; a PowerShell attribute read is 440 to 640 ms; the launch path reads files synchronously), the renderer's render cost while running conversions report progress several times a second, and first-launch effects of a freshly written exe (Defender scanning it, V8 compiling cold). To settle first: whether it happens on the installed release build, only while a conversion runs or at any time, and whether Task Manager shows the main process or the renderer busy during a stall. Related: PLR-36.

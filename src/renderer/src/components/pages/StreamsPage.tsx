@@ -39,8 +39,9 @@ import { TemplateBodyEditor, MergeFieldPicker, MERGE_FIELD_CHIP_CLASS } from '..
 import { TwitchCategoryRenamePrompt } from '../ui/TwitchCategoryRenamePrompt'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
-import { RowContent as BroadcastRowContent, BroadcastLinkRef } from '../ui/BroadcastPicker'
+import { BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
+import { VideoRow } from '../streams/VideoRow'
 import { TogglePill } from '../ui/TogglePill'
 import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
@@ -8762,64 +8763,63 @@ function SidebarDetail({
                 local meta so the link does not read as missing;
                 selectedBroadcast, which drives the mismatch dots, stays
                 null so nothing pretends to be in sync. */}
-            <div className={`flex items-center gap-2 bg-navy-900 border border-white/10 rounded-lg ps-3 pe-1.5 py-1.5 ${quotaExceeded ? 'opacity-70' : ''}`}>
-              <div className="flex-1 min-w-0">
-                {selectedBroadcast ? (
-                  <BroadcastRowContent broadcast={selectedBroadcast} showDateOnly={isPastStream} compact />
-                ) : linkedId ? (
-                  <BroadcastRowContent
-                    broadcast={{
-                      id: linkedId,
-                      snippet: {
-                        // The template body resolved, so the cached title
-                        // reads as the rendered string, not placeholders;
-                        // else the pushed snapshot, else the bare id.
-                        title: applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
-                          || meta?.ytLastPushedTitle?.trim()
-                          || `Video ${linkedId}`,
-                        description: '',
-                        scheduledStartTime: !isPastStream && meta?.scheduledTime
-                          ? `${folder.date}T${meta.scheduledTime}:00`
-                          : undefined,
-                      },
-                      status: { lifeCycleStatus: '', privacyStatus: '' },
-                    }}
-                    showDateOnly={isPastStream}
-                    compact
-                  />
-                ) : (
-                  <span className="text-xs text-gray-400">{isPastStream ? 'No video linked' : 'No broadcast linked'}</span>
-                )}
-              </div>
-              <Tooltip content="Picking is disabled while the YouTube quota is exhausted." open={quotaExceeded ? undefined : false} triggerClassName="shrink-0">
-                <Button
-                  size="sm"
-                  disabled={quotaExceeded || (!isPastStream && ytBroadcastsLoading)}
-                  onClick={() => {
-                    if (isPastStream) onLoadAllVods()
-                    setLinkPickerOpen(true)
-                  }}
-                >
-                  {linkedId ? 'Change' : 'Link'}
-                </Button>
-              </Tooltip>
-              {/* Unlink sits in the row with Change, as the red icon
-                  button, so the link's two actions share one spot. */}
-              {linkedId && (
-                <Tooltip content={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'} triggerClassName="shrink-0 self-stretch flex">
-                  <Button
-                    size="sm"
-                    variant="danger"
-                    // An icon's line box is shorter than text, so the
-                    // tooltip trigger stretches to the row's height and
-                    // the button fills it, matching Change.
-                    className="px-2 h-full"
-                    icon={<Unlink size={13} />}
-                    aria-label={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'}
-                    onClick={() => onUpdateMeta({ ytVideoId: '' })}
-                  />
-                </Tooltip>
-              )}
+            <div className={`bg-navy-900 border border-white/10 rounded-lg overflow-hidden ${quotaExceeded ? 'opacity-70' : ''}`}>
+              {/* The same row the link modal draws (VideoRow), so the
+                  footer shows the thumbnail, date and privacy to confirm
+                  the link against. */}
+              <VideoRow
+                kind={isPastStream ? 'video' : 'broadcast'}
+                chips={null}
+                placeholderTitle={isPastStream ? 'No video linked' : 'No broadcast linked'}
+                broadcast={selectedBroadcast ?? (linkedId ? {
+                  id: linkedId,
+                  snippet: {
+                    // The template body resolved, so the cached title
+                    // reads as the rendered string, not placeholders;
+                    // else the pushed snapshot, else the bare id.
+                    title: applyMergeFields(meta?.ytTitle ?? '', mergeFields).trim()
+                      || meta?.ytLastPushedTitle?.trim()
+                      || `Video ${linkedId}`,
+                    description: '',
+                    scheduledStartTime: !isPastStream && meta?.scheduledTime
+                      ? `${folder.date}T${meta.scheduledTime}:00`
+                      : undefined,
+                  },
+                  status: { lifeCycleStatus: '', privacyStatus: '' },
+                } : null)}
+                actions={
+                  <>
+                    <Tooltip content="Picking is disabled while the YouTube quota is exhausted." open={quotaExceeded ? undefined : false} triggerClassName="shrink-0">
+                      <Button
+                        size="sm"
+                        disabled={quotaExceeded || (!isPastStream && ytBroadcastsLoading)}
+                        onClick={() => {
+                          if (isPastStream) onLoadAllVods()
+                          setLinkPickerOpen(true)
+                        }}
+                      >
+                        {linkedId ? 'Change' : 'Link'}
+                      </Button>
+                    </Tooltip>
+                    {/* Unlink sits with Change, as the red icon button,
+                        so the link's two actions share one spot. */}
+                    {linkedId && (
+                      <Tooltip content={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'} triggerClassName="shrink-0 flex">
+                        <Button
+                          size="sm"
+                          variant="danger"
+                          // An icon's line box is shorter than text; the
+                          // button takes Change's height.
+                          className="px-2 h-[30px]"
+                          icon={<Unlink size={13} />}
+                          aria-label={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'}
+                          onClick={() => onUpdateMeta({ ytVideoId: '' })}
+                        />
+                      </Tooltip>
+                    )}
+                  </>
+                }
+              />
             </div>
             {quotaExceeded && !selectedBroadcast && linkedId && (
               <p className="mt-1 text-[10px] text-gray-400 italic">Cached — refresh blocked while YouTube quota is exhausted</p>
@@ -8828,6 +8828,12 @@ function SidebarDetail({
               isOpen={linkPickerOpen}
               onClose={() => setLinkPickerOpen(false)}
               kind={isPastStream ? 'video' : 'broadcast'}
+              stream={{
+                title: renderStreamTitle(folder, folders) || folder.folderName,
+                date: folder.date,
+                thumbPath: resolveStreamThumb(folder),
+                thumbsKey,
+              }}
               items={broadcastPool}
               currentId={linkedId}
               otherFolderLinks={otherFolderLinks}
