@@ -480,6 +480,9 @@
 - **CONV-25** [impact:1]
   Update Remove button to read clear for completed items in the converter.
 
+- **CONV-26**
+  After the ffmpeg debacle... Check if all handbrake presets are compatible, and warn the user if any are not when they import. Or maybe remove the Handbrake preset functionality altogether.
+
 ### Combine
 
 - **COMB-1** [needs-design]
