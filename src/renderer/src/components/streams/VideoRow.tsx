@@ -27,7 +27,8 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   className?: string
   /** When given, the privacy on the second line opens the video on
    *  YouTube and the id opens it in Studio, each with a copy icon beside
-   *  it. Only for a row that is not itself a button. */
+   *  it. Works with `onClick` too: the row is then a div with the button
+   *  role, and the links stop their clicks from picking the row. */
   links?: { watchUrl: string; studioUrl: string }
 }) {
   const title = broadcast ? (broadcast.snippet?.title?.trim() || `Untitled ${kind}`) : (placeholderTitle ?? '')
@@ -51,12 +52,14 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
       </span>
     )
   }
+  // A link inside a pickable row must not pick it.
+  const open = (url: string) => (e: React.MouseEvent) => { e.stopPropagation(); void window.api.openUrl(url) }
   if (PrivacyIcon && privacyLabel) {
     meta.push(links
       ? (
         <span key="privacy" className="inline-flex items-center gap-1 shrink-0">
           <Tooltip content="Open on YouTube" side="top" triggerClassName="inline-flex">
-            <button type="button" onClick={() => { void window.api.openUrl(links.watchUrl) }} className={`inline-flex items-center gap-1 ${linkCls}`}>
+            <button type="button" onClick={open(links.watchUrl)} className={`inline-flex items-center gap-1 ${linkCls}`}>
               <PrivacyIcon size={10} /> {privacyLabel}
             </button>
           </Tooltip>
@@ -70,7 +73,7 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
       ? (
         <span key="id" className="inline-flex items-center gap-1 min-w-0">
           <Tooltip content="Open in YouTube Studio" side="top" triggerClassName="inline-flex min-w-0">
-            <button type="button" onClick={() => { void window.api.openUrl(links.studioUrl) }} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
+            <button type="button" onClick={open(links.studioUrl)} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
           </Tooltip>
           <InlineCopy url={links.studioUrl} label="Copy Studio link" />
         </span>
@@ -104,11 +107,27 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
     </>
   )
 
+  // A pickable row is a div with the button role rather than a button,
+  // so the links on its second line can be buttons of their own.
+  const pickable = onClick
+    ? {
+      role: 'button' as const,
+      tabIndex: 0,
+      onClick,
+      onKeyDown: (e: React.KeyboardEvent) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick() }
+      },
+    }
+    : {}
   return (
     <div className={`flex items-stretch min-h-16 ${className}`}>
-      {onClick
-        ? <button type="button" onClick={onClick} className="flex flex-1 min-w-0 items-stretch text-left">{body}</button>
-        : <div className="flex flex-1 min-w-0 items-stretch">{body}</div>}
+      <div
+        {...pickable}
+        className={`flex flex-1 min-w-0 items-stretch text-left ${onClick ? 'cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-500/40' : ''}`}
+      >
+        {body}
+      </div>
       {actions && <div className="flex items-center gap-1.5 pe-2 shrink-0">{actions}</div>}
     </div>
   )
@@ -125,7 +144,8 @@ function InlineCopy({ url, label }: { url: string; label: string }) {
       <button
         type="button"
         aria-label={label}
-        onClick={async () => {
+        onClick={async (e) => {
+          e.stopPropagation()
           try {
             await navigator.clipboard.writeText(url)
             setCopied(true)

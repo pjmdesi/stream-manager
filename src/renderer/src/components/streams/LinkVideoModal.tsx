@@ -1,15 +1,13 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Search, Loader2, AlertTriangle, Link2, Radio, ExternalLink, ImageOff } from 'lucide-react'
+import { Search, Loader2, AlertTriangle, Link2, Radio, ImageOff } from 'lucide-react'
 import { Youtube as LucideYoutube } from '../ui/BrandIcons'
 import type { LiveBroadcast, StreamFolder } from '../../types'
 import { StreamNavButtons } from './StreamNavButtons'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
-import { Tooltip } from '../ui/Tooltip'
 import { TogglePill } from '../ui/TogglePill'
 import { TruncatedText } from '../ui/TruncatedText'
-import { rowActionClass } from '../ui/rowAction'
 import { ThumbImage } from './ThumbImage'
 import { VideoRow, RowChip } from './VideoRow'
 import { type BroadcastLinkRef } from '../ui/BroadcastPicker'
@@ -176,9 +174,13 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
     const isDefaultBroadcast = kind === 'broadcast' && !b.snippet?.scheduledStartTime
     // The current link needs no chip of its own: its box says what it is.
     const hasChips = isNew || isDefaultBroadcast || links.length > 0
-    // Studio's edit page for a video; the live control room for a
-    // broadcast that has not happened yet.
-    const studioUrl = `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`
+    // The row's own links (the footer's design): the privacy opens the
+    // video, the id opens Studio's edit page for a video or the live
+    // control room for a broadcast that has not happened yet.
+    const rowLinks = {
+      watchUrl: `https://youtu.be/${b.id}`,
+      studioUrl: `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`,
+    }
     return (
       <VideoRow
         key={b.id}
@@ -186,7 +188,7 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
         kind={kind}
         onClick={() => pick(b.id)}
         onThumbFailed={onThumbFailed ? () => onThumbFailed(b.id) : undefined}
-        // The hover tint belongs to the whole row, Studio button included.
+        links={rowLinks}
         className={`transition-colors hover:bg-white/5 ${boxed ? 'bg-white/5' : 'border-b border-white/5'}`}
         chips={hasChips ? (
           <>
@@ -199,18 +201,6 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
             )}
           </>
         ) : undefined}
-        actions={
-          <Tooltip content="Open in YouTube Studio">
-            <button
-              type="button"
-              aria-label="Open in YouTube Studio"
-              onClick={() => { void window.api.openUrl(studioUrl) }}
-              className={rowActionClass('gray', 'sm')}
-            >
-              <ExternalLink size={12} />
-            </button>
-          </Tooltip>
-        }
       />
     )
   }

@@ -7666,6 +7666,13 @@ function SidebarDetail({
         scheduledStartTime,
         privacyStatus: newBroadcastPrivacy,
       })
+      // Linked the moment it exists, so a failure in the follow-ups below
+      // leaves a retry that pushes to this broadcast instead of creating
+      // a second one. Targeted: several awaited API calls ran since the
+      // click, and writing through onUpdateMeta would link the broadcast
+      // to whichever stream is selected NOW, not the one it was made for.
+      setYtBroadcasts(prev => [created, ...prev])
+      onUpdateMetaForRef.current(targetKey, { ytVideoId: created.id })
 
       // youtubeCreateBroadcast only sets title/description/scheduled
       // time/privacy. Tags and the thumbnail need a separate
@@ -7689,24 +7696,17 @@ function SidebarDetail({
           } catch {}
         }
       } catch (err: any) {
-        // The broadcast itself was created — only the follow-up push
-        // failed. Surface the warning but keep the linkage so the
-        // user can retry from the regular Push to YouTube button.
-        followupWarning = `Broadcast created, but follow-up push failed: ${err?.message ?? String(err)}`
+        // The broadcast itself was created and is linked — only the
+        // follow-up push failed. Say so; Push to YouTube retries it.
+        followupWarning = `The broadcast was created and linked, but pushing its details failed: ${err?.message ?? String(err)}. Push to YouTube again to retry.`
       }
 
       // Inject tags into the cached broadcast so the broadcastMismatch
       // detection treats it as in-sync without waiting for a reload.
-      const enriched = tags.length > 0
-        ? { ...created, snippet: { ...created.snippet, tags } }
-        : created
-      setYtBroadcasts(prev => [enriched, ...prev])
-      const metaPatch: Partial<StreamMeta> = { ytVideoId: created.id }
-      if (thumbnailPushedHash) metaPatch.ytThumbnailPushedHash = thumbnailPushedHash
-      // Targeted: several awaited API calls ran since the click — writing
-      // through onUpdateMeta here would link the broadcast to whichever
-      // stream the user has selected NOW, not the one they created it for.
-      onUpdateMetaForRef.current(targetKey, metaPatch)
+      if (tags.length > 0) {
+        setYtBroadcasts(prev => prev.map(b => b.id === created.id ? { ...b, snippet: { ...b.snippet, tags } } : b))
+      }
+      if (thumbnailPushedHash) onUpdateMetaForRef.current(targetKey, { ytThumbnailPushedHash: thumbnailPushedHash })
       if (followupWarning) setCreateError(followupWarning)
     } catch (err: any) {
       setCreateError(err?.message ?? 'Failed to create broadcast')
@@ -8851,6 +8851,24 @@ function SidebarDetail({
                 />
                 </div>
               )}
+              {/* An unlinked future stream: the same lockup holds the
+                  time and privacy the broadcast will be created with
+                  when Push to YouTube runs; there is no Create button. */}
+              {!linkedId && streamDateInFuture && (
+                <div className="border-t border-white/5">
+                  <BroadcastTimePrivacyRow
+                    flush
+                    date={folder.date}
+                    onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
+                    dateMismatch={broadcastMismatches.get('date')}
+                    time={newBroadcastTime}
+                    onTimeChange={setNewBroadcastTime}
+                    privacy={newBroadcastPrivacy}
+                    onPrivacyChange={setNewBroadcastPrivacy}
+                    disabled={creatingBroadcast}
+                  />
+                </div>
+              )}
             </div>
             {quotaExceeded && !selectedBroadcast && linkedId && (
               <p className="mt-1 text-[10px] text-gray-400 italic">Cached — refresh blocked while YouTube quota is exhausted</p>
@@ -8950,45 +8968,15 @@ function SidebarDetail({
                   )}
                 </div>
 
-                {streamDateInFuture && (
-                  <div className="flex flex-col gap-1.5">
-                    <BroadcastTimePrivacyRow
-                      date={folder.date}
-                      onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
-                      dateMismatch={broadcastMismatches.get('date')}
-                      time={newBroadcastTime}
-                      onTimeChange={setNewBroadcastTime}
-                      privacy={newBroadcastPrivacy}
-                      onPrivacyChange={setNewBroadcastPrivacy}
-                      disabled={creatingBroadcast}
-                      trailing={
-                        <Tooltip
-                          content={netProblem === 'offline'
-                            ? 'No internet connection.'
-                            : 'YouTube is not responding right now. It usually recovers on its own, try again shortly.'}
-                          open={netProblem ? undefined : false}
-                        >
-                          <Button
-                            variant="primary"
-                            size="sm"
-                            loading={creatingBroadcast}
-                            disabled={netProblem !== null}
-                            onClick={handleCreateBroadcast}
-                          >
-                            Create broadcast
-                          </Button>
-                        </Tooltip>
-                      }
-                    />
-                    {createError && (
-                      <p className="text-[10px] text-red-400 flex items-center gap-1">
-                        <AlertTriangle size={10} className="shrink-0" />
-                        {createError}
-                      </p>
-                    )}
-                  </div>
-                )}
               </>
+            )}
+            {/* What the last Push to YouTube said while it was creating
+                the broadcast; cleared by the next push. */}
+            {createError && (
+              <p className="text-[10px] text-red-400 flex items-center gap-1">
+                <AlertTriangle size={10} className="shrink-0" />
+                {createError}
+              </p>
             )}
 
 
@@ -9028,11 +9016,19 @@ function SidebarDetail({
           // button that wraps them. Each handler owns its per-platform
           // loading state so the spinners stay accurate even when
           // triggered together by Push to all.
-          const ytDisabled = ytPushing || !ytConnected || !meta?.ytVideoId || !selectedBroadcast
+          // An unlinked future stream has nothing to push to yet, so Push
+          // to YouTube creates the broadcast first (handleCreateBroadcast,
+          // which also pushes the details); an unlinked past stream has
+          // nothing to create.
+          const canCreateBroadcast = !meta?.ytVideoId && streamDateInFuture
+          const ytDisabled = ytPushing || creatingBroadcast || !ytConnected
             || quotaExceeded
             || netProblem !== null
-            || stagedScheduleInPast
-            || (!broadcastMismatch && !thumbnailNeedsPush)
+            || (canCreateBroadcast ? false : (
+              !meta?.ytVideoId || !selectedBroadcast
+              || stagedScheduleInPast
+              || (!broadcastMismatch && !thumbnailNeedsPush)
+            ))
           // Effective Twitch values for the in-sync comparison —
           // matches what handlePushToTwitch above would actually send.
           // syncTitle/syncGame default ON when undefined (meta from
@@ -9143,6 +9139,13 @@ function SidebarDetail({
               ytCategorySelectRef.current?.scrollIntoView({ block: 'center', behavior: 'smooth' })
               ytCategorySelectRef.current?.focus()
               onMissingYtCategory()
+              return
+            }
+            // Nothing linked yet on a future stream: create the broadcast
+            // with the staged time and privacy, link it, and push the
+            // details, all in this one click.
+            if (canCreateBroadcast) {
+              await handleCreateBroadcast()
               return
             }
             // Schedule to send (if any) comes from the same derivation
@@ -9310,7 +9313,8 @@ function SidebarDetail({
                       netProblem === 'offline' ? 'No internet connection.'
                         : netProblem === 'yt' ? 'YouTube is not responding right now. It usually recovers on its own, try again shortly.'
                         : !ytConnected ? 'YouTube not connected (Settings → Integrations)'
-                        : !meta?.ytVideoId ? 'No linked broadcast or video — link one first'
+                        : canCreateBroadcast ? 'Create the broadcast on YouTube with these options and push the details'
+                        : !meta?.ytVideoId ? 'No linked video or broadcast — link one first'
                         : !selectedBroadcast ? 'Loading broadcast info…'
                         : quotaExceeded ? 'YouTube API quota exceeded — try again after midnight Pacific Time'
                         : stagedScheduleInPast ? 'The staged broadcast time is in the past. Fix the date or time, then push.'
@@ -9324,7 +9328,7 @@ function SidebarDetail({
                         disabled={ytDisabled}
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-red-500/10 hover:bg-red-500/20 border border-red-500/25 hover:border-red-500/40 text-red-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-red-500/10"
                       >
-                        {ytPushing ? <Loader2 size={11} className="animate-spin" /> : <LucideYoutube size={11} />}
+                        {ytPushing || creatingBroadcast ? <Loader2 size={11} className="animate-spin" /> : <LucideYoutube size={11} />}
                         Push to YouTube
                       </button>
                     </Tooltip>
@@ -10258,7 +10262,7 @@ function BroadcastTimePrivacyRow({
             <button
               type="button"
               onClick={onDateClick}
-              className={`${segment} text-gray-200 font-mono tabular-nums text-xs hover:text-accent-300 transition-colors`}
+              className={`${segment} whitespace-nowrap text-gray-200 font-mono tabular-nums text-xs hover:text-accent-300 transition-colors`}
             >
               {date}
               <PencilLine size={9} />
@@ -10278,7 +10282,15 @@ function BroadcastTimePrivacyRow({
             />
           </div>
         )}
-        <PrivacySegments value={privacy} onChange={onPrivacyChange} disabled={disabled} loading={privacyLoading} />
+        {/* The labels need more room beside the date and time than on
+            their own, so the lockup with those gives them up sooner. */}
+        <PrivacySegments
+          value={privacy}
+          onChange={onPrivacyChange}
+          disabled={disabled}
+          loading={privacyLoading}
+          expandClass={showTime ? '@[520px]:grid-cols-[1fr] @[520px]:ms-0' : '@[360px]:grid-cols-[1fr] @[360px]:ms-0'}
+        />
         {trailing && <div className="flex items-center gap-0.5 px-1 border-l border-white/10">{trailing}</div>}
       </div>
     </div>
@@ -10287,13 +10299,16 @@ function BroadcastTimePrivacyRow({
 
 /** Privacy as a three-way radio, the Settings page's first-day picker
  *  pattern: nothing drops down to clip against the box this sits in.
- *  The labels give way to the icons alone where the sidebar is narrow;
- *  the tooltips keep the names. */
-function PrivacySegments({ value, onChange, disabled, loading }: {
+ *  The labels slide away to the icons alone where the sidebar is narrow
+ *  (CollapsibleLabel, as the icon buttons do); the tooltips keep the
+ *  names. */
+function PrivacySegments({ value, onChange, disabled, loading, expandClass = '@[360px]:grid-cols-[1fr] @[360px]:ms-0' }: {
   value: PrivacyValue
   onChange: (next: PrivacyValue) => void
   disabled?: boolean
   loading?: boolean
+  /** The CollapsibleLabel breakpoint classes for the labels. */
+  expandClass?: string
 }) {
   return (
     <div className={`flex items-stretch ${disabled || loading ? 'opacity-50' : ''}`} role="radiogroup" aria-label="Privacy">
@@ -10314,7 +10329,7 @@ function PrivacySegments({ value, onChange, disabled, loading }: {
               } ${selected ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'}`}
             >
               {loading && opt.value === value ? <Loader2 size={11} className="animate-spin" /> : <Icon size={11} />}
-              <span className="hidden @[420px]:inline">{opt.label}</span>
+              <CollapsibleLabel expandClass={expandClass} collapsedMarginStart="-ms-1">{opt.label}</CollapsibleLabel>
             </button>
           </Tooltip>
         )
