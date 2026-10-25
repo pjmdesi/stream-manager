@@ -615,6 +615,9 @@ export interface LiveBroadcast {
     lifeCycleStatus: string
     privacyStatus: string
   }
+  /** A livestream (or its recording) rather than an upload; absent when
+   *  the record did not say. */
+  isLivestream?: boolean
   /** Renderer only: the entry came from the on-disk VOD cache (STR-39),
    *  good enough to list and pick, not to compare against local meta. A
    *  lookup by id replaces it with a fresh one. */

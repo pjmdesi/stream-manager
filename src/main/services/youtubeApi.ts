@@ -171,6 +171,10 @@ export interface LiveBroadcast {
     lifeCycleStatus: string
     privacyStatus: string
   }
+  /** A livestream (or its recording) rather than an upload. True for
+   *  anything from the liveBroadcasts resource; read off the video
+   *  resource's liveStreamingDetails for lookups by id. */
+  isLivestream?: boolean
 }
 
 /** A liveBroadcasts list item in the app's shape: the typed fields only,
@@ -189,6 +193,7 @@ function toLiveBroadcast(item: any): LiveBroadcast {
       lifeCycleStatus: item.status?.lifeCycleStatus ?? '',
       privacyStatus: item.status?.privacyStatus ?? '',
     },
+    isLivestream: true,
   }
 }
 
@@ -281,6 +286,7 @@ export async function getLiveBroadcasts(
         if (!seen.has(item.id)) {
           seen.add(item.id)
           item.snippet.thumbnailUrl = pickRowThumbUrl(item.snippet?.thumbnails)
+  item.isLivestream = true
           broadcasts.push(item)
         }
       }
@@ -330,6 +336,7 @@ export async function getBroadcastById(
   const item = data?.items?.[0]
   if (!item) return null
   item.snippet.thumbnailUrl = pickRowThumbUrl(item.snippet?.thumbnails)
+  item.isLivestream = true
   const extrasMap = await fetchVideoExtras([broadcastId], clientId, clientSecret)
   const extras = extrasMap.get(broadcastId)
   if (extras?.tags) item.snippet.tags = extras.tags
@@ -344,7 +351,7 @@ export async function getVideoById(
   clientSecret: string
 ): Promise<LiveBroadcast | null> {
   const data = await ytRequest(
-    `/videos?${new URLSearchParams({ part: 'snippet,status', id: videoId })}`,
+    `/videos?${new URLSearchParams({ part: 'snippet,status,liveStreamingDetails', id: videoId })}`,
     { method: 'GET' },
     clientId, clientSecret
   )
@@ -371,6 +378,7 @@ export async function getVideoById(
       lifeCycleStatus: 'complete',
       privacyStatus: item.status?.privacyStatus ?? 'public',
     },
+    isLivestream: !!item.liveStreamingDetails,
   }
 }
 
@@ -391,7 +399,7 @@ export async function getVideosByIds(
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50)
     const data = await ytRequest(
-      `/videos?${new URLSearchParams({ part: 'snippet,status', id: chunk.join(','), maxResults: '50' })}`,
+      `/videos?${new URLSearchParams({ part: 'snippet,status,liveStreamingDetails', id: chunk.join(','), maxResults: '50' })}`,
       { method: 'GET' },
       clientId, clientSecret
     )
@@ -410,6 +418,7 @@ export async function getVideosByIds(
           lifeCycleStatus: 'complete',
           privacyStatus: item.status?.privacyStatus ?? 'public',
         },
+        isLivestream: !!item.liveStreamingDetails,
       })
     }
   }

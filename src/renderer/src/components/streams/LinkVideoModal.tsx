@@ -1,6 +1,8 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Search, Loader2, AlertTriangle, Link2, Radio, ExternalLink, ImageOff } from 'lucide-react'
-import type { LiveBroadcast } from '../../types'
+import { Youtube as LucideYoutube } from '../ui/BrandIcons'
+import type { LiveBroadcast, StreamFolder } from '../../types'
+import { StreamNavButtons } from './StreamNavButtons'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
 import { Input } from '../ui/Input'
@@ -33,12 +35,28 @@ export interface LinkModalStream {
   thumbsKey: number
 }
 
+/** What the stream nav needs, the same set the sidebar header passes
+ *  its StreamNavButtons; the modal keeps up because the sidebar under it
+ *  moves to the picked stream and re-renders the modal with it. */
+export interface LinkModalNav {
+  current: StreamFolder
+  folders: StreamFolder[]
+  prevStream: StreamFolder | null
+  nextStream: StreamFolder | null
+  onPickStream: (f: StreamFolder) => void
+  series: { prev: StreamFolder | null; next: StreamFolder | null; siblings: StreamFolder[] }
+  onPickEpisode: (f: StreamFolder) => void
+}
+
 interface LinkVideoModalProps {
   isOpen: boolean
   onClose: () => void
   /** A past stream links a video; an upcoming one a scheduled broadcast. */
   kind: 'video' | 'broadcast'
   stream: LinkModalStream
+  /** Stream and episode arrows on the stream item's label row, so links
+   *  can be checked stream after stream without closing the modal. */
+  nav?: LinkModalNav
   items: LiveBroadcast[]
   currentId: string
   /** Other stream items' links into this list, keyed by broadcast id;
@@ -63,10 +81,30 @@ interface LinkVideoModalProps {
  * of fixed height sits above it, and new videos land under that line,
  * at the top, where the one you came for is.
  */
-export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
+export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, currentId, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
   const [showLinked, setShowLinked] = useState(false)
   const noun = kind === 'video' ? 'video' : 'broadcast'
+
+  // The page's Ctrl+arrow shortcuts stand down while a modal is open, so
+  // the modal walks streams and episodes itself with the same keys.
+  useEffect(() => {
+    if (!isOpen || !nav) return
+    const onKey = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.altKey || e.metaKey) return
+      if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return
+      const up = e.key === 'ArrowUp'
+      const target = e.shiftKey
+        ? (up ? nav.series.next : nav.series.prev)
+        : (up ? nav.nextStream : nav.prevStream)
+      e.preventDefault()
+      if (!target) return
+      if (e.shiftKey) nav.onPickEpisode(target)
+      else nav.onPickStream(target)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isOpen, nav])
 
   const linkMap = useMemo(() => {
     const m = new Map<string, BroadcastLinkRef[]>()
@@ -177,7 +215,9 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId
     )
   }
 
-  const sectionLabel = 'text-[10px] uppercase tracking-wide text-gray-400 mb-1'
+  // The two boxes draw the same row on purpose, for the comparison; the
+  // labels and their icons are what tell them apart.
+  const sectionLabel = 'text-[10px] uppercase tracking-wide text-gray-400 flex items-center gap-1.5'
 
   return (
     <Modal
@@ -191,7 +231,21 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId
         {/* The stream this is for, and what it is linked to now, each in
             its own box, so a row below can be checked against them. */}
         <div>
-          <div className={sectionLabel}>Stream</div>
+          <div className="flex items-center justify-between gap-2 mb-1 min-h-[22px]">
+            <div className={sectionLabel}><Radio size={11} /> Stream item</div>
+            {nav && (
+              <StreamNavButtons
+                current={nav.current}
+                folders={nav.folders}
+                prevStream={nav.prevStream}
+                nextStream={nav.nextStream}
+                onPickStream={nav.onPickStream}
+                series={nav.series}
+                onPickEpisode={nav.onPickEpisode}
+                variant="player"
+              />
+            )}
+          </div>
           <div className="rounded-lg border border-white/10 bg-navy-900 overflow-hidden">
             <div className="flex items-stretch h-16">
               <div className="self-stretch aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
@@ -208,7 +262,10 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, items, currentId
         </div>
         {current && (
           <div>
-            <div className={sectionLabel}>{kind === 'video' ? 'Linked video' : 'Linked broadcast'}</div>
+            <div className={`${sectionLabel} mb-1 min-h-[22px]`}>
+              <LucideYoutube size={11} className="text-red-400/70" />
+              {kind === 'video' ? 'Linked YouTube video' : 'Linked YouTube broadcast'}
+            </div>
             <div className="rounded-lg border border-white/10 bg-navy-900 overflow-hidden">
               {renderRow(current, true)}
             </div>

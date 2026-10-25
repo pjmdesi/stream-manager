@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'
-import { Film, Lock, Globe, Link as LinkIcon } from 'lucide-react'
+import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { TruncatedText } from '../ui/TruncatedText'
 import { formatScheduledTime } from '../../lib/formatScheduledTime'
@@ -37,11 +37,18 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
       <RowThumb url={broadcast?.snippet?.thumbnailUrl} locked={privacy === 'private'} onFailed={onThumbFailed} />
       <div className="flex-1 min-w-0 px-3 flex flex-col justify-center gap-0.5">
         <TruncatedText text={title} className={`truncate text-xs ${broadcast ? 'text-gray-200' : 'text-gray-400'}`} />
-        <div className="h-[14px] flex items-center gap-2 text-[10px] text-gray-400 whitespace-nowrap">
-          {when && <span className="tabular-nums">{when}</span>}
+        <div className="h-[14px] flex items-center gap-2 text-[10px] text-gray-400 whitespace-nowrap overflow-hidden">
+          {when && <span className="tabular-nums shrink-0">{when}</span>}
           {PrivacyIcon && privacyLabel && (
-            <span className="inline-flex items-center gap-1"><PrivacyIcon size={10} /> {privacyLabel}</span>
+            <span className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>
           )}
+          {broadcast?.isLivestream != null && (
+            <span className="inline-flex items-center gap-1 shrink-0">
+              {broadcast.isLivestream ? <Radio size={10} /> : <Upload size={10} />}
+              {broadcast.isLivestream ? 'Livestream' : 'Upload'}
+            </span>
+          )}
+          {broadcast && <span className="font-mono truncate">{broadcast.id}</span>}
         </div>
         {chips && (
           // leading-none: a chip is its text plus padding and border, so

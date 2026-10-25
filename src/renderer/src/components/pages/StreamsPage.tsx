@@ -8700,7 +8700,7 @@ function SidebarDetail({
             <div className="flex items-center justify-between gap-2">
               <span className="text-[10px] uppercase tracking-wide text-gray-200 flex items-center gap-1.5">
                 <LucideYoutube size={11} className="text-red-400/70" />
-                {isPastStream ? 'Linked video' : 'Linked broadcast'}
+                {isPastStream ? 'Linked YouTube video' : 'Linked YouTube broadcast'}
               </span>
               <div className="flex items-center gap-2">
                 {/* Pull info from YouTube — only when there's actually a
@@ -8747,6 +8747,33 @@ function SidebarDetail({
                     </button>
                   </Tooltip>
                 )}
+                {/* Link / Change and Unlink live on this row, out of the
+                    item's box: inside it they covered the title at the
+                    sidebar's narrowest width. */}
+                <Tooltip content="Picking is disabled while the YouTube quota is exhausted." open={quotaExceeded ? undefined : false}>
+                  <button
+                    type="button"
+                    disabled={quotaExceeded || (!isPastStream && ytBroadcastsLoading)}
+                    onClick={() => {
+                      if (isPastStream) onLoadAllVods()
+                      setLinkPickerOpen(true)
+                    }}
+                    className="text-[10px] text-gray-400 hover:text-gray-200 transition-colors flex items-center gap-1 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400"
+                  >
+                    <Link2 size={11} /> {linkedId ? 'Change' : (isPastStream ? 'Link a video' : 'Link a broadcast')}
+                  </button>
+                </Tooltip>
+                {linkedId && (
+                  <Tooltip content={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'}>
+                    <button
+                      type="button"
+                      onClick={() => onUpdateMeta({ ytVideoId: '' })}
+                      className="text-[10px] text-red-400 hover:text-red-300 transition-colors flex items-center gap-1"
+                    >
+                      <Unlink size={11} /> Unlink
+                    </button>
+                  </Tooltip>
+                )}
               </div>
             </div>
             {linkedVideoMissing && (
@@ -8786,39 +8813,58 @@ function SidebarDetail({
                   },
                   status: { lifeCycleStatus: '', privacyStatus: '' },
                 } : null)}
-                actions={
-                  <>
-                    <Tooltip content="Picking is disabled while the YouTube quota is exhausted." open={quotaExceeded ? undefined : false} triggerClassName="shrink-0">
-                      <Button
-                        size="sm"
-                        disabled={quotaExceeded || (!isPastStream && ytBroadcastsLoading)}
-                        onClick={() => {
-                          if (isPastStream) onLoadAllVods()
-                          setLinkPickerOpen(true)
-                        }}
-                      >
-                        {linkedId ? 'Change' : 'Link'}
-                      </Button>
-                    </Tooltip>
-                    {/* Unlink sits with Change, as the red icon button,
-                        so the link's two actions share one spot. */}
-                    {linkedId && (
-                      <Tooltip content={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'} triggerClassName="shrink-0 flex">
-                        <Button
-                          size="sm"
-                          variant="danger"
-                          // An icon's line box is shorter than text; the
-                          // button takes Change's height.
-                          className="px-2 h-[30px]"
-                          icon={<Unlink size={13} />}
-                          aria-label={isPastStream ? 'Unlink this video' : 'Unlink this broadcast'}
-                          onClick={() => onUpdateMeta({ ytVideoId: '' })}
-                        />
-                      </Tooltip>
-                    )}
-                  </>
-                }
               />
+              {/* Time + Privacy row for the linked state. Mirrors the
+                  unlinked Create-broadcast row so the only difference
+                  between the two states' editable controls is the
+                  trailing button (Copy URL here vs Create broadcast over
+                  there). Time is suppressed for past / live broadcasts —
+                  YouTube rejects schedule edits once a broadcast has
+                  started or finished. Edits stage in meta; the Push to
+                  YouTube button picks them up. */}
+              {linkedId && !linkedVideoMissing && (
+                // Render as soon as the stream is linked (linkedId is local) and
+                // disable until the broadcast/VOD detail resolves, so the field
+                // reserves its space instead of popping in and shoving the
+                // footer once the async lookup lands. Hidden entirely when the
+                // linked video no longer exists — otherwise it sits on
+                // "Loading…" forever (the lookup can never resolve).
+                <div className="border-t border-white/5 px-2 py-1.5">
+                <BroadcastTimePrivacyRow
+                  showTime={isUpcomingBroadcast}
+                  date={folder.date}
+                  onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
+                  dateMismatch={broadcastMismatches.get('date')}
+                  time={displayedScheduledTime}
+                  onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
+                  timeMismatch={broadcastMismatches.get('scheduledTime')}
+                  timeInvalid={stagedScheduleInPast}
+                  privacy={displayedPrivacy ?? 'private'}
+                  onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
+                  privacyMismatch={broadcastMismatches.get('privacy')}
+                  disabled={!selectedBroadcast}
+                  privacyLoading={!displayedPrivacy}
+                  trailing={
+                    <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!selectedBroadcast) return
+                          try {
+                            await navigator.clipboard.writeText(`https://youtu.be/${selectedBroadcast.id}`)
+                            setCopiedUrl(true)
+                            setTimeout(() => setCopiedUrl(false), 1500)
+                          } catch { /* clipboard refused — ignore */ }
+                        }}
+                        className="p-1.5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors shrink-0"
+                      >
+                        {copiedUrl ? <Check size={14} className="text-green-400" /> : <Link2 size={14} />}
+                      </button>
+                    </Tooltip>
+                  }
+                />
+                </div>
+              )}
             </div>
             {quotaExceeded && !selectedBroadcast && linkedId && (
               <p className="mt-1 text-[10px] text-gray-400 italic">Cached — refresh blocked while YouTube quota is exhausted</p>
@@ -8832,6 +8878,15 @@ function SidebarDetail({
                 date: folder.date,
                 thumbPath: resolveStreamThumb(folder),
                 thumbsKey,
+              }}
+              nav={{
+                current: folder,
+                folders,
+                prevStream,
+                nextStream,
+                onPickStream,
+                series: { prev: prevEpisode, next: nextEpisode, siblings: seriesEpisodes },
+                onPickEpisode,
               }}
               items={broadcastPool}
               currentId={linkedId}
@@ -8950,55 +9005,6 @@ function SidebarDetail({
               </>
             )}
 
-            {/* Time + Privacy row for the linked state. Mirrors the
-                unlinked Create-broadcast row so the only difference
-                between the two states' editable controls is the
-                trailing button (Copy URL here vs Create broadcast over
-                there). Time is suppressed for past / live broadcasts —
-                YouTube rejects schedule edits once a broadcast has
-                started or finished. Edits stage in meta; the Push to
-                YouTube button picks them up. */}
-            {linkedId && !linkedVideoMissing && (
-              // Render as soon as the stream is linked (linkedId is local) and
-              // disable until the broadcast/VOD detail resolves, so the field
-              // reserves its space instead of popping in and shoving the
-              // footer once the async lookup lands. Hidden entirely when the
-              // linked video no longer exists — otherwise it sits on
-              // "Loading…" forever (the lookup can never resolve).
-              <BroadcastTimePrivacyRow
-                showTime={isUpcomingBroadcast}
-                date={folder.date}
-                onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
-                dateMismatch={broadcastMismatches.get('date')}
-                time={displayedScheduledTime}
-                onTimeChange={v => onUpdateMeta({ scheduledTime: v || undefined })}
-                timeMismatch={broadcastMismatches.get('scheduledTime')}
-                timeInvalid={stagedScheduleInPast}
-                privacy={displayedPrivacy ?? 'private'}
-                onPrivacyChange={v => onUpdateMeta({ ytPrivacyStatus: v })}
-                privacyMismatch={broadcastMismatches.get('privacy')}
-                disabled={!selectedBroadcast}
-                privacyLoading={!displayedPrivacy}
-                trailing={
-                  <Tooltip content={copiedUrl ? 'Copied!' : 'Copy broadcast URL'} side="bottom">
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!selectedBroadcast) return
-                        try {
-                          await navigator.clipboard.writeText(`https://youtu.be/${selectedBroadcast.id}`)
-                          setCopiedUrl(true)
-                          setTimeout(() => setCopiedUrl(false), 1500)
-                        } catch { /* clipboard refused — ignore */ }
-                      }}
-                      className="p-1.5 rounded text-gray-400 hover:bg-white/10 hover:text-gray-200 transition-colors shrink-0"
-                    >
-                      {copiedUrl ? <Check size={14} className="text-green-400" /> : <Link2 size={14} />}
-                    </button>
-                  </Tooltip>
-                }
-              />
-            )}
 
             {/* Staged-time sanity warning. A start time that has already
                 passed can never be pushed (YouTube rejects it), so say

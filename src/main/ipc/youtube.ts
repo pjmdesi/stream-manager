@@ -41,8 +41,8 @@ const ytVodCache = new Store<{ items: LiveBroadcast[]; fetchedAt: number | null;
   defaults: { items: [], fetchedAt: null, version: 0 },
 })
 /** Bumped when the cached shape changes; an older cache is walked again.
- *  2: row-sized thumbnail URLs. */
-const VOD_CACHE_VERSION = 2
+ *  2: row-sized thumbnail URLs. 3: isLivestream on every entry. */
+const VOD_CACHE_VERSION = 3
 
 /** A sync already running for a mode; a second caller shares its result
  *  instead of paging the channel twice. */
