@@ -116,12 +116,16 @@ export function StreamNavButtons({
       </button>
     </Tooltip>
   )
-  const pickerBtn = showPicker && (
-    <Tooltip content="Jump to episode…" side={v.side}>
+  // Always drawn too, for the same reason as the episode pair: a button
+  // that comes and goes between streams moves every button after it
+  // (and, in a right-aligned group, the ones before it as well).
+  const pickerBtn = (
+    <Tooltip content={showPicker ? 'Jump to episode…' : 'No episodes to jump to'} side={v.side}>
       <button
         ref={anchorRef}
         type="button"
         onClick={() => setPickerOpen(o => !o)}
+        disabled={!showPicker}
         className={`${btnCls} ${pickerOpen ? 'bg-white/10 text-gray-200' : ''}`}
         aria-label="Jump to episode"
       >

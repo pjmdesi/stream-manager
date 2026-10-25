@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload } from 'lucide-react'
+import React, { useEffect, useRef, useState } from 'react'
+import { Film, Lock, Globe, Link as LinkIcon, Radio, Upload, Copy, Check } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { TruncatedText } from '../ui/TruncatedText'
 import { Tooltip } from '../ui/Tooltip'
@@ -12,7 +12,7 @@ import { formatDateOnly } from '../ui/BroadcastPicker'
  *  on one line, the date and privacy on the next, and a third line for
  *  chips when the row has any; the lines sit centered in the row either
  *  way. */
-export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '', onOpenWatch, onOpenStudio }: {
+export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFailed, placeholderTitle, className = '', links }: {
   broadcast: LiveBroadcast | null
   kind: 'video' | 'broadcast'
   /** The third line; left out when nothing is passed. */
@@ -25,11 +25,10 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   /** The title shown when there is no broadcast (an unlinked footer). */
   placeholderTitle?: string
   className?: string
-  /** When given, the id on the second line opens the video on YouTube
-   *  and the privacy opens it in Studio. Only for a row that is not
-   *  itself a button. */
-  onOpenWatch?: () => void
-  onOpenStudio?: () => void
+  /** When given, the privacy on the second line opens the video on
+   *  YouTube and the id opens it in Studio, each with a copy icon beside
+   *  it. Only for a row that is not itself a button. */
+  links?: { watchUrl: string; studioUrl: string }
 }) {
   const title = broadcast ? (broadcast.snippet?.title?.trim() || `Untitled ${kind}`) : (placeholderTitle ?? '')
   const start = broadcast?.snippet?.actualStartTime ?? broadcast?.snippet?.scheduledStartTime ?? ''
@@ -39,7 +38,8 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   const privacyLabel = privacy === 'public' ? 'Public' : privacy === 'unlisted' ? 'Unlisted' : privacy === 'private' ? 'Private' : null
 
   // The second line: date, kind, privacy, id, with a dot between them.
-  // The privacy and the id are links in the footer, text in the picker.
+  // In the footer the privacy is the video's link and the id is its
+  // Studio link, each with a copy icon; in the picker they are text.
   const linkCls = 'hover:text-gray-200 hover:underline underline-offset-2 transition-colors'
   const meta: React.ReactNode[] = []
   if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
@@ -52,22 +52,28 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
     )
   }
   if (PrivacyIcon && privacyLabel) {
-    meta.push(onOpenStudio
+    meta.push(links
       ? (
-        <Tooltip key="privacy" content="Open in YouTube Studio" side="top" triggerClassName="inline-flex shrink-0">
-          <button type="button" onClick={onOpenStudio} className={`inline-flex items-center gap-1 ${linkCls}`}>
-            <PrivacyIcon size={10} /> {privacyLabel}
-          </button>
-        </Tooltip>
+        <span key="privacy" className="inline-flex items-center gap-1 shrink-0">
+          <Tooltip content="Open on YouTube" side="top" triggerClassName="inline-flex">
+            <button type="button" onClick={() => { void window.api.openUrl(links.watchUrl) }} className={`inline-flex items-center gap-1 ${linkCls}`}>
+              <PrivacyIcon size={10} /> {privacyLabel}
+            </button>
+          </Tooltip>
+          <InlineCopy url={links.watchUrl} label="Copy video link" />
+        </span>
       )
       : <span key="privacy" className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>)
   }
   if (broadcast) {
-    meta.push(onOpenWatch
+    meta.push(links
       ? (
-        <Tooltip key="id" content="Open on YouTube" side="top" triggerClassName="inline-flex min-w-0">
-          <button type="button" onClick={onOpenWatch} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
-        </Tooltip>
+        <span key="id" className="inline-flex items-center gap-1 min-w-0">
+          <Tooltip content="Open in YouTube Studio" side="top" triggerClassName="inline-flex min-w-0">
+            <button type="button" onClick={() => { void window.api.openUrl(links.studioUrl) }} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
+          </Tooltip>
+          <InlineCopy url={links.studioUrl} label="Copy Studio link" />
+        </span>
       )
       : <span key="id" className="font-mono truncate">{broadcast.id}</span>)
   }
@@ -75,9 +81,11 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   const body = (
     <>
       <RowThumb url={broadcast?.snippet?.thumbnailUrl} locked={privacy === 'private'} onFailed={onThumbFailed} />
-      <div className="flex-1 min-w-0 px-3 flex flex-col justify-center gap-0.5">
+      <div className="flex-1 min-w-0 px-3 py-1 flex flex-col justify-center gap-0.5">
         <TruncatedText text={title} className={`truncate text-xs ${broadcast ? 'text-gray-200' : 'text-gray-400'}`} />
-        <div className="h-[14px] flex items-center gap-1.5 text-[10px] text-gray-400 whitespace-nowrap overflow-hidden">
+        {/* Wraps when the row is narrow (the sidebar at its narrowest);
+            the row grows with it and the thumbnail keeps its size. */}
+        <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-gray-400 leading-[14px]">
           {meta.map((item, i) => (
             <React.Fragment key={i}>
               {i > 0 && <span className="shrink-0 select-none" aria-hidden>•</span>}
@@ -97,12 +105,39 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   )
 
   return (
-    <div className={`flex items-stretch h-16 ${className}`}>
+    <div className={`flex items-stretch min-h-16 ${className}`}>
       {onClick
         ? <button type="button" onClick={onClick} className="flex flex-1 min-w-0 items-stretch text-left">{body}</button>
         : <div className="flex flex-1 min-w-0 items-stretch">{body}</div>}
       {actions && <div className="flex items-center gap-1.5 pe-2 shrink-0">{actions}</div>}
     </div>
+  )
+}
+
+/** A copy icon the size of the meta line's text, with a check for a
+ *  moment after the copy. */
+function InlineCopy({ url, label }: { url: string; label: string }) {
+  const [copied, setCopied] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current) }, [])
+  return (
+    <Tooltip content={copied ? 'Copied!' : label} side="top" triggerClassName="inline-flex">
+      <button
+        type="button"
+        aria-label={label}
+        onClick={async () => {
+          try {
+            await navigator.clipboard.writeText(url)
+            setCopied(true)
+            if (timer.current) clearTimeout(timer.current)
+            timer.current = setTimeout(() => setCopied(false), 1500)
+          } catch { /* clipboard refused */ }
+        }}
+        className="inline-flex text-gray-400 hover:text-gray-200 transition-colors"
+      >
+        {copied ? <Check size={10} className="text-green-400" /> : <Copy size={10} />}
+      </button>
+    </Tooltip>
   )
 }
 
@@ -137,7 +172,7 @@ function RowThumb({ url, locked, onFailed }: { url?: string; locked?: boolean; o
   const [failed, setFailed] = useState(false)
   useEffect(() => { setFailed(false) }, [url])
   return (
-    <div className="self-stretch aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
+    <div className="h-16 self-start aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
       {url && !failed
         ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => { setFailed(true); onFailed?.() }} />
         : locked ? <Lock size={14} /> : <Film size={14} />}

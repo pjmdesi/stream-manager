@@ -42,9 +42,8 @@ import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types
 import { BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
 import { VideoRow } from '../streams/VideoRow'
-import { CopyLinkButton } from '../ui/CopyLinkButton'
 import { TogglePill } from '../ui/TogglePill'
-import { Globe, Lock, Link as LinkIcon, Link2, Unlink, Copy } from 'lucide-react'
+import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
 import { getTagColor, getTagTextureStyle } from '../../constants/tagColors'
 import { videoMapKey, streamMetaKey } from '../../lib/videoMapKey'
@@ -8797,8 +8796,10 @@ function SidebarDetail({
               <VideoRow
                 kind={isPastStream ? 'video' : 'broadcast'}
                 placeholderTitle="No linked video or broadcast"
-                onOpenWatch={linkedId ? () => { void window.api.openUrl(`https://youtu.be/${linkedId}`) } : undefined}
-                onOpenStudio={linkedId ? () => { void window.api.openUrl(`https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`) } : undefined}
+                links={linkedId ? {
+                  watchUrl: `https://youtu.be/${linkedId}`,
+                  studioUrl: `https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`,
+                } : undefined}
                 broadcast={selectedBroadcast ?? (linkedId ? {
                   id: linkedId,
                   snippet: {
@@ -8831,8 +8832,9 @@ function SidebarDetail({
                 // footer once the async lookup lands. Hidden entirely when the
                 // linked video no longer exists — otherwise it sits on
                 // "Loading…" forever (the lookup can never resolve).
-                <div className="border-t border-white/5 px-2 py-1.5">
+                <div className="border-t border-white/5">
                 <BroadcastTimePrivacyRow
+                  flush
                   showTime={isUpcomingBroadcast}
                   date={folder.date}
                   onDateClick={() => onReschedule(broadcastMismatches.get('date'))}
@@ -8846,12 +8848,6 @@ function SidebarDetail({
                   privacyMismatch={broadcastMismatches.get('privacy')}
                   disabled={!selectedBroadcast}
                   privacyLoading={!displayedPrivacy}
-                  trailing={
-                    <>
-                      <CopyLinkButton url={`https://youtu.be/${linkedId}`} label="Copy video link" icon={<Copy size={12} />} text="Link" disabled={!selectedBroadcast} />
-                      <CopyLinkButton url={`https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`} label="Copy Studio link" icon={<Copy size={12} />} text="Studio" disabled={!selectedBroadcast} />
-                    </>
-                  }
                 />
                 </div>
               )}
@@ -10190,7 +10186,7 @@ function BroadcastTimePrivacyRow({
   time, onTimeChange, timeMismatch, timeInvalid, showTime = true,
   privacy, onPrivacyChange, privacyMismatch,
   disabled, privacyLoading,
-  trailing,
+  trailing, flush = false,
 }: {
   /** Stream date as the lockup's FIRST segment — a button opening the
    *  same reschedule modal as the header's date button. Deliberately
@@ -10214,9 +10210,12 @@ function BroadcastTimePrivacyRow({
   /** True while the real privacy value is still resolving — the
    *  segments wait, dimmed, instead of showing a possibly-wrong value. */
   privacyLoading?: boolean
-  /** Controls in the lockup's last segment: the copy-link buttons for a
-   *  linked item, Create broadcast for an unlinked future one. */
+  /** Controls in the lockup's last segment: Create broadcast for an
+   *  unlinked future stream. */
   trailing?: React.ReactNode
+  /** Inside the linked item's box: no border or rounding of its own,
+   *  the lockup spans the box and the label sits inside its edge. */
+  flush?: boolean
 }) {
   // Same dot palette + tooltip copy as MetaRow. Kept inline here rather
   // than imported from MetaRow because MetaRow's render shape (label +
@@ -10242,9 +10241,11 @@ function BroadcastTimePrivacyRow({
   // (text-xs plus py-1.5 plus the border, the other inputs' height).
   const segment = 'flex items-center gap-1 px-2 border-r border-white/10'
   return (
-    <div className="flex flex-col gap-1 min-w-0">
-      <span className="text-[10px] uppercase tracking-wide text-gray-400">Broadcast options</span>
-      <div className="flex items-stretch max-w-full h-[30px] bg-navy-900/70 border border-white/10 rounded-lg overflow-hidden">
+    <div className={`flex flex-col gap-1 min-w-0 ${flush ? 'pt-1.5' : ''}`}>
+      <span className={`text-[10px] uppercase tracking-wide text-gray-400 ${flush ? 'px-2' : ''}`}>Broadcast options</span>
+      <div className={`flex items-stretch max-w-full h-[30px] bg-navy-900/70 overflow-hidden ${
+        flush ? 'border-t border-white/10' : 'border border-white/10 rounded-lg'
+      }`}>
         {showTime && date && onDateClick && (
           <Tooltip content={<div>Reschedule stream<DateTooltipCalendar streamDate={date} /></div>} side="top" triggerClassName="flex">
             <button
