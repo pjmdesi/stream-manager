@@ -8899,12 +8899,31 @@ function SidebarDetail({
               isOpen={linkPickerOpen}
               onClose={() => setLinkPickerOpen(false)}
               kind={isPastStream ? 'video' : 'broadcast'}
-              stream={{
-                title: renderStreamTitle(folder, folders) || folder.folderName,
-                date: folder.date,
-                thumbPath: resolveStreamThumb(folder),
-                thumbsKey,
-              }}
+              stream={(() => {
+                // The primary recording for the best-match scorer: the
+                // largest full-length video the scan has classified, else
+                // the first video, else nothing.
+                const map = folder.meta?.videoMap
+                let recording: { path: string; duration?: number } | null = null
+                let recordingSize = -1
+                for (const v of folder.videos) {
+                  const entry = map?.[videoMapKey(folder.folderPath, v)]
+                  if (entry?.category !== 'full') continue
+                  if (entry.size > recordingSize) { recording = { path: v, duration: entry.duration }; recordingSize = entry.size }
+                }
+                if (!recording && folder.videos[0]) {
+                  recording = { path: folder.videos[0], duration: map?.[videoMapKey(folder.folderPath, folder.videos[0])]?.duration }
+                }
+                return {
+                  title: renderStreamTitle(folder, folders) || folder.folderName,
+                  date: folder.date,
+                  thumbPath: resolveStreamThumb(folder),
+                  thumbsKey,
+                  recordingName: recording ? (recording.path.split(/[\\/]/).pop() ?? null) : null,
+                  recordingDurationSec: recording?.duration ?? null,
+                  tags: meta?.ytTags ?? [],
+                }
+              })()}
               nav={{
                 current: folder,
                 folders,

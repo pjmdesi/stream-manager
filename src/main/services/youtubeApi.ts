@@ -175,6 +175,12 @@ export interface LiveBroadcast {
    *  anything from the liveBroadcasts resource; read off the video
    *  resource's liveStreamingDetails for lookups by id. */
   isLivestream?: boolean
+  /** The video's length, from the extras lookup, for matching it to a
+   *  stream's recording (STR-42). */
+  durationSec?: number
+  /** The name of the file that was uploaded, which the API shows the
+   *  video's owner; the strongest match signal. */
+  fileName?: string
 }
 
 /** A liveBroadcasts list item in the app's shape: the typed fields only,
@@ -608,24 +614,37 @@ async function fetchVideoExtras(
   ids: string[],
   clientId: string,
   clientSecret: string
-): Promise<Map<string, { tags?: string[]; categoryId?: string }>> {
+): Promise<Map<string, VideoExtras>> {
   if (ids.length === 0) return new Map()
-  const map = new Map<string, { tags?: string[]; categoryId?: string }>()
+  const map = new Map<string, VideoExtras>()
   for (let i = 0; i < ids.length; i += 50) {
     const chunk = ids.slice(i, i + 50)
+    // contentDetails for the length and fileDetails for the uploaded
+    // file's name (shown to the owner only), both for matching a video
+    // to a stream's recording (STR-42); the same one unit per 50 ids.
     const data = await ytRequest(
-      `/videos?${new URLSearchParams({ part: 'snippet', id: chunk.join(','), maxResults: '50' })}`,
+      `/videos?${new URLSearchParams({ part: 'snippet,contentDetails,fileDetails', id: chunk.join(','), maxResults: '50' })}`,
       { method: 'GET' },
       clientId, clientSecret
     )
     for (const item of (data?.items ?? [])) {
-      const extras: { tags?: string[]; categoryId?: string } = {}
+      const extras: VideoExtras = {}
       if (item.snippet?.tags?.length) extras.tags = item.snippet.tags
       if (item.snippet?.categoryId) extras.categoryId = String(item.snippet.categoryId)
-      if (extras.tags || extras.categoryId) map.set(item.id, extras)
+      const durationSec = parseIsoDuration(item.contentDetails?.duration)
+      if (durationSec) extras.durationSec = durationSec
+      if (item.fileDetails?.fileName) extras.fileName = String(item.fileDetails.fileName)
+      if (Object.keys(extras).length > 0) map.set(item.id, extras)
     }
   }
   return map
+}
+
+interface VideoExtras {
+  tags?: string[]
+  categoryId?: string
+  durationSec?: number
+  fileName?: string
 }
 
 /** Fetch the authenticated user's completed (past) live broadcasts, sorted newest-first.
@@ -690,6 +709,8 @@ export async function hydrateVideoExtras(
     const extras = extrasMap.get(b.id)
     if (extras?.tags) b.snippet.tags = extras.tags
     if (extras?.categoryId) b.snippet.categoryId = extras.categoryId
+    if (extras?.durationSec) b.durationSec = extras.durationSec
+    if (extras?.fileName) b.fileName = extras.fileName
   }
 }
 

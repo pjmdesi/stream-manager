@@ -618,6 +618,11 @@ export interface LiveBroadcast {
   /** A livestream (or its recording) rather than an upload; absent when
    *  the record did not say. */
   isLivestream?: boolean
+  /** The video's length and the name of the file that was uploaded,
+   *  from the cache walk's extras lookup, for matching it to a stream's
+   *  recording (STR-42). */
+  durationSec?: number
+  fileName?: string
   /** Renderer only: the entry came from the on-disk VOD cache (STR-39),
    *  good enough to list and pick, not to compare against local meta. A
    *  lookup by id replaces it with a fresh one. */

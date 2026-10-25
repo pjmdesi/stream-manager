@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { Search, Loader2, AlertTriangle, Link2, Radio, ImageOff } from 'lucide-react'
+import { Search, Loader2, AlertTriangle, Link2, Radio, ImageOff, Sparkle } from 'lucide-react'
 import { Youtube as LucideYoutube } from '../ui/BrandIcons'
 import type { LiveBroadcast, StreamFolder } from '../../types'
+import { bestVideoMatch } from '../../lib/videoMatch'
 import { StreamNavButtons } from './StreamNavButtons'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -24,13 +25,17 @@ export interface VodListState {
 }
 
 /** The stream item the modal was opened for, drawn at the top so a row
- *  can be compared against it. */
+ *  can be compared against it, and what the best-match scorer reads. */
 export interface LinkModalStream {
   title: string
   /** The folder date, YYYY-MM-DD. */
   date: string
   thumbPath: string | null
   thumbsKey: number
+  /** The primary recording's file name and length, for the scorer. */
+  recordingName: string | null
+  recordingDurationSec: number | null
+  tags: string[]
 }
 
 /** What the stream nav needs, the same set the sidebar header passes
@@ -127,7 +132,15 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
   // The current link sits in its own box above the list whatever the
   // search says, so the comparison it is there for never scrolls away.
   const current = currentId ? items.find(b => b.id === currentId) ?? null : null
-  const visible = items.filter(b => b.id !== currentId && matches(b) && (showLinked || !isLinkedElsewhere(b)))
+  // The best match (STR-42), for an unlinked stream only: scored against
+  // the videos no other stream owns, shown first and nowhere else.
+  const best = useMemo(() => {
+    if (currentId) return null
+    const candidates = items.filter(b => !linkMap.has(b.id))
+    return bestVideoMatch(stream, candidates)
+  }, [currentId, items, linkMap, stream])
+  const bestVideo = best ? items.find(b => b.id === best.id) ?? null : null
+  const visible = items.filter(b => b.id !== currentId && b.id !== best?.id && matches(b) && (showLinked || !isLinkedElsewhere(b)))
   const newSet = new Set(state.newIds)
 
   const close = () => { setQuery(''); setShowLinked(false); onClose() }
@@ -161,7 +174,7 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
 
   const emptyLine = (() => {
     if (state.phase === 'loading' && items.length === 0) return null
-    if (visible.length > 0) return null
+    if (visible.length > 0 || bestVideo) return null
     if (words.length > 0) return `No ${noun}s match.`
     if (linkedCount > 0) return `Every ${noun} is linked to another stream.`
     if (current) return `No other ${noun}s on your channel.`
@@ -172,8 +185,9 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
     const links = linkMap.get(b.id) ?? []
     const isNew = newSet.has(b.id)
     const isDefaultBroadcast = kind === 'broadcast' && !b.snippet?.scheduledStartTime
+    const isBest = !!best && b.id === best.id
     // The current link needs no chip of its own: its box says what it is.
-    const hasChips = isNew || isDefaultBroadcast || links.length > 0
+    const hasChips = isBest || isNew || isDefaultBroadcast || links.length > 0
     // The row's own links (the footer's design): the privacy opens the
     // video, the id opens Studio's edit page for a video or the live
     // control room for a broadcast that has not happened yet.
@@ -192,6 +206,12 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
         className={`transition-colors hover:bg-white/5 ${boxed ? 'bg-white/5' : 'border-b border-white/5'}`}
         chips={hasChips ? (
           <>
+            {isBest && (
+              <>
+                <RowChip tone="accent" icon={<Sparkle size={9} />}>Best match</RowChip>
+                {best!.reasons.map(r => <RowChip key={r} tone="gray">{r}</RowChip>)}
+              </>
+            )}
             {isNew && <RowChip tone="accent">New</RowChip>}
             {isDefaultBroadcast && <RowChip tone="gray" icon={<Radio size={9} />}>Default livestream</RowChip>}
             {links.length > 0 && (
@@ -289,8 +309,10 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
               />
             )}
           </div>
-          {/* Fixed-height list: the modal keeps its size while pages land. */}
+          {/* Fixed-height list: the modal keeps its size while pages land.
+              The best match leads it, whatever the search says. */}
           <div className="h-[50vh] overflow-y-auto rounded-lg border border-white/10 bg-navy-900">
+            {bestVideo && renderRow(bestVideo, false)}
             {visible.map(b => renderRow(b, false))}
             {emptyLine && (
               <p className="px-3 py-6 text-xs text-gray-400 italic text-center">{emptyLine}</p>

@@ -227,6 +227,7 @@
 
 - **STR-42** [impact:3]
   Update 2026-10-23: STR-39 replaced the dropdown with a modal picker, so the recommended entry goes at the top of the modal's list, under its status line, instead of the bottom of a menu; the typed filter from STR-43 is the modal's search field.
+  Decision 2026-10-25: shown for unlinked streams only, one best match. Built 2026-10-25, awaiting review.
   Linked Video dropdown: a recommended entry at the bottom of the menu (nearest the cursor, since the menu opens upward), SM's best guess at the video the user is about to link, with a marker and the reason beside it ("matches file name", "same length"). Split from STR-39 (its item 2 has the original wording). The scorer compares the stream item with each unlinked video and is the same matcher STR-34's automatic link-back needs, so it is built once as a shared function and used here first. Signals, strongest first: the uploaded file name (the API's `fileDetails` part exposes it to the video's owner; confirm on current docs at design time), duration against the stream's primary recording, the resolved title against the YouTube title, tags, and date proximity last as a weak tiebreaker (edited versions go up months later). Marker: the single Sparkle icon (decided 2026-10-12; not the plural Sparkles, and not the star, which means "pick as primary" in the nav and launcher and toggles on click), with a short "Best match" label beside it. Filed 2026-10-12.
 
 - **STR-43** [ui] [impact:3] [blocked:STR-42] [done]
