@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { Search, Loader2, AlertTriangle, Link2, Check, Radio, Film, Globe, Lock, Link as LinkIcon, ExternalLink } from 'lucide-react'
 import type { LiveBroadcast } from '../../types'
 import { Modal } from '../ui/Modal'
@@ -34,19 +34,23 @@ interface LinkVideoModalProps {
   otherFolderLinks: BroadcastLinkRef[]
   state: VodListState
   onPick: (id: string) => void
+  /** A row's thumbnail did not load. Private videos get signed, expiring
+   *  thumbnail URLs, so the owner can fetch the record again for a fresh
+   *  one; the row shows the placeholder meanwhile. */
+  onThumbFailed?: (id: string) => void
 }
 
 /**
  * The link picker (STR-39): a modal in place of the sidebar's drop-up. A
  * search field, rows of one height with the thumbnail flush to the row's
- * edges, the title, date and privacy, the current link pinned at the top
- * of the list so it stays in view for comparison, and videos already
+ * edges, the title, date and privacy, the current link in its own box
+ * above the list so it stays in view for comparison, and videos already
  * linked to another stream left out until the filter pill above the
  * list says otherwise. Rows never move once shown: the list has a fixed
  * height, a status line of fixed height sits above it, and new videos
  * land under that line, at the top, where the one you came for is.
  */
-export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherFolderLinks, state, onPick }: LinkVideoModalProps) {
+export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
   const [showLinked, setShowLinked] = useState(false)
   const noun = kind === 'video' ? 'video' : 'broadcast'
@@ -71,8 +75,8 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
   // filter pill asks for them.
   const isLinkedElsewhere = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
   const linkedCount = items.filter(b => isLinkedElsewhere(b) && matches(b)).length
-  // The current link is pinned above the list whatever the search says,
-  // so the comparison it is there for never scrolls away.
+  // The current link sits in its own box above the list whatever the
+  // search says, so the comparison it is there for never scrolls away.
   const current = currentId ? items.find(b => b.id === currentId) ?? null : null
   const visible = items.filter(b => b.id !== currentId && matches(b) && (showLinked || !isLinkedElsewhere(b)))
   const newSet = new Set(state.newIds)
@@ -127,19 +131,25 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
     // Studio's edit page for a video; the live control room for a
     // broadcast that has not happened yet.
     const studioUrl = `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`
+    // The hover tint belongs to the whole row, Studio button included,
+    // so the row reads as one thing under the pointer.
     return (
       <div
         key={b.id}
-        className={`flex items-stretch h-16 border-b border-white/5 ${
-          pinned ? 'sticky top-0 z-10 bg-navy-800 border-b-white/10' : isCurrent ? 'bg-white/10' : ''
+        className={`flex items-stretch h-16 transition-colors hover:bg-white/5 ${
+          pinned ? 'bg-white/5' : 'border-b border-white/5'
         }`}
       >
         <button
           type="button"
           onClick={() => pick(b.id)}
-          className="flex flex-1 min-w-0 items-stretch text-left transition-colors hover:bg-white/5"
+          className="flex flex-1 min-w-0 items-stretch text-left"
         >
-          <RowThumb url={b.snippet?.thumbnailUrl} />
+          <RowThumb
+            url={b.snippet?.thumbnailUrl}
+            locked={privacy === 'private'}
+            onFailed={onThumbFailed ? () => onThumbFailed(b.id) : undefined}
+          />
           <div className="flex-1 min-w-0 px-3 flex flex-col justify-center gap-1">
             <TruncatedText text={title} className="truncate text-xs text-gray-200" />
             <div className="flex items-center gap-2 min-w-0 overflow-hidden whitespace-nowrap text-[10px] text-gray-400">
@@ -219,9 +229,14 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
             />
           )}
         </div>
+        {/* The current link, boxed apart from the list and always in view. */}
+        {current && (
+          <div className="rounded-lg border border-white/10 bg-navy-900 overflow-hidden">
+            {renderRow(current, true)}
+          </div>
+        )}
         {/* Fixed-height list: the modal keeps its size while pages land. */}
         <div className="h-[55vh] overflow-y-auto rounded-lg border border-white/10 bg-navy-900">
-          {current && renderRow(current, true)}
           {visible.map(b => renderRow(b, false))}
           {emptyLine && (
             <p className="px-3 py-6 text-xs text-gray-400 italic text-center">{emptyLine}</p>
@@ -240,14 +255,17 @@ export function LinkVideoModal({ isOpen, onClose, kind, items, currentId, otherF
 /** A row's thumbnail, flush to the row's top, bottom and left edges, or
  *  the placeholder box when there is no URL or the load fails: the
  *  browser's broken-image glyph never shows (style guide, every image
- *  has a fallback). */
-function RowThumb({ url }: { url?: string }) {
+ *  has a fallback). A private video's placeholder carries the lock,
+ *  since its signed thumbnail URL is the one that expires. A new URL
+ *  gets a new try. */
+function RowThumb({ url, locked, onFailed }: { url?: string; locked?: boolean; onFailed?: () => void }) {
   const [failed, setFailed] = useState(false)
+  useEffect(() => { setFailed(false) }, [url])
   return (
     <div className="self-stretch aspect-video shrink-0 overflow-hidden bg-navy-700 flex items-center justify-center text-gray-400">
       {url && !failed
-        ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => setFailed(true)} />
-        : <Film size={14} />}
+        ? <img src={url} loading="lazy" alt="" className="w-full h-full object-cover" onError={() => { setFailed(true); onFailed?.() }} />
+        : locked ? <Lock size={14} /> : <Film size={14} />}
     </div>
   )
 }

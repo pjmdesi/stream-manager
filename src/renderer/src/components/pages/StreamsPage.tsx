@@ -7326,6 +7326,9 @@ function SidebarDetail({
   const broadcastPool = isPastStream ? ytVods : ytBroadcasts
   // The link modal (STR-39), opened from the footer's Link / Change button.
   const [linkPickerOpen, setLinkPickerOpen] = useState(false)
+  /** Videos whose thumbnail failed once this session and were fetched
+   *  again for a fresh URL; one lookup each, so a dead one cannot loop. */
+  const thumbRetriedRef = useRef(new Set<string>())
 
   // Defer non-critical on-open YouTube fetches past the sidebar slide so their
   // setYt* updates — which re-render the (unmemoized) streams list — don't land
@@ -8832,6 +8835,20 @@ function SidebarDetail({
                 ? ytVodList
                 : { phase: ytBroadcastsLoading ? 'loading' : 'ready', checking: false, newIds: [], error: null }}
               onPick={id => { onUpdateMeta({ ytVideoId: id }); setLinkPickerOpen(false) }}
+              onThumbFailed={id => {
+                // Private videos get signed thumbnail URLs that expire (a
+                // cached one 404s a day later), so one fresh lookup per
+                // video per session replaces the record, picture included.
+                if (thumbRetriedRef.current.has(id)) return
+                thumbRetriedRef.current.add(id)
+                const lookup = isPastStream ? window.api.youtubeGetVideoById(id) : window.api.youtubeGetBroadcastById(id)
+                lookup.then(fresh => {
+                  if (!fresh) return
+                  const replace = (prev: LiveBroadcast[]) => prev.map(v => v.id === fresh.id ? fresh : v)
+                  if (isPastStream) setYtVods(replace)
+                  else setYtBroadcasts(replace)
+                }).catch(() => {})
+              }}
             />
 
             {/* Date mismatch warning — only for upcoming broadcasts.
