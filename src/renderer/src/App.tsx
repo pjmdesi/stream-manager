@@ -37,6 +37,31 @@ import { ThumbnailEditorProvider, useThumbnailEditor } from './context/Thumbnail
 import { PageActivityProvider, usePageActivity } from './context/PageActivityContext'
 import type { PendingThumbnailStream } from './context/ThumbnailEditorContext'
 
+/** A page that stays mounted while another is open, hidden with
+ *  display none. Container queries inside it resolve only once it is
+ *  shown again, so a label that depends on one would transition from
+ *  its hidden-state value, the collapsed form, every time the page came
+ *  back (STR-51). For two frames after it shows, the page is marked
+ *  settling and nothing inside it transitions (see index.css). */
+function PersistentPage({ active, children }: { active: boolean; children: React.ReactNode }) {
+  const [settling, setSettling] = useState(false)
+  const wasActive = useRef(active)
+  useLayoutEffect(() => {
+    const shown = active && !wasActive.current
+    wasActive.current = active
+    if (!shown) return
+    setSettling(true)
+    let second = 0
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setSettling(false)) })
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second) }
+  }, [active])
+  return (
+    <div className={`h-full ${active ? '' : 'hidden'}`} data-settling={settling || undefined}>
+      {children}
+    </div>
+  )
+}
+
 class PageErrorBoundary extends Component<{ children: React.ReactNode }, { error: Error | null }> {
   constructor(props: { children: React.ReactNode }) {
     super(props)
@@ -1556,7 +1581,7 @@ function AppInner() {
         <main className="flex-1 overflow-hidden">
         <PageErrorBoundary>
           {/* Persistent pages — must live outside ErrorBoundary so key={page} doesn't remount them */}
-          <div className={`h-full ${page === 'player' ? '' : 'hidden'}`}>
+          <PersistentPage active={page === 'player'}>
             <PlayerPage
               isVisible={page === 'player'}
               initialFile={pendingPlayer}
@@ -1568,23 +1593,23 @@ function AppInner() {
                 if (!config.hasOpenedHelp) updateConfig({ hasOpenedHelp: true })
               }}
             />
-          </div>
-          <div className={`h-full ${page === 'converter' ? '' : 'hidden'}`}>
+          </PersistentPage>
+          <PersistentPage active={page === 'converter'}>
             <ConverterPage pending={pendingConverter} onNavigateToStream={navigateToStream} />
-          </div>
-          <div className={`h-full ${page === 'thumbnails' ? '' : 'hidden'}`}>
+          </PersistentPage>
+          <PersistentPage active={page === 'thumbnails'}>
             <ThumbnailPage isVisible={page === 'thumbnails'} onNavigateToStream={navigateToStream} />
-          </div>
-          <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
+          </PersistentPage>
+          <PersistentPage active={page === 'streams'}>
             <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} onOpenIntegrations={() => setPage('integrations')} onConvertDump={() => setDumpConvertOpen(true)} />
-          </div>
+          </PersistentPage>
           {/* Combine is persistent too: switch-mounting it meant every
               navigation away unmounted the page, and the remount re-ran the
               initialFiles ingest — resurrecting removed files and resetting
               the sort order, output path, and delete-sources checkbox. */}
-          <div className={`h-full ${page === 'combine' ? '' : 'hidden'}`}>
+          <PersistentPage active={page === 'combine'}>
             <CombinePage initialFiles={pendingCombine} onNavigateToStream={navigateToStream} />
-          </div>
+          </PersistentPage>
           {page === 'templates' && <TemplatesPage />}
           {page === 'rules'     && <RulesPage />}
           {page === 'launcher'  && <LauncherPage />}

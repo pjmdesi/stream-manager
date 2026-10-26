@@ -11,6 +11,17 @@
    padding themselves (pl to match the neighboring inputs, pr wide enough
    for the chevron: pr-7 at text-xs, pr-9 at text-sm). The chevron is the
    gray-400 token drawn at 12px; color-scheme keeps the option list dark. */
+/* A page kept mounted but hidden while another is open resolves its
+   container queries only once it is shown again, so a label that depends
+   on one would transition from its hidden-state value every time the page
+   came back (STR-51). App marks such a page as settling for two frames
+   after it shows; nothing inside transitions in that window. The
+   important beats the inline durations the animation settings write. */
+[data-settling],
+[data-settling] * {
+  transition-duration: 0s !important;
+}
+
 @layer components {
   .select-themed {
     appearance: none;
