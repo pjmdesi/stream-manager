@@ -21,6 +21,9 @@ export interface AppConfig {
   archivePresetId: string
   /** Set when the user continues past the notice shown before the first archive. */
   archiveNoticeAcknowledged: boolean
+  /** Set when the user closes the notice shown on the first launch of a
+   *  dump-folder library, which says the layout is being retired (APP-54). */
+  dumpRetirementNoticeAcknowledged: boolean
   /** Minutes an archive output that came out no smaller than its original is
    *  kept for "Replace anyway" before it is discarded (CONV-15). No Settings
    *  control; edit the config file to change it. */
@@ -173,6 +176,7 @@ export const CONFIG_DEFAULTS: AppConfig = {
   streamMode: '',
   archivePresetId: '',
   archiveNoticeAcknowledged: false,
+  dumpRetirementNoticeAcknowledged: false,
   keptLargerOutputMinutes: 120,
   clipPresetId: '',
   defaultConversionPresetId: '',

@@ -60,6 +60,10 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - Default Watch Directory now does what it says: adding a new auto-rule starts with that folder filled in.
 - The episode numbering setting works now, under its new name, Number episodes automatically. Off, a new episode starts with an empty episode number for you to type; on, it fills in the next number for that topic and season as before.
 
+## Dump-folder libraries
+
+- The dump-folder layout (every stream's files in one folder, told apart by the date in their names) is being retired. Stream Manager 3.0.0 will open a library only in the folder-per-stream layout; no date is set for that release, and this version keeps opening a dump folder as before. A dump library gets a notice on its first launch and a standing reminder at the top of the Streams page, both leading to the one-click conversion that was already in Settings. Setup no longer offers the dump layout as a choice: a folder that uses it is recognized, the retirement is explained, and the conversion is offered as the next step, with undo. It is not required until 3.0.0.
+
 ## Questions and bug reports
 
 - Ask in the Discord server at https://discord.gg/MMjuHe6ZM2, or open an issue at https://github.com/pjmdesi/stream-manager/issues. A bug report is most useful with the Stream Manager version, your Windows version, and the steps that led to it.

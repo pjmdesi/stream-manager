@@ -23,7 +23,7 @@ export function DumpConvertExplainer() {
     <div className="flex flex-col gap-5">
       <div className="flex flex-col gap-2">
         <p className="text-sm text-gray-400 leading-relaxed">
-          Some features only work with folder-per-stream, and several others are cleaner with it. The app can convert your dump folder into that layout in one click.
+          The dump-folder layout is being retired: Stream Manager 3.0.0 will open a library only in the folder-per-stream layout, and no date is set for that release. The app can convert your dump folder into that layout in one click.
         </p>
         <p className="text-xs text-gray-400 italic leading-relaxed">
           Recording and thumbnail files need <span className="font-mono">YYYY-MM-DD</span> in the name (OBS's default). Subfolders won't be touched.

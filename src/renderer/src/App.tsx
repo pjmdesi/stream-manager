@@ -29,6 +29,7 @@ import { StreamRelayWidget } from './components/StreamRelayWidget'
 import { useStore } from './hooks/useStore'
 import { useAnimationConfig } from './hooks/useAnimationConfig'
 import { OnboardingModal } from './components/OnboardingModal'
+import { DumpRetirementModal, DumpConvertModal } from './components/DumpRetirement'
 import { HelpModal, type HelpTarget } from './components/HelpModal'
 import { isAnyModalOpen, isTypingTarget } from './lib/shortcuts'
 import { PostStreamTwitchModal } from './components/PostStreamTwitchModal'
@@ -827,6 +828,9 @@ function AppInner() {
   // opens wherever it last was, exactly as before.
   const [helpTarget, setHelpTarget] = useState<HelpTarget | null>(null)
   const [onboardingOpen, setOnboardingOpen] = useState(false)
+  // The dump-to-folders conversion, opened by the retirement notice below
+  // and by the Streams page strip (APP-54).
+  const [dumpConvertOpen, setDumpConvertOpen] = useState(false)
   // Per-service integration state for the Integrations nav indicator (nav
   // redesign Pass C sub-item m). setUp = the user connected it; healthy =
   // it currently works (token valid / key accepted). Not-set-up services
@@ -1571,7 +1575,7 @@ function AppInner() {
             <ThumbnailPage isVisible={page === 'thumbnails'} onNavigateToStream={navigateToStream} />
           </div>
           <div className={`h-full ${page === 'streams' ? '' : 'hidden'}`}>
-            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} onOpenIntegrations={() => setPage('integrations')} />
+            <StreamsPage isVisible={page === 'streams'} onSendToPlayer={sendToPlayer} onSendToConverter={sendToConverter} onSendToCombine={sendToCombine} pendingSelect={pendingStreamSelect} onAutoPushCategoryMiss={setAutoPushError} onOpenIntegrations={() => setPage('integrations')} onConvertDump={() => setDumpConvertOpen(true)} />
           </div>
           {/* Combine is persistent too: switch-mounting it meant every
               navigation away unmounted the page, and the remount re-ran the
@@ -1597,6 +1601,16 @@ function AppInner() {
         </PageErrorBoundary>
         </main>
       </div>
+      {/* The dump-folder layout is being retired (APP-54): a one-time
+          notice on the first launch of a dump library, and the shared
+          conversion modal the notice and the Streams page strip open. The
+          store follows the mode change itself (config:changed). */}
+      <DumpRetirementModal
+        isOpen={!loading && !!config.streamsDir && config.streamMode === 'dump-folder' && !config.dumpRetirementNoticeAcknowledged && !onboardingOpen}
+        onConvert={() => { updateConfig({ dumpRetirementNoticeAcknowledged: true }); setDumpConvertOpen(true) }}
+        onLater={() => updateConfig({ dumpRetirementNoticeAcknowledged: true })}
+      />
+      <DumpConvertModal isOpen={dumpConvertOpen} onClose={() => setDumpConvertOpen(false)} streamsDir={config.streamsDir} />
       <OnboardingModal
         isOpen={onboardingOpen}
         initialStreamsDir={config.streamsDir}

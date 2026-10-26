@@ -6,8 +6,6 @@ import { Button } from './ui/Button'
 import { Tooltip } from './ui/Tooltip'
 import { DumpConvertExplainer } from './DumpConvertExplainer'
 import type { StreamMode, WatchRule, DetectedStructure } from '../types'
-import imgFolderPerStream from '../assets/onboarding/per-stream-folders.png'
-import imgDumpFolder from '../assets/onboarding/stream-dump-folder.png'
 
 interface Props {
   isOpen: boolean
@@ -19,60 +17,18 @@ interface Props {
   onComplete: () => void
 }
 
-// ── Mode cards (shared) ───────────────────────────────────────────────────────
-
-interface ModeCardProps {
-  selected: boolean
-  suggested: boolean
-  onSelect: () => void
-  title: string
-  flavor: string
-  image: string
-}
-
-function ModeCard({ selected, suggested, onSelect, title, flavor, image }: ModeCardProps) {
-  return (
-    <button
-      onClick={onSelect}
-      className={`relative flex-1 flex flex-col items-center gap-3 p-5 rounded-xl border-2 transition-all text-left ${
-        selected
-          ? 'border-accent-500 bg-accent-600/15'
-          : 'border-white/10 bg-white/5 hover:border-white/20 hover:bg-white/8'
-      }`}
-    >
-      {suggested && (
-        <span className="absolute top-2 right-2 text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
-          Detected
-        </span>
-      )}
-      <img src={image} alt={title} className="w-full aspect-video rounded-lg object-cover" />
-      <div className="flex flex-col gap-1 w-full">
-        <div className="flex items-center justify-between gap-2">
-          <span className={`text-sm font-semibold ${selected ? 'text-accent-200' : 'text-gray-200'}`}>{title}</span>
-          <div className={`w-4 h-4 rounded-full border-2 shrink-0 transition-all ${
-            selected ? 'border-accent-400 bg-accent-400' : 'border-white/20'
-          }`} />
-        </div>
-        <span className="text-xs text-gray-400 leading-relaxed">{flavor}</span>
-      </div>
-    </button>
-  )
-}
-
 // ── Step 1: Combined picker + auto-detect ─────────────────────────────────────
 
 interface StepSetupProps {
   streamsDir: string
-  selectedMode: StreamMode
   detection: DetectedStructure | null
   scanning: boolean
   onPickDir: () => void
-  onModeChange: (mode: StreamMode) => void
 }
 
 type DetectionTone = 'ok' | 'info' | 'warn'
 
-function describeDetection(d: DetectedStructure): { tone: DetectionTone; headline: string; detail: string } {
+function describeDetection(d: DetectedStructure): { tone: DetectionTone; headline: string; detail: string; note?: string } {
   if (d.layoutKind === 'flat') {
     return {
       tone: 'ok',
@@ -92,8 +48,11 @@ function describeDetection(d: DetectedStructure): { tone: DetectionTone; headlin
   if (d.layoutKind === 'dump') {
     return {
       tone: 'warn',
-      headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected — dump folder (not recommended)`,
-      detail: 'Files for multiple streams share a single folder, distinguished by the date in the filename.',
+      headline: `${d.sessionCount} stream${d.sessionCount === 1 ? '' : 's'} detected`,
+      detail: 'Dump folder detected: The files in this folder share a single location. Stream items are distinguished only by filename.',
+      // One banner says it all (APP-54): what the layout is, and that its
+      // support ends with 3.0.0, with the conversion offered next.
+      note: 'Support for this structure will be officially retired in Stream Manager version 3.0.0, and only folder-per-stream mode will be supported. You can convert your structure in the next step (which can also be undone).',
     }
   }
   if (d.isEmpty) {
@@ -106,12 +65,12 @@ function describeDetection(d: DetectedStructure): { tone: DetectionTone; headlin
   return {
     tone: 'warn',
     headline: 'Nothing recognizable in this folder',
-    detail: 'Stream Manager looks for date-named folders (YYYY-MM-DD) or files whose names include a date. This is usually a sign that the wrong folder was selected — try picking the folder where your streams actually live. If you have an unusual layout, you can choose a mode manually below.',
+    detail: 'Stream Manager looks for date-named folders (YYYY-MM-DD) or files whose names include a date. This is usually a sign that the wrong folder was selected — try picking the folder where your streams actually live. Continuing sets up one folder per stream, created as streams are added.',
   }
 }
 
 function DetectionBanner({ detection }: { detection: DetectedStructure }) {
-  const { tone, headline, detail } = describeDetection(detection)
+  const { tone, headline, detail, note } = describeDetection(detection)
   const colorClasses =
     tone === 'ok'   ? 'border-emerald-400/20 bg-emerald-400/5 text-emerald-200' :
     tone === 'warn' ? 'border-yellow-500/20 bg-yellow-500/5 text-yellow-200' :
@@ -123,6 +82,7 @@ function DetectionBanner({ detection }: { detection: DetectedStructure }) {
       <div className="flex flex-col gap-1">
         <p className="text-sm font-semibold">{headline}</p>
         <p className="text-xs text-gray-400 leading-relaxed">{detail}</p>
+        {note && <p className="text-xs leading-relaxed">{note}</p>}
       </div>
     </div>
   )
@@ -150,20 +110,10 @@ function SamplesList({ samples, total }: { samples: DetectedStructure['samples']
   )
 }
 
-function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, onModeChange }: StepSetupProps) {
-  const [overrideOpen, setOverrideOpen] = useState(false)
-  // Reset the override toggle whenever the user picks a different folder.
-  useEffect(() => { setOverrideOpen(false) }, [streamsDir])
-
-  const suggested = detection?.suggestedMode || ''
-  const detected = !!detection && detection.layoutKind !== 'unknown'
-  // Cards appear when:
-  //  - detection failed AND the folder isn't empty (genuine ambiguity — show fallback)
-  //  - the user explicitly opened the override
-  const showCards = !!detection && (
-    overrideOpen || (detection.layoutKind === 'unknown' && !detection.isEmpty)
-  )
-
+function StepSetup({ streamsDir, detection, scanning, onPickDir }: StepSetupProps) {
+  // No mode to choose since APP-54: the layout the scan finds decides. A
+  // dump layout is offered the conversion on the next step; everything
+  // else is folder-per-stream.
   return (
     <div className="flex flex-col gap-5">
       <p className="text-sm text-gray-400 leading-relaxed">
@@ -195,14 +145,6 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
               New streams created in the app will land as flat <span className="font-mono text-white">YYYY-MM-DD</span> folders at the root of your streams directory, regardless of how existing streams are grouped.
             </p>
           )}
-          {detection.layoutKind === 'dump' && (
-            <p className="rounded-lg border border-yellow-500/30 bg-yellow-500/10 px-4 py-3 text-sm text-yellow-100 leading-relaxed">
-              App functionality is <span className="font-semibold">significantly reduced</span> in dump-folder
-              mode — importing from YouTube, bulk-linking, and several newer features require folder-per-stream.
-              The next step can convert your folder into folder-per-stream in one click (with undo).
-            </p>
-          )}
-
           {detection.samples.length > 0 && (
             <div className="flex flex-col gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Sample sessions</h3>
@@ -210,43 +152,6 @@ function StepSetup({ streamsDir, selectedMode, detection, scanning, onPickDir, o
             </div>
           )}
 
-          {/* Quiet escape hatch when detection succeeded — keep the default UX clean,
-              but let power users / mis-detections override the mode. */}
-          {detected && !overrideOpen && (
-            <button
-              type="button"
-              onClick={() => setOverrideOpen(true)}
-              className="self-start text-xs text-gray-400 hover:text-gray-300 underline underline-offset-2 transition-colors"
-            >
-              Not what you expected? Choose mode manually
-            </button>
-          )}
-
-          {showCards && (
-            <div className="flex flex-col gap-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                {detected ? 'Override the detected mode' : 'Pick a mode'}
-              </h3>
-              <div className="flex gap-4">
-                <ModeCard
-                  selected={selectedMode === 'folder-per-stream'}
-                  suggested={suggested === 'folder-per-stream'}
-                  onSelect={() => onModeChange('folder-per-stream')}
-                  title="Folder per stream"
-                  flavor="Each stream and related items go into a folder specific to that stream"
-                  image={imgFolderPerStream}
-                />
-                <ModeCard
-                  selected={selectedMode === 'dump-folder'}
-                  suggested={suggested === 'dump-folder'}
-                  onSelect={() => onModeChange('dump-folder')}
-                  title="Dump folder"
-                  flavor="All streams and related items are all together in a single folder. Significantly reduced functionality — not recommended."
-                  image={imgDumpFolder}
-                />
-              </div>
-            </div>
-          )}
         </>
       )}
     </div>
@@ -545,16 +450,18 @@ export function OnboardingModal({ isOpen, initialStreamsDir, onComplete }: Props
     setStreamsDir(picked)
     setDetection(null)
     setConvertResult(null)
+    setSelectedMode('')
     setScanning(true)
     try {
       const result = await window.api.detectStreamStructure(picked)
       setDetection(result)
-      // Detected layout wins. Empty folders auto-apply the canonical default
-      // (folder-per-stream) so the user can just hit Next without picking a mode.
-      if (result.suggestedMode) setSelectedMode(result.suggestedMode)
-      else if (result.isEmpty) setSelectedMode('folder-per-stream')
+      // The layout the scan finds decides (APP-54, no mode choice): a dump
+      // layout is offered the conversion on the next step; everything
+      // else, an unknown layout included, is folder-per-stream.
+      setSelectedMode(result.layoutKind === 'dump' ? 'dump-folder' : 'folder-per-stream')
     } catch {
       setDetection({ suggestedMode: '', layoutKind: 'unknown', nestingDepth: 0, sessionCount: 0, samples: [], groupingHints: [], isEmpty: false })
+      setSelectedMode('folder-per-stream')
     } finally {
       setScanning(false)
     }
@@ -644,7 +551,15 @@ export function OnboardingModal({ isOpen, initialStreamsDir, onComplete }: Props
   const nextDisabled =
     (step === 'setup' && (!streamsDir || !selectedMode))
 
-  const nextLabel = step === 'done' ? 'Get started' : step === 'auto-rule' ? (recordingsDir ? 'Create rule & continue' : 'Skip') : 'Next'
+  // The conversion is offered, not required, until 3.0.0 (APP-54, decided
+  // 2026-10-26 to give users time): Next on that step reads as a skip.
+  const nextLabel = step === 'done'
+    ? 'Get started'
+    : step === 'auto-rule'
+      ? (recordingsDir ? 'Create rule & continue' : 'Skip')
+      : step === 'convert' && !convertResult
+        ? 'Skip for now'
+        : 'Next'
 
   return (
     <Modal
@@ -673,11 +588,9 @@ export function OnboardingModal({ isOpen, initialStreamsDir, onComplete }: Props
       {step === 'setup' && (
         <StepSetup
           streamsDir={streamsDir}
-          selectedMode={selectedMode}
           detection={detection}
           scanning={scanning}
           onPickDir={pickDir}
-          onModeChange={setSelectedMode}
         />
       )}
       {step === 'convert' && (

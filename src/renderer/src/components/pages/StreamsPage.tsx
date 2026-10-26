@@ -16,6 +16,7 @@ import { Checkbox } from '../ui/Checkbox'
 import { TagComboBox } from '../ui/TagComboBox'
 import { TopicSelect } from '../ui/TopicSelect'
 import { Modal } from '../ui/Modal'
+import { DumpRetirementStrip } from '../DumpRetirement'
 import { PathList } from '../ui/PathList'
 import { useStore } from '../../hooks/useStore'
 import { formatBytes } from '../../lib/formatBytes'
@@ -460,6 +461,7 @@ export function StreamsPage({
   pendingSelect,
   onAutoPushCategoryMiss,
   onOpenIntegrations,
+  onConvertDump,
 }: {
   isVisible: boolean
   onSendToPlayer: (file: string, opts?: { navigate?: boolean }) => void
@@ -477,6 +479,9 @@ export function StreamsPage({
   /** Navigate to the Integrations page — the empty-library state points
    *  fresh users there to connect their accounts. */
   onOpenIntegrations?: () => void
+  /** Open the dump-to-folders conversion (App holds the modal). The
+   *  retirement strip at the top of the page leads there (APP-54). */
+  onConvertDump?: () => void
 }) {
   const { config, updateConfig } = useStore()
   const { openEditor: openThumbnailEditor, requestThumbnailRerender } = useThumbnailEditor()
@@ -3754,6 +3759,8 @@ export function StreamsPage({
               </Tooltip>
             </div>
           )}
+          {/* Stays until the library is converted (APP-54). */}
+          {isDumpMode && onConvertDump && <DumpRetirementStrip onConvert={onConvertDump} />}
           <div className="flex items-center justify-between gap-3">
             <div>
               <h1 className="text-lg font-semibold flex items-center gap-2">

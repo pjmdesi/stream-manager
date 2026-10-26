@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Bot, FolderTree, CheckCircle, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
+import { FolderOpen, Save, ChevronDown, AlertTriangle, Trash2, AlertCircle, Bot, FolderTree, User, HardDrive, Radio, Film, Zap, Palette, MonitorCog, Shuffle, FlaskConical, ArrowRight } from 'lucide-react'
 import { Youtube, Twitch, Claude } from '../ui/BrandIcons'
 import { useStore } from '../../hooks/useStore'
 import { formatBytes } from '../../lib/formatBytes'
@@ -10,7 +10,7 @@ import { Input, NumberInput } from '../ui/Input'
 import { Modal } from '../ui/Modal'
 import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
-import { DumpConvertExplainer } from '../DumpConvertExplainer'
+import { DumpConvertModal } from '../DumpRetirement'
 import type { ConversionPreset, Page } from '../../types'
 import { isClipExportCompatible } from '../../lib/clipExport'
 import { DEFAULT_TRACK_NAME_SLOTS } from '../../lib/trackNames'
@@ -183,11 +183,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   const online = useOnlineStatus()
   // Convert dump → folder-per-stream modal state
   const [convertModalOpen, setConvertModalOpen] = useState(false)
-  type ConvertManifest = { moves: { from: string; to: string }[]; createdFolders: string[] }
-  type ConvertResult = { moved: number; skipped: number; manifest: ConvertManifest }
-  const [convertStatus, setConvertStatus] = useState<'idle' | 'converting' | 'done' | 'undoing' | 'undone'>('idle')
-  const [convertResult, setConvertResult] = useState<ConvertResult | null>(null)
-  const [convertError, setConvertError] = useState<string | null>(null)
 
   // Config the draft was last synced against — the baseline that tells a
   // user-staged edit (draft differs from BASE) apart from a config change
@@ -541,16 +536,11 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 variant="secondary"
                 size="sm"
                 icon={<FolderTree size={14} />}
-                onClick={() => {
-                  setConvertStatus('idle')
-                  setConvertResult(null)
-                  setConvertError(null)
-                  setConvertModalOpen(true)
-                }}
+                onClick={() => setConvertModalOpen(true)}
               >
                 Convert to folder-per-stream
               </Button>
-              <span className="text-xs text-gray-400">Currently using dump-folder mode.</span>
+              <span className="text-xs text-yellow-200">Dump-folder libraries are being retired: Stream Manager 3.0.0 will need this library converted first.</span>
             </div>
           )}
           {/* The three thumbnail defaults that sat here (use the built-in
@@ -973,100 +963,10 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
       </div>
       </div>
 
-      {/* Convert dump → folder-per-stream */}
-      {convertModalOpen && (
-        <Modal
-          isOpen
-          onClose={() => setConvertModalOpen(false)}
-          title="Convert to folder-per-stream"
-          width="2xl"
-          footer={
-            <div className="flex items-center justify-end gap-2 w-full">
-              {convertStatus === 'done' ? (
-                /* Done: Close is the most-likely-next action, so it takes the
-                   right/primary slot (style guide → Modal button order); the
-                   rarely-used Undo sits to its left. */
-                <>
-                  <Button
-                    variant="secondary"
-                    onClick={async () => {
-                      if (!convertResult) return
-                      setConvertStatus('undoing')
-                      setConvertError(null)
-                      try {
-                        await window.api.undoConvertDumpFolder(convertResult.manifest)
-                        await window.api.setConfig({ streamMode: 'dump-folder' })
-                        setConvertResult(null)
-                        setConvertStatus('undone')
-                      } catch (err: any) {
-                        setConvertError(err?.message ?? String(err))
-                        setConvertStatus('done')
-                      }
-                    }}
-                  >
-                    Undo conversion
-                  </Button>
-                  <Button variant="primary" onClick={() => setConvertModalOpen(false)}>
-                    Close
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button variant="ghost" onClick={() => setConvertModalOpen(false)}>
-                    Cancel
-                  </Button>
-                  <Button
-                    variant="primary"
-                    onClick={async () => {
-                      if (!local.streamsDir) return
-                      setConvertStatus('converting')
-                      setConvertError(null)
-                      try {
-                        const res = await window.api.convertDumpFolder(local.streamsDir)
-                        setConvertResult(res)
-                        await window.api.setConfig({ streamMode: 'folder-per-stream' })
-                        setConvertStatus('done')
-                      } catch (err: any) {
-                        setConvertError(err?.message ?? String(err))
-                        setConvertStatus('idle')
-                      }
-                    }}
-                    disabled={convertStatus === 'converting' || convertStatus === 'undoing'}
-                  >
-                    {convertStatus === 'converting' ? 'Converting…' : convertStatus === 'undoing' ? 'Undoing…' : 'Update structure'}
-                  </Button>
-                </>
-              )}
-            </div>
-          }
-        >
-          <DumpConvertExplainer />
-
-          {convertStatus === 'done' && convertResult && (
-            <div className="mt-5 flex items-start gap-2 text-sm text-green-400 bg-green-400/10 border border-green-400/20 rounded-lg px-4 py-3">
-              <CheckCircle size={16} className="shrink-0 mt-0.5" />
-              <span>
-                Done — {convertResult.manifest.createdFolders.length} folder{convertResult.manifest.createdFolders.length !== 1 ? 's' : ''} created, {convertResult.moved} file{convertResult.moved !== 1 ? 's' : ''} organized.
-                {convertResult.skipped > 0 && ` ${convertResult.skipped} file${convertResult.skipped !== 1 ? 's' : ''} with no date in the filename were left in place.`}
-              </span>
-            </div>
-          )}
-
-          {convertStatus === 'undone' && (
-            <div className="mt-5 flex items-start gap-2 text-sm text-gray-400 bg-white/5 border border-white/10 rounded-lg px-4 py-3">
-              <CheckCircle size={16} className="shrink-0 mt-0.5" />
-              <span>Undone — files have been moved back to their original locations.</span>
-            </div>
-          )}
-
-          {convertError && (
-            <div className="mt-5 flex items-start gap-2 text-sm text-red-300 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
-              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
-              <span>{convertError}</span>
-            </div>
-          )}
-        </Modal>
-      )}
+      {/* Convert dump → folder-per-stream: the modal lives in
+          DumpRetirement.tsx, shared with the first-launch notice and the
+          Streams page strip (APP-54). */}
+      <DumpConvertModal isOpen={convertModalOpen} onClose={() => setConvertModalOpen(false)} streamsDir={local.streamsDir} />
 
       {/* Nav-away unsaved-changes prompt. Surfaces only when App has set
           pendingNav (which it only does when this page is dirty). Three
