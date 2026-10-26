@@ -10,7 +10,7 @@ import { Input } from '../ui/Input'
 import { TogglePill } from '../ui/TogglePill'
 import { TruncatedText } from '../ui/TruncatedText'
 import { ThumbImage } from './ThumbImage'
-import { VideoRow, RowChip } from './VideoRow'
+import { VideoRow, RowChip, bustThumbUrl } from './VideoRow'
 import { type BroadcastLinkRef } from '../ui/BroadcastPicker'
 
 /** Where the channel-wide video list stands (STR-39). `loading` is the
@@ -62,6 +62,9 @@ interface LinkVideoModalProps {
   nav?: LinkModalNav
   items: LiveBroadcast[]
   currentId: string
+  /** The current link's pushed-thumbnail hash, for a thumbnail URL the
+   *  browser's cache does not already hold (see bustThumbUrl). */
+  currentThumbBust?: string
   /** Other stream items' links into this list, keyed by broadcast id;
    *  those rows stay out until the filter pill asks for them. */
   otherFolderLinks: BroadcastLinkRef[]
@@ -84,7 +87,7 @@ interface LinkVideoModalProps {
  * of fixed height sits above it, and new videos land under that line,
  * at the top, where the one you came for is.
  */
-export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, currentId, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
+export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, currentId, currentThumbBust, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
   const [showLinked, setShowLinked] = useState(false)
   const noun = kind === 'video' ? 'video' : 'broadcast'
@@ -195,10 +198,13 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
       watchUrl: `https://youtu.be/${b.id}`,
       studioUrl: `https://studio.youtube.com/video/${b.id}/${kind === 'video' ? 'edit' : 'livestreaming'}`,
     }
+    const shown = boxed && currentThumbBust
+      ? { ...b, snippet: { ...b.snippet, thumbnailUrl: bustThumbUrl(b.snippet?.thumbnailUrl, currentThumbBust) } }
+      : b
     return (
       <VideoRow
         key={b.id}
-        broadcast={b}
+        broadcast={shown}
         kind={kind}
         onClick={() => pick(b.id)}
         onThumbFailed={onThumbFailed ? () => onThumbFailed(b.id) : undefined}

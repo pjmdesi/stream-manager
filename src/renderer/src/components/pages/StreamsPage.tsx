@@ -41,7 +41,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
 import { BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
-import { VideoRow } from '../streams/VideoRow'
+import { VideoRow, bustThumbUrl } from '../streams/VideoRow'
 import { TogglePill } from '../ui/TogglePill'
 import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
 import { useFieldSuggestion } from '../../hooks/useFieldSuggestion'
@@ -2139,9 +2139,8 @@ export function StreamsPage({
         const cur = prev[pushedId]
         return cur ? { ...prev, [pushedId]: applyPushOverlay(cur) } : prev
       })
-      let thumbUploaded = false
       if (thumbToUpload) {
-        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload); thumbUploaded = true }
+        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
         catch (thumbErr: any) {
           showBanner({ streamKey: folder.relativePath, type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
           return
@@ -2189,12 +2188,6 @@ export function StreamsPage({
           refreshed.snippet.tags = tags
           if (categoryId) refreshed.snippet.categoryId = categoryId
           if (privacy) refreshed.status.privacyStatus = privacy
-          // A new thumbnail keeps its URL, so the row's image would stay
-          // the cached old one; a query parameter makes it load again.
-          if (thumbUploaded && refreshed.snippet.thumbnailUrl) {
-            const url = refreshed.snippet.thumbnailUrl
-            refreshed.snippet.thumbnailUrl = `${url}${url.includes('?') ? '&' : '?'}sm=${Date.now()}`
-          }
           // Schedule too — a stale read here would resurrect the OLD
           // start time in the cached broadcast, and the time dot would
           // keep glowing right after a successful schedule push.
@@ -8805,7 +8798,13 @@ function SidebarDetail({
                   watchUrl: `https://youtu.be/${linkedId}`,
                   studioUrl: `https://studio.youtube.com/video/${linkedId}/${isPastStream ? 'edit' : 'livestreaming'}`,
                 } : undefined}
-                broadcast={selectedBroadcast ?? (linkedId ? {
+                // The thumbnail URL carries the pushed thumbnail's hash,
+                // so a new picture is a new URL for the browser's cache;
+                // the plain URL went on showing the old picture or
+                // YouTube's placeholder until a reload.
+                broadcast={selectedBroadcast
+                  ? { ...selectedBroadcast, snippet: { ...selectedBroadcast.snippet, thumbnailUrl: bustThumbUrl(selectedBroadcast.snippet.thumbnailUrl, meta?.ytThumbnailPushedHash) } }
+                  : (linkedId ? {
                   id: linkedId,
                   snippet: {
                     // The template body resolved, so the cached title
@@ -8938,6 +8937,7 @@ function SidebarDetail({
               }}
               items={broadcastPool}
               currentId={linkedId}
+              currentThumbBust={meta?.ytThumbnailPushedHash}
               otherFolderLinks={otherFolderLinks}
               state={isPastStream
                 ? ytVodList

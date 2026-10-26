@@ -72,6 +72,8 @@
 40. STR-50
 41. STR-51
 42. APP-58
+43. THU-43
+44. THU-44
 
 ## Improvement ideas
 
@@ -401,6 +403,12 @@
 
   ![screenshot](_todo.md.images/THU-42-1.png)
 
+- **THU-43** [impact:2]
+  Ability to move multiple layers with keyboard shortcuts and with mouse in layer panel
+
+- **THU-44** [impact:1]
+  Add temperature and tint to filer options in layer properties
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -484,6 +492,9 @@
 
 - **CONV-26**
   After the ffmpeg debacle... Check if all handbrake presets are compatible, and warn the user if any are not when they import. Or maybe remove the Handbrake preset functionality altogether.
+
+- **CONV-27** [impact:1] [bug]
+  Refreshing the UI with ctrl+r resets the ETA for conversion items. Very minor issue, basically only for me, but would still like the fix it if possible.
 
 ### Combine
 

@@ -41,20 +41,12 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   const PrivacyIcon = privacy === 'unlisted' ? LinkIcon : privacy === 'private' ? Lock : privacy === 'public' ? Globe : null
   const privacyLabel = privacy === 'public' ? 'Public' : privacy === 'unlisted' ? 'Unlisted' : privacy === 'private' ? 'Private' : null
 
-  // The second line: date, kind, privacy, id, with a dot between them.
-  // In the footer the privacy is the video's link and the id is its
-  // Studio link, each with a copy icon; in the picker they are text.
+  // The second line: privacy, kind, date, id, with a dot between them
+  // (privacy before the date, the order of the Broadcast options). In
+  // the footer the privacy is the video's link and the id is its Studio
+  // link, each with a copy icon; in the picker they are text.
   const linkCls = 'hover:text-gray-200 hover:underline underline-offset-2 transition-colors'
   const meta: React.ReactNode[] = []
-  if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
-  if (broadcast?.isLivestream != null) {
-    meta.push(
-      <span key="kind" className="inline-flex items-center gap-1 shrink-0">
-        {broadcast.isLivestream ? <Radio size={10} /> : <Upload size={10} />}
-        {broadcast.isLivestream ? 'Livestream' : 'Upload'}
-      </span>
-    )
-  }
   // A link inside a pickable row must not pick it.
   const open = (url: string) => (e: React.MouseEvent) => { e.stopPropagation(); void window.api.openUrl(url) }
   if (PrivacyIcon && privacyLabel) {
@@ -71,6 +63,15 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
       )
       : <span key="privacy" className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>)
   }
+  if (broadcast?.isLivestream != null) {
+    meta.push(
+      <span key="kind" className="inline-flex items-center gap-1 shrink-0">
+        {broadcast.isLivestream ? <Radio size={10} /> : <Upload size={10} />}
+        {broadcast.isLivestream ? 'Livestream' : 'Upload'}
+      </span>
+    )
+  }
+  if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
   if (broadcast) {
     meta.push(links
       ? (
@@ -162,6 +163,17 @@ function InlineCopy({ url, label }: { url: string; label: string }) {
       </button>
     </Tooltip>
   )
+}
+
+/** A thumbnail URL made unique to the thumbnail last pushed for it. A
+ *  new thumbnail keeps its URL on YouTube, and the browser's image cache
+ *  serves the same URL from memory for the life of the page, so the row
+ *  kept showing the picture from before the upload (or YouTube's
+ *  placeholder) until a reload. The pushed file's hash, which the push
+ *  records in meta, becomes a query parameter: a new picture, a new URL. */
+export function bustThumbUrl(url: string | undefined, token: string | undefined): string | undefined {
+  if (!url || !token) return url
+  return `${url}${url.includes('?') ? '&' : '?'}sm=${token.slice(0, 12)}`
 }
 
 /** One chip on a VideoRow's third line. The border takes the text's
