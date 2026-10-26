@@ -28,6 +28,10 @@ interface StepSetupProps {
 
 type DetectionTone = 'ok' | 'info' | 'warn'
 
+/** The retirement line (APP-54), on the setup banner for a dump layout and
+ *  again on the convert step; each adds where the conversion happens. */
+const DUMP_RETIREMENT_NOTE = 'Support for this structure will be officially retired in Stream Manager version 3.0.0, and only folder-per-stream mode will be supported.'
+
 function describeDetection(d: DetectedStructure): { tone: DetectionTone; headline: string; detail: string; note?: string } {
   if (d.layoutKind === 'flat') {
     return {
@@ -52,7 +56,7 @@ function describeDetection(d: DetectedStructure): { tone: DetectionTone; headlin
       detail: 'Dump folder detected: The files in this folder share a single location. Stream items are distinguished only by filename.',
       // One banner says it all (APP-54): what the layout is, and that its
       // support ends with 3.0.0, with the conversion offered next.
-      note: 'Support for this structure will be officially retired in Stream Manager version 3.0.0, and only folder-per-stream mode will be supported. You can convert your structure in the next step (which can also be undone).',
+      note: `${DUMP_RETIREMENT_NOTE} You can convert your structure in the next step (which can also be undone).`,
     }
   }
   if (d.isEmpty) {
@@ -212,6 +216,12 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* The setup banner's last line again, the warn tone's look. */}
+      <div className="flex items-start gap-2.5 rounded-lg border px-4 py-3 border-yellow-500/20 bg-yellow-500/5 text-yellow-200">
+        <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+        <p className="text-xs leading-relaxed">{DUMP_RETIREMENT_NOTE} You can convert your structure now (which can also be undone).</p>
+      </div>
+
       <DumpConvertExplainer />
 
       <div className="flex justify-center">
@@ -226,7 +236,18 @@ function StepConvert({ dir, result, onResult, onConverted }: StepConvertProps) {
             onClick={convert}
             disabled={!dir || status === 'converting' || status === 'undoing'}
           >
-            {status === 'converting' ? 'Converting…' : status === 'undoing' ? 'Undoing…' : 'Update structure'}
+            {status === 'converting'
+              ? 'Converting…'
+              : status === 'undoing'
+                ? 'Undoing…'
+                // Two lines inside the one button: the label, and the
+                // recommendation smaller under it.
+                : (
+                  <span className="flex flex-col items-center leading-tight">
+                    <span>Update structure</span>
+                    <span className="text-xs font-normal opacity-80">(Recommended)</span>
+                  </span>
+                )}
           </Button>
         )}
       </div>
