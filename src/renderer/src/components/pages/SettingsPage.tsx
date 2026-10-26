@@ -936,6 +936,19 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <Button
                 variant="ghost"
                 size="sm"
+                onClick={async () => {
+                  await window.api.resetOnboarding()
+                  window.location.reload()
+                }}
+              >
+                Reset onboarding
+              </Button>
+              <p className="text-xs text-gray-400">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => {
                   // Every flag a one-time notice sets once the user has
                   // seen it (APP-55); the store follows config:changed, so
@@ -946,19 +959,6 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
                 Reset one-time notices
               </Button>
               <p className="text-xs text-gray-400">Brings back the notice before the first archive, the dump-folder retirement notice, and the Help nudge, as a fresh install would see them.</p>
-            </div>
-            <div className="flex flex-col gap-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={async () => {
-                  await window.api.resetOnboarding()
-                  window.location.reload()
-                }}
-              >
-                Reset onboarding
-              </Button>
-              <p className="text-xs text-gray-400">Clears streamsDir and streamerName, then reloads the app to trigger the onboarding flow. Not visible in production builds.</p>
             </div>
             <Checkbox
               checked={!!local.slowAnimations}
