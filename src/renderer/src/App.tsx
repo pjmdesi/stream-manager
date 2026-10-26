@@ -1561,6 +1561,7 @@ function AppInner() {
               isVisible={page === 'player'}
               initialFile={pendingPlayer}
               onNavigateToConverter={() => setPage('converter')}
+              onNavigateToStream={navigateToStream}
               onOpenHelp={anchor => {
                 setHelpTarget({ section: 'player', anchor })
                 setHelpOpen(true)

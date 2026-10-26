@@ -1363,10 +1363,13 @@ function CropAspectSelector({ value, onChange, videoW, videoH }: {
   )
 }
 
-export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOpenHelp }: {
+export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNavigateToStream, onOpenHelp }: {
   isVisible: boolean
   initialFile?: PendingFile | null
   onNavigateToConverter?: () => void
+  /** Open the current stream's item on the Streams page (PLR-26); the
+   *  Selected Stream block's thumbnail and title are the link. */
+  onNavigateToStream?: (folderPath: string) => void
   /** Open the Help modal deep-linked to the Player section, scrolled to the
    *  given ElementSection anchor (PLR-1). */
   onOpenHelp?: (anchor: string) => void
@@ -6793,10 +6796,16 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                           isEpisodeUnavailable={f => f.videos.length === 0}
                           variant="player-rail"
                         >
-                          <Tooltip content={`${currentStreamFolder.date} · ${title}`} side="right">
-                            <div className="w-9 h-5 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
+                          {/* The rail's thumbnail is the same link (PLR-26). */}
+                          <Tooltip content={`${currentStreamFolder.date} · ${title} · Open this stream on the Streams page`} side="right">
+                            <button
+                              type="button"
+                              onClick={() => onNavigateToStream?.(currentStreamFolder.folderPath)}
+                              disabled={!onNavigateToStream}
+                              className="block w-9 h-5 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0 transition-shadow enabled:hover:ring-1 enabled:hover:ring-accent-400/60"
+                            >
                               {thumbNode}
-                            </div>
+                            </button>
                           </Tooltip>
                         </StreamNavButtons>
                       </div>
@@ -6820,13 +6829,30 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onOp
                       />
                     </div>
                     <div className="flex items-start gap-2">
-                      <div className="w-16 h-9 rounded overflow-hidden bg-navy-900 border border-white/10 shrink-0">
-                        {thumbNode}
-                      </div>
+                      {/* The thumbnail and the title open the stream's item on
+                          the Streams page (PLR-26); the nav group above is a
+                          different action and stays outside the link. */}
+                      <Tooltip content="Open this stream on the Streams page" side="bottom" triggerClassName="shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => onNavigateToStream?.(currentStreamFolder.folderPath)}
+                          disabled={!onNavigateToStream}
+                          className="block w-16 h-9 rounded overflow-hidden bg-navy-900 border border-white/10 transition-shadow enabled:hover:ring-1 enabled:hover:ring-accent-400/60"
+                        >
+                          {thumbNode}
+                        </button>
+                      </Tooltip>
                       <div className="flex flex-col min-w-0 flex-1 leading-tight">
                         <span className="text-[11px] text-gray-400 tabular-nums">{currentStreamFolder.date}</span>
-                        <Tooltip content={title} side="bottom" triggerClassName="block min-w-0">
-                          <span className="text-xs text-gray-200 truncate block">{title}</span>
+                        <Tooltip content={`${title} · Open this stream on the Streams page`} side="bottom" triggerClassName="block min-w-0">
+                          <button
+                            type="button"
+                            onClick={() => onNavigateToStream?.(currentStreamFolder.folderPath)}
+                            disabled={!onNavigateToStream}
+                            className="block max-w-full truncate text-xs text-left text-gray-200 enabled:hover:text-accent-200 enabled:hover:underline transition-colors"
+                          >
+                            {title}
+                          </button>
                         </Tooltip>
                         {meta?.games && meta.games.length > 0 && meta.ytTitle && (
                           <TruncatedText text={meta.games.join(' · ')} className="text-[10px] text-gray-400 truncate" side="bottom" />
