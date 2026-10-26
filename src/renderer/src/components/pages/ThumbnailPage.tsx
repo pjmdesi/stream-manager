@@ -5225,6 +5225,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // one being edited. Both default to [1] / 1 so legacy single-
   // thumbnail streams behave identically without any migration.
   const [variants, setVariants] = useState<number[]>([1])
+  // The variants of the open stream that exist on disk: what the open
+  // found, plus each one a save has written. A variant missing from the
+  // disk but never saved is new, not deleted (see the streams-changed
+  // effect in the editor).
+  const savedVariantsRef = useRef<Set<number>>(new Set())
   const [currentVariant, setCurrentVariant] = useState<number>(1)
   // Mark the open thumbnail as in-use so the Streams page blocks deleting it
   // (and its stream) while the editor has it open — registering the variant's
@@ -6626,6 +6631,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       const pngDataUrl = withholdPng ? null : getCanvasDataUrl()
       try {
         await window.api.thumbnailSaveCanvas(folderPath, date, canvasFile, pngDataUrl, ordinal)
+        savedVariantsRef.current.add(ordinal)
         // Merge only the thumbnail flags — prevents closure-stale `currentStream.meta` from
         // clobbering fields edited concurrently in other UI (e.g. MetaModal).
         // When the PNG was withheld, only refresh the flag if it was already
@@ -7570,6 +7576,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
 
     setCurrentStream({ folderPath, date, title, meta, totalEpisodes })
     setVariants(foundVariants.length > 0 ? foundVariants : [1])
+    savedVariantsRef.current = new Set(foundVariants)
     setCurrentVariant(initialVariant)
     setSelectedIds([])
     if (canvas) {
@@ -7704,6 +7711,8 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // stream's thumbnails into this one's strip as phantoms.
     const baseVariants = knownVariants ?? []
     setVariants(baseVariants.includes(ordinal) ? baseVariants : [...baseVariants, ordinal].sort((a, b) => a - b))
+    // The new ordinal is not on disk until the eager save below lands.
+    savedVariantsRef.current = new Set(baseVariants)
     const entry: ThumbnailRecentEntry = { folderPath, date, title, updatedAt: Date.now() }
     window.api.thumbnailAddRecent(entry).then(setRecents).catch(() => {})
     // Eager save: stream items previously only got an on-disk PNG +
@@ -7930,6 +7939,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       const nextOrdinal = remaining[0]
       const canvas = await window.api.thumbnailLoadCanvas(folderPath, date, nextOrdinal)
       setVariants(remaining)
+      savedVariantsRef.current = new Set(remaining)
       setCurrentVariant(nextOrdinal)
       if (canvas) {
         resetLayers(canvas.layers, canvas.nameCounters)
@@ -7964,6 +7974,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     })
     setCurrentStream(null)
     setVariants([1])
+    savedVariantsRef.current = new Set()
     setCurrentVariant(1)
     resetLayers([])
     setCurrentTemplateId(undefined)
@@ -7984,6 +7995,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       const nextOrdinal = remaining[0]
       const canvas = await window.api.thumbnailLoadCanvas(folderPath, date, nextOrdinal)
       setVariants(remaining)
+      savedVariantsRef.current = new Set(remaining)
       setCurrentVariant(nextOrdinal)
       if (canvas) { resetLayers(canvas.layers, canvas.nameCounters); setCurrentTemplateId(canvas.templateId) }
       else { resetLayers([]); setCurrentTemplateId(undefined) }
@@ -7992,6 +8004,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     }
     setCurrentStream(null)
     setVariants([1])
+    savedVariantsRef.current = new Set()
     setCurrentVariant(1)
     resetLayers([])
     setCurrentTemplateId(undefined)
@@ -8018,6 +8031,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       // to the overview. (The editor's own saves also fire streams:changed, but
       // the variant still exists then, so this branch is skipped.)
       if (!remaining.includes(variant)) {
+        // A variant that has never reached the disk is not a deleted one:
+        // its first save is still running (the template images load
+        // first), or Start blank wrote nothing yet. An event for this
+        // stream from elsewhere in that window (a files-grid probe
+        // writing its verdicts to _meta.json, 2026-10-26) bounced the
+        // editor to the overview and, with the stage gone, aborted that
+        // first save, so the thumbnail never existed.
+        if (!savedVariantsRef.current.has(variant)) return
         await reconcileVariantGone(folderPath, date, variant)
         return
       }

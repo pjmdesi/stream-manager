@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { ChevronUp, ChevronDown, ChevronsUp, ChevronsDown, List } from 'lucide-react'
 import { Tooltip } from '../ui/Tooltip'
@@ -82,6 +82,22 @@ export function StreamNavButtons({
   const [pickerOpen, setPickerOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
   useEffect(() => { setPickerOpen(false) }, [current.relativePath])
+  // Row layouts center the panel on the List button, as the tooltips are
+  // centered on theirs (THU-42; right-aligned, the panel ran under the nav
+  // rail beside the thumbnail page's top bar). The panel's width depends
+  // on its titles, so the center is set once the panel exists, before
+  // paint, and clamped 8 px inside the window.
+  const panelRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    if (!pickerOpen || column) return
+    const el = panelRef.current
+    const a = anchorRef.current
+    if (!el || !a) return
+    const r = a.getBoundingClientRect()
+    const w = el.offsetWidth
+    const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), Math.max(8, window.innerWidth - 8 - w))
+    el.style.left = `${left}px`
+  }, [pickerOpen, column])
 
   const streamTip = (label: 'Previous' | 'Next', f: StreamFolder | null) =>
     f ? `${label} stream: ${f.date} · ${titleOf(f)}` : `No ${label.toLowerCase()} stream`
@@ -151,15 +167,22 @@ export function StreamNavButtons({
           maxHeight: Math.max(160, window.innerHeight - r.top - 12),
         }
       } else {
+        // Centered on the button across (the layout effect above sets the
+        // exact left once the panel's width is known; this first value is
+        // the center for the panel's minimum width, so nothing jumps), and
+        // along it opens below the button or above it from the bottom
+        // half, clamped 8 px inside the window. One engine for every
+        // anchored popup is APP-39; this picker is on its list.
         const dropUp = r.top > window.innerHeight / 2
-        positionStyle = dropUp
-          ? { position: 'fixed', bottom: window.innerHeight - r.top + 4, right: Math.max(8, window.innerWidth - r.right), zIndex: 61, maxHeight: Math.max(160, r.top - 16) }
-          : { position: 'fixed', top: r.bottom + 4, right: Math.max(8, window.innerWidth - r.right), zIndex: 61, maxHeight: Math.max(160, window.innerHeight - r.bottom - 16) }
+        const along: React.CSSProperties = dropUp
+          ? { bottom: window.innerHeight - r.top + 4, maxHeight: Math.max(160, r.top - 16) }
+          : { top: r.bottom + 4, maxHeight: Math.max(160, window.innerHeight - r.bottom - 16) }
+        positionStyle = { position: 'fixed', zIndex: 61, maxWidth: Math.min(320, window.innerWidth - 16), left: Math.max(8, r.left + r.width / 2 - 120), ...along }
       }
       return (
         <>
           <div className="fixed inset-0 z-[60]" onClick={() => setPickerOpen(false)} />
-          <div style={positionStyle} className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[240px] max-w-[320px] overflow-y-auto py-1">
+          <div ref={panelRef} style={positionStyle} className="bg-navy-700 border border-white/10 rounded-lg shadow-xl min-w-[240px] max-w-[320px] overflow-y-auto py-1">
             {/* Newest episode at the top, even though siblings is sorted
                 ascending for the prev/next semantics; slice() so the
                 reverse cannot mutate the caller's list. */}
