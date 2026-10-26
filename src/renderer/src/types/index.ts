@@ -245,6 +245,11 @@ export interface VideoEntry {
   /** SM's archive marker was found in the file's container tags. Undefined =
    *  not determined yet (cloud placeholder, or entry predates the field). */
   archived?: boolean
+  /** One of the converter's marks was found in the file's container tags
+   *  (a conversion, clip, short, combine or archive stamp), so the file
+   *  is the app's output (STR-40). Sticky once true. Undefined = not
+   *  determined yet. */
+  converted?: boolean
 }
 
 /** In-progress clip work. Saved per-stream-folder under `StreamMeta.clipDrafts`, keyed by draft id. */

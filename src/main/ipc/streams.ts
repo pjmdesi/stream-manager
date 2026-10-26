@@ -8,7 +8,7 @@ import { startStreamsWatcher, type StreamsWatcher } from '../services/streamsWat
 import { getStore, getStreamsDir, getStreamMode } from './store'
 import type { ConversionPreset } from './converter'
 import { checkLocalFiles, isFileConfirmedLocal, trashItemWithRetry } from './files'
-import { probeFile, parseClipProvenance, probeArchiveTag, isArchiveTag } from '../services/ffmpegService'
+import { probeFile, parseClipProvenance, probeContainerTags, isArchiveTag, isConverterOutput } from '../services/ffmpegService'
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { broadcast } from '../services/broadcast'
 import { isVideoExtension } from '../../shared/videoExts'
@@ -35,6 +35,12 @@ export interface VideoEntry {
    *  (STR-20). Undefined = not determined yet (never probed, or a cloud
    *  placeholder that cannot be probed without hydrating). */
   archived?: boolean
+  /** True when the file carries one of the app's converter markers (a
+   *  conversion, clip, short, combine or archive stamp), read at probe
+   *  time like `archived` (STR-40). Sticky: once a file is known to be
+   *  the converter's output, no later probe takes it back, so an
+   *  offloaded placeholder keeps the mark. Undefined = not determined. */
+  converted?: boolean
 }
 
 export interface ClipDraft {
@@ -844,6 +850,7 @@ async function refreshVideoMaps(
           // The probe read the container tags, so this is a definite answer
           // either way (an archived file that gets re-encoded loses it).
           archived: isArchiveTag(info.encodedBy),
+          converted: prev?.converted || isConverterOutput(info),
         }
         const meta = ensureMetaEntry(allMeta, key, pathDate.get(p)!)
         if (!meta.videoMap) meta.videoMap = {}
@@ -1523,28 +1530,30 @@ export function registerStreamsIPC(): void {
     writeAllMeta(streamsDir, allMeta)
   })
 
-  // Backfill the per-file `archived` flag for videoMap entries that predate
-  // it (STR-20). New probes record the flag as part of refreshVideoMaps;
-  // this covers entries the scan will not re-probe (mtime unchanged) and
-  // files that just hydrated. Only local files are probed, never
-  // placeholders, so a cloud file stays undetermined until it lands.
-  // Returns one verdict per PROBED path; the renderer merges them in.
-  ipcMain.handle('videoMap:backfillArchived', async (_event, folderPath: string, videoPaths: string[], metaKeyOverride?: string): Promise<Array<{ path: string; archived: boolean }>> => {
+  // Backfill the per-file `archived` and `converted` flags for videoMap
+  // entries that predate them (STR-20, STR-40). New probes record both as
+  // part of refreshVideoMaps; this covers entries the scan will not
+  // re-probe (mtime unchanged) and files that just hydrated. Only local
+  // files are probed, never placeholders, so a cloud file stays
+  // undetermined until it lands. Returns one verdict per PROBED path; the
+  // renderer merges them in.
+  ipcMain.handle('videoMap:backfillFlags', async (_event, folderPath: string, videoPaths: string[], metaKeyOverride?: string): Promise<Array<{ path: string; archived: boolean; converted: boolean }>> => {
     if (!Array.isArray(videoPaths) || videoPaths.length === 0) return []
     const localFlags = await checkLocalFiles(videoPaths)
     const eligible = videoPaths.filter((_, i) => localFlags[i])
     if (eligible.length === 0) return []
-    const verdicts: Array<{ path: string; archived: boolean }> = []
+    const verdicts: Array<{ path: string; archived: boolean; converted: boolean }> = []
     const CONCURRENCY = 4
     let cursor = 0
     await Promise.all(Array.from({ length: Math.min(CONCURRENCY, eligible.length) }, async () => {
       while (cursor < eligible.length) {
         const p = eligible[cursor++]
-        const tag = await probeArchiveTag(p)
-        // A failed probe returns undefined, indistinguishable from "no
-        // tag"; the entry stays undetermined rather than recording false.
-        if (tag === undefined) continue
-        verdicts.push({ path: p, archived: isArchiveTag(tag) })
+        const tags = await probeContainerTags(p)
+        // A failed probe answers undefined and the entry stays
+        // undetermined rather than recording false; a probe that read the
+        // container and found no marker is a definite no.
+        if (tags === undefined) continue
+        verdicts.push({ path: p, archived: isArchiveTag(tags.encodedBy), converted: isConverterOutput(tags) })
       }
     }))
     if (verdicts.length === 0) return []
@@ -1559,7 +1568,10 @@ export function registerStreamsIPC(): void {
         for (const v of verdicts) {
           const relKey = relativeKey(folderPath, v.path)
           const entry = videoMap[relKey]
-          if (entry && entry.archived !== v.archived) { videoMap[relKey] = { ...entry, archived: v.archived }; touched = true }
+          if (!entry) continue
+          // `converted` is sticky: a known output stays one.
+          const converted = entry.converted || v.converted
+          if (entry.archived !== v.archived || entry.converted !== converted) { videoMap[relKey] = { ...entry, archived: v.archived, converted }; touched = true }
         }
         if (touched) {
           allMeta[key] = { ...existing, videoMap }
@@ -1575,7 +1587,7 @@ export function registerStreamsIPC(): void {
     } catch (err) {
       // The verdicts still go back to the renderer for this session; the
       // next backfill retries the write.
-      console.warn('[videoMap:backfillArchived] meta write skipped:', err)
+      console.warn('[videoMap:backfillFlags] meta write skipped:', err)
     }
     return verdicts
   })

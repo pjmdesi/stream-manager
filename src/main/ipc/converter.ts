@@ -1224,7 +1224,7 @@ export async function startConversionJob(
           setStatus('running')
         }
 
-        const { runConversion, applyGpuAcceleration, probeFile } = await import('../services/ffmpegService')
+        const { runConversion, applyGpuAcceleration, probeFile, parseClipProvenance, conversionProvenanceComment } = await import('../services/ffmpegService')
         let gpuArgs = await applyGpuAcceleration(job.preset.ffmpegArgs)
         // Audio-extraction track selection: prepend an explicit stream map so
         // ffmpeg extracts the chosen audio track rather than its default pick.
@@ -1243,6 +1243,15 @@ export async function startConversionJob(
           gpuArgs = `${gpuArgs} -metadata "encoded_by=Archived Stream — Stream Manager v${app.getVersion()}"`
         }
         const probed = await probeFile(job.inputFile).catch(() => null)
+        // Every other conversion is stamped as the converter's output in the
+        // `comment` tag (STR-40), the slot the clip and combine stamps use:
+        // MP4 drops `encoded_by`, the archive's tag, and the archive presets
+        // write MKV. An input that already carries a clip, short or combine
+        // marker keeps it, since that marker already says the app made the
+        // file and a converted clip is still a clip; the output inherits it.
+        if (job.groupCompletionHook?.type !== 'archiveMarkAsArchived' && !parseClipProvenance(probed?.comment)) {
+          gpuArgs = `${gpuArgs} -metadata "comment=${conversionProvenanceComment(app.getVersion())}"`
+        }
         const duration = Number(probed?.duration) || 0
         // The output should run as long as the input unless the preset
         // trims (a custom `-t`, `-to`, `-ss` or frame cap); then only the

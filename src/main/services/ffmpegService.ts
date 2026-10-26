@@ -214,6 +214,39 @@ export function parseClipProvenance(comment: string | undefined | null): 'clip' 
   return null
 }
 
+// ── Conversion provenance marker (STR-40) ───────────────────────────────────
+// Every other conversion the converter runs is stamped the same way, on the
+// `comment` tag: MP4 drops `encoded_by`, the archive's tag (the archive
+// presets write MKV, where it survives), and `comment` lives through every
+// container the presets write. The version rides along, as on the clip and
+// combine stamps.
+const CONVERSION_MARKER = 'Stream Manager Conversion'
+
+/** Build the `-metadata comment=` value stamped on a regular conversion. */
+export function conversionProvenanceComment(version: string): string {
+  return `${CONVERSION_MARKER} — v${version}`
+}
+
+/** True when the file's container tags say the app's converter wrote it:
+ *  a conversion, a clip or short export, a combine, or an archive. */
+export function isConverterOutput(tags: { comment?: string | null; encodedBy?: string | null }): boolean {
+  return (!!tags.comment && tags.comment.includes(CONVERSION_MARKER))
+    || parseClipProvenance(tags.comment) !== null
+    || isArchiveTag(tags.encodedBy)
+}
+
+/** Read the two format-level tags the app's markers live in. Undefined
+ *  when the probe fails, so a failure never reads as "no tag". */
+export async function probeContainerTags(filePath: string): Promise<{ comment?: string; encodedBy?: string } | undefined> {
+  return new Promise(resolve => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) { resolve(undefined); return }
+      const tags = (metadata.format as { tags?: Record<string, string> }).tags
+      resolve({ comment: tags?.comment ?? tags?.COMMENT, encodedBy: tags?.encoded_by ?? tags?.ENCODED_BY })
+    })
+  })
+}
+
 // Set of per-call cancel handles. Each in-flight extractAudioTracks adds
 // its own cancel on entry and removes it on exit, so multiple concurrent
 // extractions are safe and cancelExtraction() kills every one of them.

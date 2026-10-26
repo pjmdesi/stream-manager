@@ -137,7 +137,7 @@ declare global {
       /** Probe LOCAL files among `videoPaths` for the archive marker and
        *  record the verdict on their videoMap entries. Returns one verdict
        *  per probed path (placeholders and failed probes are omitted). */
-      backfillVideoArchived(folderPath: string, videoPaths: string[], metaKey?: string): Promise<Array<{ path: string; archived: boolean }>>
+      backfillVideoFlags(folderPath: string, videoPaths: string[], metaKey?: string): Promise<Array<{ path: string; archived: boolean; converted: boolean }>>
       detectAvailableEncoders(): Promise<string[]>
       importPreset(filePath: string): Promise<ConversionPreset>
       getImportedPresets(): Promise<ConversionPreset[]>

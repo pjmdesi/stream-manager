@@ -239,7 +239,7 @@ function timeAgo(ms: number): string {
   return `${Math.floor(s / 86400)}d ago`
 }
 
-function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleteRequest, blockReason, drafts, onModifierSelect }: {
+function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archived, converted, selectMode, selected, highlighted, onSelectToggle, onDragStart, onDragEnter, onSendToPlayer, onSendToConverter, onOffload, onPin, onDeleteRequest, blockReason, drafts, onModifierSelect }: {
   path: string
   entry: VideoEntry | undefined
   /** Fresh ffprobe result after a hydration — fills what the placeholder lacked. */
@@ -250,6 +250,9 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
   busy: boolean
   /** SM stamped the archived (encoded_by) tag on the file. */
   archived: boolean
+  /** The file carries one of the converter's marks: a conversion, clip,
+   *  short, combine or archive stamp (STR-40). */
+  converted: boolean
   selectMode: boolean
   selected: boolean
   /** Transient focus ring (streams-list tooltip row click). */
@@ -315,16 +318,22 @@ function VideoCard({ path, entry, probed, isLocal, cloudSyncActive, busy, archiv
           tag={(() => {
             // The archived marker lives in the tag tray for every kind of
             // video (same layout as the thumbnail tag's bookmark), never
-            // next to the filename: one place, one meaning. strokeWidth 3:
-            // at 9px the default 2px stroke rasterizes into sub-pixel smudge
-            // and the glyph stops reading as a box.
-            const archivedTag = archived
+            // next to the filename: one place, one meaning. A file the
+            // converter wrote (a conversion, clip export or combine)
+            // carries the converter's bolt in the same slot, in the tray's
+            // own text color (STR-40); an archive implies it and keeps the
+            // archive icon alone. strokeWidth 3: at 9px the default 2px
+            // stroke rasterizes into sub-pixel smudge and the glyph stops
+            // reading as a box.
+            const markTag = archived
               ? { icon: <Archive size={9} strokeWidth={3} className="text-emerald-400" />, tooltip: 'Archived by Stream Manager' }
-              : {}
-            return isShort ? { color: 'violet' as const, label: 'Short', ...archivedTag }
-              : isClip ? { color: 'pink' as const, label: 'Clip', ...archivedTag }
-              : isCombined ? { color: 'orange' as const, label: 'Combined', ...archivedTag }
-              : isRecording ? { color: 'red' as const, label: 'Recording', ...archivedTag }
+              : converted
+                ? { icon: <Zap size={9} strokeWidth={3} />, tooltip: 'Converted by Stream Manager' }
+                : {}
+            return isShort ? { color: 'violet' as const, label: 'Short', ...markTag }
+              : isClip ? { color: 'pink' as const, label: 'Clip', ...markTag }
+              : isCombined ? { color: 'orange' as const, label: 'Combined', ...markTag }
+              : isRecording ? { color: 'red' as const, label: 'Recording', ...markTag }
               : null
           })()}
         />
@@ -776,6 +785,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
   }, [offloadItems, hydrateItems])
 
   const [archivedSet, setArchivedSet] = useState<Set<string>>(new Set())
+  const [convertedSet, setConvertedSet] = useState<Set<string>>(new Set())
 
   // After a video finishes hydrating, read the metadata its placeholder lacked:
   // a fresh ffprobe for duration/resolution/codec and a thumbnail remount.
@@ -792,41 +802,53 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
       window.api.probeFile(it.path)
         .then(info => setProbedMeta(prev => ({ ...prev, [it.path]: info })))
         .catch(() => {})
-      // The placeholder's videoMap entry had no archived verdict (it could
-      // not be probed); now that the bytes are here, record one.
-      window.api.backfillVideoArchived(folder.folderPath, [it.path], metaKey)
-        .then(verdicts => { for (const v of verdicts) if (v.archived) setArchivedSet(prev => { const next = new Set(prev); next.add(v.path); return next }) })
+      // The placeholder's videoMap entry had no archived or converted
+      // verdict (it could not be probed); now that the bytes are here,
+      // record them.
+      window.api.backfillVideoFlags(folder.folderPath, [it.path], metaKey)
+        .then(verdicts => {
+          for (const v of verdicts) {
+            if (v.archived) setArchivedSet(prev => new Set([...prev, v.path]))
+            if (v.converted) setConvertedSet(prev => new Set([...prev, v.path]))
+          }
+        })
         .catch(() => {})
     }
   }, [hydrateItems, folder.videos, folder.folderPath, metaKey])
 
-  // Archived badge (STR-20): the truth is the per-file `archived` flag on
-  // the videoMap entry, recorded by the scan's probe. It was a live
-  // ffprobe on every visit before, which was flaky: deferred, local files
-  // only, silent on probe failure, and never re-run after an archive
-  // finished because the path list it keyed on did not change. Now only
-  // entries with NO verdict yet (predating the flag, or cloud placeholders)
-  // get probed, and the verdict is written back so it is a one-time cost.
+  // Archived badge (STR-20) and converter mark (STR-40): the truth is the
+  // per-file `archived` and `converted` flags on the videoMap entry,
+  // recorded by the scan's probe. It was a live ffprobe on every visit
+  // before, which was flaky: deferred, local files only, silent on probe
+  // failure, and never re-run after an archive finished because the path
+  // list it keyed on did not change. Now only entries with NO verdict yet
+  // (predating a flag, or cloud placeholders) get probed, and the verdicts
+  // are written back so it is a one-time cost.
   useEffect(() => {
-    const undetermined = folder.videos.filter(p => videoMap[videoMapKey(folder.folderPath, p)]?.archived === undefined)
+    const undetermined = folder.videos.filter(p => {
+      const e = videoMap[videoMapKey(folder.folderPath, p)]
+      return e?.archived === undefined || e?.converted === undefined
+    })
     if (undetermined.length === 0) return
     let cancelled = false
     // Deferred past the slide: the reply would otherwise re-render the grid
     // mid-open-animation.
     const timer = setTimeout(() => {
-      window.api.backfillVideoArchived(folder.folderPath, undetermined, metaKey)
+      window.api.backfillVideoFlags(folder.folderPath, undetermined, metaKey)
         .then(verdicts => {
           if (cancelled) return
-          const hits = verdicts.filter(v => v.archived).map(v => v.path)
-          if (hits.length > 0) setArchivedSet(prev => new Set([...prev, ...hits]))
+          const archivedHits = verdicts.filter(v => v.archived).map(v => v.path)
+          if (archivedHits.length > 0) setArchivedSet(prev => new Set([...prev, ...archivedHits]))
+          const convertedHits = verdicts.filter(v => v.converted).map(v => v.path)
+          if (convertedHits.length > 0) setConvertedSet(prev => new Set([...prev, ...convertedHits]))
         })
         .catch(() => {})
     }, anim.duration(230))
     return () => { cancelled = true; clearTimeout(timer) }
   }, [folder.videos.join('|'), folder.folderPath, metaKey]) // eslint-disable-line react-hooks/exhaustive-deps
-  // Reset the session overlay when the stream changes so one stream's
+  // Reset the session overlays when the stream changes so one stream's
   // hits never bleed into the next.
-  useEffect(() => { setArchivedSet(new Set()) }, [folder.folderPath])
+  useEffect(() => { setArchivedSet(new Set()); setConvertedSet(new Set()) }, [folder.folderPath])
 
   const sizeOf = (path: string): number => {
     return videoMap[videoMapKey(folder.folderPath, path)]?.size ?? imageSizes[path] ?? 0
@@ -1292,6 +1314,7 @@ export const StreamFilesGrid = forwardRef<FilesGridHandle, Props>(function Strea
               cloudSyncActive={cloudSyncActive}
               busy={busyPaths.has(path)}
               archived={!!entry?.archived || archivedSet.has(path)}
+              converted={!!entry?.converted || convertedSet.has(path)}
               selectMode={selectMode}
               selected={selected.has(path)}
               highlighted={ringPath === path}
