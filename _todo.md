@@ -27,6 +27,7 @@
 23. APP-54
 24. CONV-25
 25. THU-42
+26. THU-43
 
 ## Next up
 
@@ -68,8 +69,7 @@
 36. STR-50
 37. STR-51
 38. APP-58
-39. THU-43
-40. THU-44
+39. THU-44
 
 ## Improvement ideas
 
@@ -402,7 +402,7 @@
 
   ![screenshot](_todo.md.images/THU-42-1.png)
 
-- **THU-43** [bug] [impact:3]
+- **THU-43** [bug] [impact:3] [done]
   Fixed 2026-10-26, awaiting review. Opening a stream with no thumbnail, picking a template, and landing in the editor, the page bounced to the overview a second or two later and the thumbnail was never written. Cause: the editor listens for streams-changed events and treats the open variant as deleted when the disk has no file for it; a brand-new variant has no file until its first save lands, and that save first loads the template's images, so any event for the stream in that window (the files grid's one-time probe writing its converted verdicts to _meta.json since STR-40, the likeliest source) sent the editor to the overview, which unmounted the stage and aborted the save. Start blank had the same hole with no save at all. Fix: the editor keeps the set of variants known to exist on disk (what the open found, plus each one a save wrote) and only treats a variant in that set as deleted. Reported 2026-10-26.
 
 - **THU-43** [impact:2]
@@ -818,6 +818,7 @@
 ### Navigation
 
 - **NAV-1** [bug] [impact:1]
+  Fixed 2026-10-26, awaiting review. Reproduced during the THU-43 check: it shows when the editor reaches a stream through its own prev and next arrows. The streams page hands the editor a rendered title, but the arrows handed it the raw ytTitle, which is the title template, so the nav subtext read the template and the recents entry stored it (the overview showed it raw until its load re-rendered the titles). The arrows now render the title the same way, and opening from the recents list re-renders a stored one.
   Raw merge fields were visisble in the nav subtitle for some reason. Unable to reproduce, but I grabbed a screenshot:
   "D:\SMAUG\Desktop\stream-manager-thumbnails-new.webp"
 

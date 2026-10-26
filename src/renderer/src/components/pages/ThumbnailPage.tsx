@@ -7617,19 +7617,23 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // rendered blanks and the next save BAKED them into the PNG.
     let meta: StreamMeta | undefined
     let totalEpisodes: number | undefined
+    // The stored title may be the raw template from an older entry; the
+    // live stream renders it (NAV-1).
+    let title = entry.title
     try {
       const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
       const f = all.find(x => x.folderPath === entry.folderPath && x.date === entry.date)
         ?? all.find(x => x.folderPath === entry.folderPath)
       if (f) {
         meta = f.meta ?? undefined
+        title = renderStreamTitle(f, all)
         const primaryGame = resolvePrimaryGame(f.meta) || f.detectedGames?.[0] || ''
         totalEpisodes = f.meta?.isSeries === false
           ? 0
           : detectTotalEpisodes(all, primaryGame, f.meta?.ytSeason || '1')
       }
     } catch { /* open with just the basics — same as before */ }
-    await openStreamEditor(entry.folderPath, entry.date, entry.title, meta, totalEpisodes)
+    await openStreamEditor(entry.folderPath, entry.date, title, meta, totalEpisodes)
   }, [openStreamEditor, config.streamsDir, config.streamMode])
 
   const removeRecent = useCallback((entry: ThumbnailRecentEntry) => {
@@ -7674,7 +7678,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const totalEpisodes = f.meta?.isSeries === false
       ? 0
       : detectTotalEpisodes(sortedStreamFolders, primaryGame, f.meta?.ytSeason || '1')
-    const title = f.meta?.ytTitle ?? f.meta?.games?.join(', ')
+    // The rendered title, as the streams page passes it: the raw ytTitle
+    // is the title template, so arriving here through the arrows put its
+    // merge fields in the nav subtext and in the recents entry (NAV-1).
+    const title = renderStreamTitle(f, sortedStreamFolders)
     void openStreamEditor(f.folderPath, f.date, title, f.meta ?? undefined, totalEpisodes)
   }, [openStreamEditor, sortedStreamFolders])
   const navRefs = useRef({ prevNavStream, nextNavStream, thumbSeriesNav, openNeighborStream })
