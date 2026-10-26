@@ -316,7 +316,15 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   }
 
   // ── Jump-nav ───────────────────────────────────────────────────────────
-  const isDev = import.meta.env.DEV
+  // Dev Tools show on the dev server and in a packaged _DEV build alike
+  // (APP-55): the branch badge's source, a branch other than master, is
+  // what tells a _DEV build apart, since import.meta.env.DEV is false in
+  // any packaged build.
+  const [onDevBranch, setOnDevBranch] = useState(false)
+  useEffect(() => {
+    window.api.getGitBranch?.().then(b => setOnDevBranch(!!b && b !== 'master')).catch(() => {})
+  }, [])
+  const isDev = import.meta.env.DEV || onDevBranch
   const aiConnected = !!(config.claudeApiKey ?? '').trim()
   const sections = SETTINGS_SECTIONS.filter(s => (!s.dev || isDev) && (s.id !== 'ai' || aiConnected))
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -922,8 +930,23 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
           </div>
         </Section>
 
-        {import.meta.env.DEV && (
+        {isDev && (
           <Section id="devtools" icon={<FlaskConical size={14} />} title="Dev Tools" headerClass="text-yellow-600 border-yellow-600/20" registerRef={registerSection}>
+            <div className="flex flex-col gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  // Every flag a one-time notice sets once the user has
+                  // seen it (APP-55); the store follows config:changed, so
+                  // the notices arm again without a reload.
+                  void window.api.setConfig({ archiveNoticeAcknowledged: false, dumpRetirementNoticeAcknowledged: false, hasOpenedHelp: false })
+                }}
+              >
+                Reset one-time notices
+              </Button>
+              <p className="text-xs text-gray-400">Brings back the notice before the first archive, the dump-folder retirement notice, and the Help nudge, as a fresh install would see them.</p>
+            </div>
             <div className="flex flex-col gap-1">
               <Button
                 variant="ghost"

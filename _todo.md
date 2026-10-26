@@ -27,48 +27,51 @@
 23. APP-54
 24. CONV-25
 25. THU-42
-26. THU-43
+26. THU-45
+27. APP-55
+28. PLR-26
+29. STR-51
+30. STR-47
+31. PLR-30
+32. PLR-32
+33. THU-35
+34. APP-28
+35. STR-26
+36. THU-43
 
 ## Next up
 
-1. STR-34
-2. SYNC-10
-3. STR-32
-4. APP-38
-5. APP-19
-6. APP-39
-7. PLR-30
+1. CONV-27
+2. STR-34
+3. SYNC-10
+4. STR-32
+5. APP-38
+6. APP-19
+7. APP-39
 8. STR-36
 9. STR-31
 10. STR-30
 11. STR-11
 12. STR-25
-13. STR-26
-14. PLR-26
-15. PLR-25
-16. PLR-32
-17. THU-38
-18. THU-35
-19. THU-36
-20. THU-37
-21. THU-39
-22. INTG-1
-23. APP-25
-24. APP-26
-25. APP-28
-26. APP-31
-27. APP-34
-28. APP-35
-29. SYNC-7
-30. STR-44
-31. THU-41
-32. STR-47
-33. STR-48
-34. STR-49
-35. STR-50
-36. STR-51
-37. APP-58
-38. THU-44
+13. PLR-25
+14. THU-38
+15. THU-36
+16. THU-37
+17. THU-39
+18. INTG-1
+19. APP-25
+20. APP-26
+21. APP-31
+22. APP-34
+23. APP-35
+24. SYNC-7
+25. STR-44
+26. THU-41
+27. STR-48
+28. STR-49
+29. STR-50
+30. APP-58
+31. THU-44
 
 ## Improvement ideas
 
@@ -401,7 +404,7 @@
 
   ![screenshot](_todo.md.images/THU-42-1.png)
 
-- **THU-43** [bug] [impact:3] [done]
+- **THU-45** [bug] [impact:3] [done]
   Fixed 2026-10-26, awaiting review. Opening a stream with no thumbnail, picking a template, and landing in the editor, the page bounced to the overview a second or two later and the thumbnail was never written. Cause: the editor listens for streams-changed events and treats the open variant as deleted when the disk has no file for it; a brand-new variant has no file until its first save lands, and that save first loads the template's images, so any event for the stream in that window (the files grid's one-time probe writing its converted verdicts to _meta.json since STR-40, the likeliest source) sent the editor to the overview, which unmounted the stage and aborted the save. Start blank had the same hole with no save at all. Fix: the editor keeps the set of variants known to exist on disk (what the open found, plus each one a save wrote) and only treats a variant in that set as deleted. Reported 2026-10-26.
 
 - **THU-43** [impact:2]
@@ -763,6 +766,7 @@
   Add setting to allow bulk cloud sync to sort items by size (ascending/descending). When multiple items are chosen to pin local or offload, allow the cloud sync modal to sort the items by file size (or estimated file size if unknown), so the user can pick the largest or smallest items in the whole collection to go first. This would be a new dropdown setting in the settings menu (probably a new "cloud sync" section).
 
 - **APP-55** [impact:1] [ui]
+  Built 2026-10-26, awaiting review. A Reset one-time notices button at the top of Settings' Dev Tools clears the first-archive notice, the dump-folder retirement notice and the Help nudge flags through the config, with no reload; the store follows the change. Decision at build time: the Dev Tools section itself now shows in a packaged _DEV build too (it was dev-server only), keyed off the same branch check as the badge, since a control for _DEV builds inside a section they could not see would be no control; say if only the new button should show there.
   Dev builds get a way to reset one-time notices. The notice before the first archive (2.7.1) is remembered in config once the user continues, so a tester cannot bring it back without editing the config file, and the same will apply to any one-time notice added later. Add a Reset one-time notices control in Settings, shown only in _DEV builds (the branch badge already knows), that clears those flags.
 
 - **APP-57** [ui] [impact:2]
@@ -817,7 +821,7 @@
 ### Navigation
 
 - **NAV-1** [bug] [impact:1] [done]
-  Fixed 2026-10-26, awaiting review. Reproduced during the THU-43 check: it shows when the editor reaches a stream through its own prev and next arrows. The streams page hands the editor a rendered title, but the arrows handed it the raw ytTitle, which is the title template, so the nav subtext read the template and the recents entry stored it (the overview showed it raw until its load re-rendered the titles). The arrows now render the title the same way, and opening from the recents list re-renders a stored one.
+  Fixed 2026-10-26, awaiting review. Reproduced during the THU-45 check: it shows when the editor reaches a stream through its own prev and next arrows. The streams page hands the editor a rendered title, but the arrows handed it the raw ytTitle, which is the title template, so the nav subtext read the template and the recents entry stored it (the overview showed it raw until its load re-rendered the titles). The arrows now render the title the same way, and opening from the recents list re-renders a stored one.
   Raw merge fields were visisble in the nav subtitle for some reason. Unable to reproduce, but I grabbed a screenshot:
   "D:\SMAUG\Desktop\stream-manager-thumbnails-new.webp"
 
