@@ -966,8 +966,12 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             </div>
           )}
 
+          {/* The stats wrap: each figure keeps its own line unbroken, and a
+              row too narrow for all of them grows by a line instead of
+              running the figures under the buttons and squeezing the
+              folder link to nothing (seen 2026-10-26 at about 800 px). */}
           {isActive && (
-            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
               {/* Guard: ffmpeg's first progress events can carry NaN before
                   a real timemark lands — show 0% instead of "NaN%". */}
               <span className="whitespace-nowrap">{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
@@ -994,7 +998,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           )}
 
           {isDone && (
-            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
               <span className="whitespace-nowrap">100%</span>
               {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(finalElapsed / 1000)}</span>}
               {finalSizeText && <span className="whitespace-nowrap">Final size: {finalSizeText}</span>}
@@ -1028,7 +1032,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           )}
 
           {isCancelled && (
-            <div className="flex items-center gap-3 text-xs text-gray-400 tabular-nums">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
               <span>{job.progress.toFixed(1)}%</span>
               <span>Conversion cancelled</span>
               {/* A kept partial is a file in the output folder, so the folder
@@ -1063,14 +1067,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           {job.status === 'queued' && !job.autoStart && (
             <button onClick={() => window.api.startQueuedJob(job.id)} className={rowActionClass('green')}>
               <Play size={13} />
-              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
+              <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
             </button>
           )}
           {job.status === 'queued' && job.autoStart && (
             <Tooltip content="Waiting for a free conversion slot (max simultaneous conversions in Settings). Starts automatically when one frees up." side="top">
               <span className="inline-flex shrink-0 min-w-max items-center gap-1.5 px-2 py-1.5 rounded-md text-[11px] text-gray-400 cursor-default">
                 <Clock size={13} />
-                <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Waiting</CollapsibleLabel>
+                <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">Waiting</CollapsibleLabel>
               </span>
             </Tooltip>
           )}
@@ -1080,19 +1084,19 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               className={job.status === 'paused' ? rowActionClass('blue') : rowActionClass('yellow')}
             >
               {job.status === 'paused' ? <Play size={13} /> : <Pause size={13} />}
-              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{job.status === 'paused' ? 'Resume' : 'Pause'}</CollapsibleLabel>
+              <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">{job.status === 'paused' ? 'Resume' : 'Pause'}</CollapsibleLabel>
             </button>
           )}
           {isWorking && (
             <button onClick={() => cancelJob(job.id)} className={rowActionClass('red')}>
               <Ban size={13} />
-              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Cancel</CollapsibleLabel>
+              <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">Cancel</CollapsibleLabel>
             </button>
           )}
           {isCancelled && (
             <button onClick={() => requeueJob(job)} className={rowActionClass('blue')}>
               <RotateCcw size={13} />
-              <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Requeue</CollapsibleLabel>
+              <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">Requeue</CollapsibleLabel>
             </button>
           )}
           {(isDone || isCancelled || isError || job.status === 'queued') && (() => {
@@ -1112,14 +1116,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <Tooltip content="Decide on the larger file first: Replace anyway or Discard now" side="top">
                 <button disabled className={rowActionClass('gray')}>
                   <ListX size={13} />
-                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
+                  <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
                 </button>
               </Tooltip>
             ) : (
               <Tooltip content={hint} side="top">
                 <button onClick={() => removeJob(job.id)} className={rowActionClass('gray')}>
                   <ListX size={13} />
-                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
+                  <CollapsibleLabel expandClass="@[900px]:grid-cols-[1fr] @[900px]:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
                 </button>
               </Tooltip>
             )
