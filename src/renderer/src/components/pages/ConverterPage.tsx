@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
 import { useConversionJobs } from '../../context/ConversionContext'
-import { XCircle, Zap, CheckCircle, AlertCircle, AlertTriangle, Clock, RefreshCw, Trash2, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical, ShieldCheck } from 'lucide-react'
+import { XCircle, Zap, CheckCircle, AlertCircle, AlertTriangle, Clock, RefreshCw, Trash2, ListX, Archive, Ban, Pause, Play, Cloud, SlidersHorizontal, ChevronDown, RotateCcw, Loader2, GripVertical, ShieldCheck } from 'lucide-react'
 import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, AudioTrackInfo } from '../../types'
 import { Button } from '../ui/Button'
@@ -1095,23 +1095,35 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
               <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Requeue</CollapsibleLabel>
             </button>
           )}
-          {(isDone || isCancelled || isError || job.status === 'queued') && (
-            kept && !kept.resolved ? (
+          {(isDone || isCancelled || isError || job.status === 'queued') && (() => {
+            // A finished row is cleared from the list, a queued one removed
+            // from the queue; neither touches a file. The button says so:
+            // the list glyph and the gray tone, not the trash can and the
+            // red that mean deletion elsewhere, and a tooltip that spells
+            // it out (CONV-25).
+            const queued = job.status === 'queued'
+            const label = queued ? 'Remove' : 'Clear'
+            const hint = queued
+              ? 'Remove this job from the queue. Files on disk are not touched.'
+              : 'Clear this job from the list. Files on disk are not touched.'
+            return kept && !kept.resolved ? (
               // Removing the row would discard the larger file without saying
               // so; the decision comes first (CONV-15).
               <Tooltip content="Decide on the larger file first: Replace anyway or Discard now" side="top">
-                <button disabled className={rowActionClass('red')}>
-                  <Trash2 size={13} />
-                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+                <button disabled className={rowActionClass('gray')}>
+                  <ListX size={13} />
+                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
                 </button>
               </Tooltip>
             ) : (
-              <button onClick={() => removeJob(job.id)} className={rowActionClass('red')}>
-                <Trash2 size={13} />
-                <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
-              </button>
+              <Tooltip content={hint} side="top">
+                <button onClick={() => removeJob(job.id)} className={rowActionClass('gray')}>
+                  <ListX size={13} />
+                  <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">{label}</CollapsibleLabel>
+                </button>
+              </Tooltip>
             )
-          )}
+          })()}
         </div>
       </div>
     )
@@ -1305,10 +1317,14 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
                         <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Start</CollapsibleLabel>
                       </button>
                       </Tooltip>
-                      <button onClick={() => removeFile(path)} className={rowActionClass('red')}>
-                        <Trash2 size={13} />
-                        <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
-                      </button>
+                      {/* Takes the file out of the ready list, nothing more
+                          (CONV-25): the list glyph, gray, and a tooltip. */}
+                      <Tooltip content="Remove this file from the queue. The file itself is not touched." side="top">
+                        <button onClick={() => removeFile(path)} className={rowActionClass('gray')}>
+                          <ListX size={13} />
+                          <CollapsibleLabel expandClass="@2xl:grid-cols-[1fr] @2xl:ms-0" collapsedMarginStart="-ms-1.5">Remove</CollapsibleLabel>
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
                 )

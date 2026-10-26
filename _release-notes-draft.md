@@ -14,6 +14,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - An archive whose result would be no smaller than the original no longer replaces it. The original stays, the larger file waits for two hours in case you want it anyway (Replace anyway on the row, behind a confirmation), and the row says what happened. A stream is marked archived only when its files were actually replaced.
 - Converting rows show the source size beside the source name, the output size growing beside the output name, an estimated final size (with its share of the source) from 5 percent on, and the time remaining. The Combine page shows the same while it runs.
 - Every conversion, archive, clip export and combine the app runs is now recorded in a log on this PC: the files, the preset and its settings, the timings, and how it ended. Settings, under System, has an Open logs folder button. Records are kept for a year.
+- Taking a job off the Converter page no longer looks like a deletion. A finished row has a Clear button and a waiting one a Remove button, both with a list icon instead of the trash can, and each says on hover that the files on disk are not touched. Files in the ready list have the same Remove, and the Combine page's Clear job, Remove job and per-file remove buttons follow suit.
 
 ## Streams
 

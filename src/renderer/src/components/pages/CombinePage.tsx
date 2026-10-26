@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   GripVertical, Film, FolderOpen, Wand2, Combine,
-  CheckCircle2, AlertCircle, AlertTriangle, Loader2, Trash2,
+  CheckCircle2, AlertCircle, AlertTriangle, Loader2, ListX,
   RefreshCw, Pause, Play, Ban, X, Cloud
 } from 'lucide-react'
 import { Button } from '../ui/Button'
@@ -889,16 +889,19 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                       </button>
                     </Tooltip>
                   )}
+                  {/* The Remove tier (style guide, CONV-25): the list glyph
+                      and a gray hover, since the trash can and red mean a
+                      deletion; the tooltip says no file is touched. */}
                   <Tooltip content={g.completed
-                    ? 'Clear this finished job from the list — files on disk are untouched'
-                    : 'Remove this job and all its files from the list — the files themselves are untouched'}
+                    ? 'Clear this finished job from the list. Files on disk are not touched.'
+                    : 'Remove this job and all its files from the list. The files themselves are not touched.'}
                   >
                     <button
                       onClick={() => removeGroup(g.id)}
                       disabled={isRunning}
-                      className="inline-flex shrink-0 items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-gray-400 transition-colors hover:text-red-400 hover:bg-red-500/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                      className="inline-flex shrink-0 items-center gap-1.5 px-2 py-1 rounded-md text-[11px] text-gray-400 transition-colors hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent disabled:hover:text-gray-400"
                     >
-                      <Trash2 size={12} />
+                      <ListX size={12} />
                       {g.completed ? 'Clear job' : 'Remove job'}
                     </button>
                   </Tooltip>
@@ -1096,15 +1099,16 @@ export function CombinePage({ initialFiles, onNavigateToStream }: {
                         </div>
 
                         {/* Remove (not on a completed job's record rows).
-                            Trash2, not X — X is strictly close/dismiss
-                            (style guide: X closes, trash removes/deletes). */}
+                            The list glyph, not X (X is strictly close or
+                            dismiss) and not the trash can (that is a
+                            deletion); style guide, Remove tier. */}
                         {!g.completed && (
-                          <Tooltip content="Remove from this job — the file itself is untouched">
+                          <Tooltip content="Remove from this job. The file itself is not touched.">
                             <button
                               onClick={() => removeFile(g.id, i)}
-                              className="text-gray-400 hover:text-red-400 transition-colors shrink-0"
+                              className="text-gray-400 hover:text-white transition-colors shrink-0"
                             >
-                              <Trash2 size={13} />
+                              <ListX size={13} />
                             </button>
                           </Tooltip>
                         )}
