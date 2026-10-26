@@ -41,14 +41,25 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
   const PrivacyIcon = privacy === 'unlisted' ? LinkIcon : privacy === 'private' ? Lock : privacy === 'public' ? Globe : null
   const privacyLabel = privacy === 'public' ? 'Public' : privacy === 'unlisted' ? 'Unlisted' : privacy === 'private' ? 'Private' : null
 
-  // The second line: privacy, kind, date, id, with a dot between them
-  // (privacy before the date, the order of the Broadcast options). In
-  // the footer the privacy is the video's link and the id is its Studio
-  // link, each with a copy icon; in the picker they are text.
+  // The second line: id, privacy, date, kind, with a dot between them.
+  // In the footer the privacy is the video's link and the id is its
+  // Studio link, each with a copy icon; in the picker they are text.
   const linkCls = 'hover:text-gray-200 hover:underline underline-offset-2 transition-colors'
   const meta: React.ReactNode[] = []
   // A link inside a pickable row must not pick it.
   const open = (url: string) => (e: React.MouseEvent) => { e.stopPropagation(); void window.api.openUrl(url) }
+  if (broadcast) {
+    meta.push(links
+      ? (
+        <span key="id" className="inline-flex items-center gap-1 min-w-0">
+          <Tooltip content="Open in YouTube Studio" side="top" triggerClassName="inline-flex min-w-0">
+            <button type="button" onClick={open(links.studioUrl)} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
+          </Tooltip>
+          <InlineCopy url={links.studioUrl} label="Copy Studio link" />
+        </span>
+      )
+      : <span key="id" className="font-mono truncate">{broadcast.id}</span>)
+  }
   if (PrivacyIcon && privacyLabel) {
     meta.push(links
       ? (
@@ -63,6 +74,7 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
       )
       : <span key="privacy" className="inline-flex items-center gap-1 shrink-0"><PrivacyIcon size={10} /> {privacyLabel}</span>)
   }
+  if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
   if (broadcast?.isLivestream != null) {
     meta.push(
       <span key="kind" className="inline-flex items-center gap-1 shrink-0">
@@ -70,19 +82,6 @@ export function VideoRow({ broadcast, kind, chips, actions, onClick, onThumbFail
         {broadcast.isLivestream ? 'Livestream' : 'Upload'}
       </span>
     )
-  }
-  if (when) meta.push(<span key="when" className="tabular-nums shrink-0">{when}</span>)
-  if (broadcast) {
-    meta.push(links
-      ? (
-        <span key="id" className="inline-flex items-center gap-1 min-w-0">
-          <Tooltip content="Open in YouTube Studio" side="top" triggerClassName="inline-flex min-w-0">
-            <button type="button" onClick={open(links.studioUrl)} className={`font-mono truncate ${linkCls}`}>{broadcast.id}</button>
-          </Tooltip>
-          <InlineCopy url={links.studioUrl} label="Copy Studio link" />
-        </span>
-      )
-      : <span key="id" className="font-mono truncate">{broadcast.id}</span>)
   }
 
   const body = (
