@@ -396,7 +396,7 @@
 - **THU-41** [impact:2]
   Add setting to asset panel menu to show assets from streams on the same day
 
-- **THU-42** [impact:2] [bug] [ui]
+- **THU-42** [impact:2] [bug] [ui] [done]
   Fixed 2026-10-26, awaiting review. Cause: the episode picker right-aligned its panel (at least 240 px wide) to the List button, which sits beside the nav rail in the thumbnail page's top bar, so the panel ran under the rail. The panel is now centered on the button, as the tooltips are, with its left set before paint once its width is known and clamped 8 px inside the window; along, it opens below the button or above it from the bottom half. A one-off in the picker by decision; the shared engine is APP-39.
   Thumbnail episode picker popup panel gets cropped.
 
