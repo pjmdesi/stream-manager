@@ -2139,8 +2139,9 @@ export function StreamsPage({
         const cur = prev[pushedId]
         return cur ? { ...prev, [pushedId]: applyPushOverlay(cur) } : prev
       })
+      let thumbUploaded = false
       if (thumbToUpload) {
-        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload) }
+        try { await window.api.youtubeUploadThumbnail(meta.ytVideoId, thumbToUpload); thumbUploaded = true }
         catch (thumbErr: any) {
           showBanner({ streamKey: folder.relativePath, type: 'error', message: `Pushed metadata, but thumbnail upload failed: ${thumbErr?.message ?? String(thumbErr)}` })
           return
@@ -2188,6 +2189,12 @@ export function StreamsPage({
           refreshed.snippet.tags = tags
           if (categoryId) refreshed.snippet.categoryId = categoryId
           if (privacy) refreshed.status.privacyStatus = privacy
+          // A new thumbnail keeps its URL, so the row's image would stay
+          // the cached old one; a query parameter makes it load again.
+          if (thumbUploaded && refreshed.snippet.thumbnailUrl) {
+            const url = refreshed.snippet.thumbnailUrl
+            refreshed.snippet.thumbnailUrl = `${url}${url.includes('?') ? '&' : '?'}sm=${Date.now()}`
+          }
           // Schedule too — a stale read here would resurrect the OLD
           // start time in the cached broadcast, and the time dot would
           // keep glowing right after a successful schedule push.
@@ -4521,7 +4528,22 @@ export function StreamsPage({
               fileHighlight={fileHighlight}
               linkedVideoMissing={!!renderedFolder.meta?.ytVideoId && effectiveYtVideoStatusMap[renderedFolder.meta.ytVideoId]?.missing === true}
               netProblem={netProblem}
-              onPushToYoutube={(customThumb, newScheduledStartTime) => handlePushToYoutube(renderedFolder, customThumb, newScheduledStartTime)}
+              // linkedIdOverride: a broadcast the sidebar created a moment
+              // ago, before the meta write carrying it has reached this
+              // render's folder.
+              onPushToYoutube={(customThumb, newScheduledStartTime, linkedIdOverride) => handlePushToYoutube(
+                linkedIdOverride
+                  ? {
+                    ...renderedFolder,
+                    meta: {
+                      ...(renderedFolder.meta ?? { date: renderedFolder.date, streamType: [], games: [], comments: '' }),
+                      ytVideoId: linkedIdOverride,
+                    },
+                  }
+                  : renderedFolder,
+                customThumb,
+                newScheduledStartTime,
+              )}
               onPushToTwitch={() => handlePushToTwitch(renderedFolder)}
               // The two callbacks above already return the promise from
               // their inner handler call (no explicit return because the
@@ -6503,7 +6525,7 @@ function SidebarDetail({
   /** Page-level network problem: 'offline' pauses all pushes, 'yt'
    *  pauses only YouTube pushes (Twitch is unaffected). */
   netProblem: null | 'offline' | 'yt'
-  onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string) => Promise<void> | void
+  onPushToYoutube: (customThumbPath: string | null, newScheduledStartTime?: string, linkedIdOverride?: string) => Promise<void> | void
   onPushToTwitch: () => Promise<{ categoryApplied: boolean } | void> | void
   ytConnected: boolean
   /** YouTube video categories list (session-cached at the page level
@@ -7675,39 +7697,19 @@ function SidebarDetail({
       onUpdateMetaForRef.current(targetKey, { ytVideoId: created.id })
 
       // youtubeCreateBroadcast only sets title/description/scheduled
-      // time/privacy. Tags and the thumbnail need a separate
-      // updateBroadcast + uploadThumbnail pair, otherwise the new
-      // broadcast is missing those until the user manually runs Push
-      // to YouTube. Do the follow-up here so the broadcast is fully
-      // configured in a single user action.
-      let thumbnailPushedHash: string | undefined
-      let followupWarning = ''
+      // time/privacy. The rest (tags, category, thumbnail, the pushed
+      // snapshots the mismatch dots read, the refreshed record) is what
+      // the regular push does, so the regular push runs now against the
+      // new id, the same as a click on Push to YouTube a moment later.
+      // A hand-rolled follow-up here used to skip the category and left
+      // the row's thumbnail on YouTube's placeholder.
       try {
-        if (tags.length > 0) {
-          await window.api.youtubeUpdateBroadcast(created.id, { title, description }, tags)
-        }
-        if (effectiveYtThumb) {
-          await window.api.youtubeUploadThumbnail(created.id, effectiveYtThumb)
-          // Record the hash so the sidebar's thumbnail-needs-push
-          // detection sees the new broadcast as already in sync.
-          try {
-            const hash = await window.api.thumbnailHashFile(effectiveYtThumb)
-            if (hash) thumbnailPushedHash = hash
-          } catch {}
-        }
+        await onPushToYoutube(effectiveYtThumb, undefined, created.id)
       } catch (err: any) {
         // The broadcast itself was created and is linked — only the
-        // follow-up push failed. Say so; Push to YouTube retries it.
-        followupWarning = `The broadcast was created and linked, but pushing its details failed: ${err?.message ?? String(err)}. Push to YouTube again to retry.`
+        // push failed. Say so; Push to YouTube retries it.
+        setCreateError(`The broadcast was created and linked, but pushing its details failed: ${err?.message ?? String(err)}. Push to YouTube again to retry.`)
       }
-
-      // Inject tags into the cached broadcast so the broadcastMismatch
-      // detection treats it as in-sync without waiting for a reload.
-      if (tags.length > 0) {
-        setYtBroadcasts(prev => prev.map(b => b.id === created.id ? { ...b, snippet: { ...b.snippet, tags } } : b))
-      }
-      if (thumbnailPushedHash) onUpdateMetaForRef.current(targetKey, { ytThumbnailPushedHash: thumbnailPushedHash })
-      if (followupWarning) setCreateError(followupWarning)
     } catch (err: any) {
       setCreateError(err?.message ?? 'Failed to create broadcast')
     } finally {
