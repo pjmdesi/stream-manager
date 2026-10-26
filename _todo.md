@@ -822,6 +822,9 @@
   Raw merge fields were visisble in the nav subtitle for some reason. Unable to reproduce, but I grabbed a screenshot:
   "D:\SMAUG\Desktop\stream-manager-thumbnails-new.webp"
 
+- **NAV-2** [ui] [impact:2]
+  Built 2026-10-26, awaiting review. The stream and episode navigation group (prev and next stream, the episode picker, prev and next episode) is drawn in five places: the streams page's detail sidebar, the player's Selected Stream block and its collapsed rail, the thumbnail editor's top bar, and the link picker modal. Each had its own button size and hover. Decisions 2026-10-26: one size and look everywhere, the sidebar's as the reference (p-1, 13 px icons), on a slightly darker rounded field that ties the buttons together; the variant now only sets the tooltip side and the rail's column layout. The thumbnail editor drew the group only once its library listing had resolved the open stream, a second or two after the editor; it now draws it from the first frame, disabled with a loading tooltip until then, so the space is reserved and the arrows are never hidden, a single stream included. Requested 2026-10-26.
+
 ## GitHub
 
 ## Other ideas (small)

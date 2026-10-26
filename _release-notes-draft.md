@@ -59,6 +59,8 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - The small action buttons in rows and file cards (the converter and combine rows, the file cards and their toolbar) are brighter at rest, matching the stream sidebar's Archive and Delete, and a disabled one now stands apart from its neighbors.
 - The Converter, Combine and Player accept every video format a stream folder can hold (WMV, M4V, MPG, M2TS and the rest), where their drop zones and open dialogs used to take seven.
 
+- The previous and next stream buttons, with the episode picker, look the same in every place they appear: the streams sidebar, the player, the thumbnail editor and the link picker, each group on a slightly darker field. The thumbnail editor shows them as soon as it opens, disabled for the moment the stream list takes, instead of a second or two later.
+
 ## Settings
 
 - Three thumbnail settings that no longer did anything are gone: use the built-in creator by default, default built-in template, and default external template. Thumbnails start in the built-in editor, and a file made elsewhere is added to a stream like any other file.

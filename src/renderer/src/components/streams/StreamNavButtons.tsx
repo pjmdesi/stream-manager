@@ -18,14 +18,19 @@ export const STREAM_NAV_SHORTCUTS = {
 
 type Variant = 'sidebar' | 'player' | 'player-rail' | 'toolbar'
 
-const VARIANT = {
-  sidebar: { btn: 'p-1 hover:bg-white/5', icon: 13, side: 'bottom' as const },
-  player: { btn: 'h-5 w-5 flex items-center justify-center hover:bg-white/10', icon: 12, side: 'bottom' as const },
-  'player-rail': { btn: 'h-6 w-8 flex items-center justify-center hover:bg-white/10', icon: 12, side: 'right' as const },
-  /** The thumbnail editor's top bar (THU-19): sized like its other
-   *  icon buttons. */
-  toolbar: { btn: 'p-1.5 hover:bg-white/10', icon: 14, side: 'bottom' as const },
+// One size and look everywhere (2026-10-26): the streams page's detail
+// sidebar is the reference, and the group sits on a slightly darker
+// rounded field that ties the buttons together. The variant now only
+// decides the tooltip side and whether the rail's column layout is used.
+const VARIANT: Record<Variant, { side: 'bottom' | 'right' }> = {
+  sidebar: { side: 'bottom' },
+  player: { side: 'bottom' },
+  'player-rail': { side: 'right' },
+  toolbar: { side: 'bottom' },
 }
+const ICON = 13
+const BTN = 'p-1 hover:bg-white/5'
+const GROUP = 'rounded-md bg-black/20 p-0.5'
 
 const BTN_BASE = 'rounded text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-30 disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-gray-400'
 
@@ -47,9 +52,11 @@ const BTN_BASE = 'rounded text-gray-400 hover:text-gray-200 transition-colors di
  */
 export function StreamNavButtons({
   current, folders, prevStream, nextStream, onPickStream, series, onPickEpisode,
-  isEpisodeUnavailable, variant, children,
+  isEpisodeUnavailable, variant, children, pending,
 }: {
-  current: StreamFolder
+  /** Null while the caller is still resolving the open stream in its
+   *  list; the buttons are drawn disabled so the group keeps its place. */
+  current: StreamFolder | null
   folders: StreamFolder[]
   prevStream: StreamFolder | null
   nextStream: StreamFolder | null
@@ -62,18 +69,24 @@ export function StreamNavButtons({
   isEpisodeUnavailable?: (f: StreamFolder) => boolean
   variant: Variant
   children?: React.ReactNode
+  /** The caller's list has not resolved yet: every button disabled, the
+   *  tooltips say so, and nothing opens. The thumbnail editor's top bar
+   *  used to draw the group a second or two after the editor, once its
+   *  library listing came back (2026-10-26). */
+  pending?: boolean
 }) {
   const v = VARIANT[variant]
   const column = variant === 'player-rail'
-  const btnCls = `${BTN_BASE} ${v.btn}`
+  const btnCls = `${BTN_BASE} ${BTN}`
   const titleOf = (f: StreamFolder) => renderStreamTitle(f, folders).trim() || f.folderName
+  const loadingTip = 'Loading the stream list…'
 
   // Episode group: always drawn, disabled when there is nothing to walk,
   // so the stream pair keeps its place from one stream to the next (it
   // used to jump when a stream without a series hid the pair). The
   // picker only once the chevrons alone would mean many clicks.
   const showEpisodes = true
-  const showPicker = series.siblings.length > 2
+  const showPicker = !pending && series.siblings.length > 2
 
   // Jump-to-episode picker: click the List button, pick a row or click
   // outside to close; closes when the current stream changes so a click
@@ -81,7 +94,7 @@ export function StreamNavButtons({
   // scrolling, overflow-hidden parent cannot clip it.
   const [pickerOpen, setPickerOpen] = useState(false)
   const anchorRef = useRef<HTMLButtonElement>(null)
-  useEffect(() => { setPickerOpen(false) }, [current.relativePath])
+  useEffect(() => { setPickerOpen(false) }, [current?.relativePath])
   // Row layouts center the panel on the List button, as the tooltips are
   // centered on theirs (THU-42; right-aligned, the panel ran under the nav
   // rail beside the thumbnail page's top bar). The panel's width depends
@@ -100,35 +113,35 @@ export function StreamNavButtons({
   }, [pickerOpen, column])
 
   const streamTip = (label: 'Previous' | 'Next', f: StreamFolder | null) =>
-    f ? `${label} stream: ${f.date} · ${titleOf(f)}` : `No ${label.toLowerCase()} stream`
+    pending ? loadingTip : f ? `${label} stream: ${f.date} · ${titleOf(f)}` : `No ${label.toLowerCase()} stream`
   const episodeTip = (label: 'Previous' | 'Next', f: StreamFolder | null) =>
-    f ? `${label} episode (E${f.meta?.ytEpisode || '?'}): ${titleOf(f)}` : `No ${label.toLowerCase()} episode`
+    pending ? loadingTip : f ? `${label} episode (E${f.meta?.ytEpisode || '?'}): ${titleOf(f)}` : `No ${label.toLowerCase()} episode`
 
   const prevStreamBtn = (
-    <Tooltip content={streamTip('Previous', prevStream)} maxWidth="max-w-sm" side={v.side} shortcut={prevStream ? STREAM_NAV_SHORTCUTS.prevStream : undefined}>
-      <button type="button" onClick={() => prevStream && onPickStream(prevStream)} disabled={!prevStream} className={btnCls} aria-label="Previous stream">
-        <ChevronDown size={v.icon} />
+    <Tooltip content={streamTip('Previous', prevStream)} maxWidth="max-w-sm" side={v.side} shortcut={!pending && prevStream ? STREAM_NAV_SHORTCUTS.prevStream : undefined}>
+      <button type="button" onClick={() => prevStream && onPickStream(prevStream)} disabled={pending || !prevStream} className={btnCls} aria-label="Previous stream">
+        <ChevronDown size={ICON} />
       </button>
     </Tooltip>
   )
   const nextStreamBtn = (
-    <Tooltip content={streamTip('Next', nextStream)} maxWidth="max-w-sm" side={v.side} shortcut={nextStream ? STREAM_NAV_SHORTCUTS.nextStream : undefined}>
-      <button type="button" onClick={() => nextStream && onPickStream(nextStream)} disabled={!nextStream} className={btnCls} aria-label="Next stream">
-        <ChevronUp size={v.icon} />
+    <Tooltip content={streamTip('Next', nextStream)} maxWidth="max-w-sm" side={v.side} shortcut={!pending && nextStream ? STREAM_NAV_SHORTCUTS.nextStream : undefined}>
+      <button type="button" onClick={() => nextStream && onPickStream(nextStream)} disabled={pending || !nextStream} className={btnCls} aria-label="Next stream">
+        <ChevronUp size={ICON} />
       </button>
     </Tooltip>
   )
   const prevEpisodeBtn = showEpisodes && (
-    <Tooltip content={episodeTip('Previous', series.prev)} maxWidth="max-w-sm" side={v.side} shortcut={series.prev ? STREAM_NAV_SHORTCUTS.prevEpisode : undefined}>
-      <button type="button" onClick={() => series.prev && onPickEpisode(series.prev)} disabled={!series.prev} className={btnCls} aria-label="Previous episode">
-        <ChevronsDown size={v.icon} />
+    <Tooltip content={episodeTip('Previous', series.prev)} maxWidth="max-w-sm" side={v.side} shortcut={!pending && series.prev ? STREAM_NAV_SHORTCUTS.prevEpisode : undefined}>
+      <button type="button" onClick={() => series.prev && onPickEpisode(series.prev)} disabled={pending || !series.prev} className={btnCls} aria-label="Previous episode">
+        <ChevronsDown size={ICON} />
       </button>
     </Tooltip>
   )
   const nextEpisodeBtn = showEpisodes && (
-    <Tooltip content={episodeTip('Next', series.next)} maxWidth="max-w-sm" side={v.side} shortcut={series.next ? STREAM_NAV_SHORTCUTS.nextEpisode : undefined}>
-      <button type="button" onClick={() => series.next && onPickEpisode(series.next)} disabled={!series.next} className={btnCls} aria-label="Next episode">
-        <ChevronsUp size={v.icon} />
+    <Tooltip content={episodeTip('Next', series.next)} maxWidth="max-w-sm" side={v.side} shortcut={!pending && series.next ? STREAM_NAV_SHORTCUTS.nextEpisode : undefined}>
+      <button type="button" onClick={() => series.next && onPickEpisode(series.next)} disabled={pending || !series.next} className={btnCls} aria-label="Next episode">
+        <ChevronsUp size={ICON} />
       </button>
     </Tooltip>
   )
@@ -136,7 +149,7 @@ export function StreamNavButtons({
   // that comes and goes between streams moves every button after it
   // (and, in a right-aligned group, the ones before it as well).
   const pickerBtn = (
-    <Tooltip content={showPicker ? 'Jump to episode…' : 'No episodes to jump to'} side={v.side}>
+    <Tooltip content={pending ? loadingTip : showPicker ? 'Jump to episode…' : 'No episodes to jump to'} side={v.side}>
       <button
         ref={anchorRef}
         type="button"
@@ -145,7 +158,7 @@ export function StreamNavButtons({
         className={`${btnCls} ${pickerOpen ? 'bg-white/10 text-gray-200' : ''}`}
         aria-label="Jump to episode"
       >
-        <List size={v.icon} />
+        <List size={ICON} />
       </button>
     </Tooltip>
   )
@@ -154,7 +167,7 @@ export function StreamNavButtons({
   // (flipping up from the bottom half of the viewport) and right-align to
   // it; the rail opens to the left with its top aligned. Height clamps to
   // the available space either way.
-  const picker = pickerOpen && anchorRef.current && ReactDOM.createPortal(
+  const picker = pickerOpen && current && anchorRef.current && ReactDOM.createPortal(
     (() => {
       const r = anchorRef.current.getBoundingClientRect()
       let positionStyle: React.CSSProperties
@@ -187,7 +200,7 @@ export function StreamNavButtons({
                 ascending for the prev/next semantics; slice() so the
                 reverse cannot mutate the caller's list. */}
             {series.siblings.slice().reverse().map(ep => {
-              const isCurrent = ep.relativePath === current.relativePath
+              const isCurrent = ep.relativePath === current?.relativePath
               const unavailable = !isCurrent && !!isEpisodeUnavailable?.(ep)
               const disabled = isCurrent || unavailable
               const epNum = ep.meta?.ytEpisode || '?'
@@ -221,7 +234,7 @@ export function StreamNavButtons({
 
   if (column) {
     return (
-      <div className="flex flex-col items-center gap-1">
+      <div className={`flex flex-col items-center gap-1 ${GROUP}`}>
         {pickerBtn}
         {nextEpisodeBtn}
         {nextStreamBtn}
@@ -233,7 +246,7 @@ export function StreamNavButtons({
     )
   }
   return (
-    <div className="flex items-center gap-0.5">
+    <div className={`flex items-center gap-0.5 ${GROUP}`}>
       {prevStreamBtn}
       {nextStreamBtn}
       {showEpisodes && <span className="w-px h-3.5 bg-white/10 mx-0.5 shrink-0" aria-hidden />}

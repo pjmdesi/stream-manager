@@ -8336,14 +8336,17 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
           {/* Top bar */}
           <div className="flex items-center gap-2 px-3 py-2 border-b border-white/5 shrink-0 bg-navy-800">
             <div className="flex-1 flex items-center gap-2 min-w-0">
-              {/* Stream and episode navigation (THU-19), once the library
-                  listing has resolved the open stream. First in the row, so
-                  the buttons stay put while the title beside them changes
-                  length from one stream to the next (2026-09-29). */}
-              {currentStream && currentNavFolder && (
+              {/* Stream and episode navigation (THU-19). First in the row,
+                  so the buttons stay put while the title beside them changes
+                  length from one stream to the next (2026-09-29). Drawn from
+                  the first frame, disabled until the library listing has
+                  resolved the open stream; the group used to appear a second
+                  or two after the editor (2026-10-26). */}
+              {currentStream && (
                 <div className="shrink-0 mr-1">
                   <StreamNavButtons
                     current={currentNavFolder}
+                    pending={!currentNavFolder}
                     folders={sortedStreamFolders}
                     prevStream={prevNavStream}
                     nextStream={nextNavStream}
