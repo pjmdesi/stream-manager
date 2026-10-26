@@ -21,6 +21,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - For a stream with no link, the picker leads with its best guess at the right video, marked Best match, with the reasons beside it: the length, the title, the tags and the date, or the uploaded file's name for an upload.
 - The sidebar footer shows the linked video as the same row the picker uses, with the date, privacy and id, and its Broadcast options (privacy, and for an upcoming stream the date and time) as one group under it. Link, Change and Unlink sit on the heading. For an upcoming stream with no link, Push to YouTube creates the broadcast with those options and pushes the details; the separate Create broadcast button is gone.
 - Files the converter produced (conversions, clip exports and combined files) show a lightning bolt in the badge under their thumbnail; an archived file keeps the archive icon there. New conversions are stamped inside the file, as clip exports and archives already were, so the mark survives a move or an offload. Files converted before this version carry no stamp and show no bolt.
+- The YouTube import's summary now says when an imported stream landed on a day that already had one, with the folder name it was given, the way New stream does; the folder used to get its numeric suffix without a word.
 
 ## Player
 

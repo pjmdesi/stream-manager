@@ -31,49 +31,45 @@
 ## Next up
 
 1. STR-34
-2. STR-42
-3. STR-43
-4. SYNC-10
-5. STR-32
-6. APP-38
-7. APP-19
-8. APP-39
-9. NAV-1
-10. PLR-30
-11. STR-36
-12. STR-31
-13. STR-30
-14. STR-11
-15. STR-25
-16. STR-26
-17. STR-29
-18. PLR-17
-19. PLR-25
-20. PLR-26
-21. PLR-32
-22. THU-38
-23. THU-35
-24. THU-36
-25. THU-37
-26. THU-39
-27. INTG-1
-28. APP-25
-29. APP-26
-30. APP-28
-31. APP-31
-32. APP-34
-33. APP-35
-34. SYNC-7
-35. STR-44
-36. THU-41
-37. STR-47
-38. STR-48
-39. STR-49
-40. STR-50
-41. STR-51
-42. APP-58
-43. THU-43
-44. THU-44
+2. SYNC-10
+3. STR-32
+4. APP-38
+5. APP-19
+6. APP-39
+7. NAV-1
+8. PLR-30
+9. STR-36
+10. STR-31
+11. STR-30
+12. STR-11
+13. STR-25
+14. STR-26
+15. PLR-26
+16. PLR-25
+17. PLR-32
+18. THU-38
+19. THU-35
+20. THU-36
+21. THU-37
+22. THU-39
+23. INTG-1
+24. APP-25
+25. APP-26
+26. APP-28
+27. APP-31
+28. APP-34
+29. APP-35
+30. SYNC-7
+31. STR-44
+32. THU-41
+33. STR-47
+34. STR-48
+35. STR-49
+36. STR-50
+37. STR-51
+38. APP-58
+39. THU-43
+40. THU-44
 
 ## Improvement ideas
 
@@ -163,7 +159,7 @@
 - **STR-28**
   MAYBE... Allow AI suggestion to use the built in merge fields. This will probably invove editing the behind-the-scenes prompt. We need to pass the available merge fields for the input from which the suggestion request comes to the AI ingest and describe what they're basically for.
 
-- **STR-29** [ui] [impact:1]
+- **STR-29** [ui] [impact:1] [done]
   The episode selection button needs to stay visible but disabled when a stream item is not applicable to display the list. The skip to prev/next episode buttons already do this.
 
 - **STR-30** [impact:4]
@@ -206,7 +202,7 @@
   Add a new icon item to the video counter column which roughly indicates the cloud status of the files within the stream item. For instance, if all items are hydrated, we should show a solid cloud with check icon, like the one for individual files in the files grid. If there's a mix of hydrated and dehydrated files, we should show the same icon with a dashed check (or maybe something else... not sure). If all files (exluding the perminently pinned-local thumnail image file) are dehydrated we show a muted cloud, again, just like individual files.
 
 - **STR-36** [impact:2] [bug]
-  I recently changed the privacy status of several streams to unlisted. For some reason. 2 stream items keep appearing in the out of sync panel on the streams page. The privacy status for both of them have been pushed and pulled multiple times and ive check and double checked that their privacystatus matches on YouTube. When I manually run a refresh, the items disappear, but they keep coming back both on app startup and seemingly after every automatic check.
+  I recently changed the privacy status of several streams to unlisted. For some reason. 2 stream items keep appearing in the out of sync panel on the streams page. The privacy status for both of them have been pushed and pulled multiple times and ive check and double checked that their privacy status matches on YouTube. When I manually run a refresh, the items disappear, but they keep coming back both on app startup and seemingly after every automatic check.
 
 - **STR-37** [ui] [done]
   Confirm before deleting a single file from the files grid. The per-file trash button on a file card deletes on one click; a misclick on 2026-10-06 deleted a dehydrated file and getting it back was painful. The confirmation applies to hydrated and dehydrated files alike (a dehydrated file is harder to recover, since the local placeholder goes and the cloud copy follows). A confirmation modal like the stream-level `DeleteModal`, naming the file and its size, with the same recycle-bin wording; the files grid lives on the page, not in a modal, so the no-secondary-modals rule does not come into it. The bulk select-mode delete already confirms and stays as it is. Filed 2026-10-06.
@@ -221,19 +217,20 @@
   2. Add a "recommended" item at the very bottom (since the menu opens upward almost exclusively due to its position, the bottom entry would be nearest the user's cursor). This should be SM's best guess at the item the user is probably going to want to link. We should use the metadata details to calculate a matching score based on how closely the stream item details match the YouTube entry details. The highest scoring item will show in this special slot with a star or other icon that says "this is probably the one you want". The date and title will prbably be the strongest items to match against, but the day may not be wholly reliable since the user might be posting a trimmed or edited version of a livestreams months after the actual livestream date. Title, tags, uploaded video filename (if that's available through the API), etc. Split 2026-10-12: this ticket is the reflow fix and item 1 (linked videos hidden behind a pinned "Show linked" button); item 2, the recommended entry, is STR-42, and the typed filter is STR-43.
   Decision 2026-10-23: the drop-up is replaced by a modal picker (a search field, rows with thumbnail, title and date, videos linked to other streams behind a Show linked row at the end of the list; the channel's video list is cached on disk and checked for newer videos on open). Built 2026-10-23, refined through fourteen review rounds to 2026-10-25, awaiting the final review.
 
-- **STR-40** [ui] [impact:1]
+- **STR-40** [ui] [impact:1] [done]
   Built 2026-10-26, awaiting review. Decisions 2026-10-26: the bolt sits in the thumbnail's tag tray, where STR-20 moved the archive icon, in the tray's own text color; the stamp goes in the comment tag with the app version, since MP4 drops the encoded_by tag the archive uses; the verdict is recorded on the file's videoMap entry in _meta.json and is sticky once true, so offloaded placeholders keep it; files converted before this build carry no stamp and get no mark.
   Mark files the converter produced in the files grid. A recording, clip or combined file that came out of SM's converter is only recognizable by the suffix in its name, which is a weak tell. Show the converter's lightning bolt icon to the left of the name, where the archive icon sits, for every file SM converted (the provenance tag in the container already identifies clip exports and combines; converter outputs need the same stamp if they lack one). Files archived through the archive process keep the archive icon alone, since it implies the same and more. Filed 2026-10-12.
 
 - **STR-41** [ui] [impact:1]
+  Built 2026-10-26, awaiting review: each such row in the summary carries the New stream notice's wording after the fact, with the folder name, and the heading counts them.
   The YouTube import's confirmation step says nothing when an imported stream landed alongside an existing one for the same date (the folder gets the `-N` suffix silently, 2026-10-12). List those with their folder name, the same wording the New stream notice uses, so the user knows there are now two streams on that day. Filed 2026-10-12.
 
-- **STR-42** [impact:3]
+- **STR-42** [impact:3] [done]
   Update 2026-10-23: STR-39 replaced the dropdown with a modal picker, so the recommended entry goes at the top of the modal's list, under its status line, instead of the bottom of a menu; the typed filter from STR-43 is the modal's search field.
   Decision 2026-10-25: shown for unlinked streams only, one best match. Built 2026-10-25, awaiting review.
   Linked Video dropdown: a recommended entry at the bottom of the menu (nearest the cursor, since the menu opens upward), SM's best guess at the video the user is about to link, with a marker and the reason beside it ("matches file name", "same length"). Split from STR-39 (its item 2 has the original wording). The scorer compares the stream item with each unlinked video and is the same matcher STR-34's automatic link-back needs, so it is built once as a shared function and used here first. Signals, strongest first: the uploaded file name (the API's `fileDetails` part exposes it to the video's owner; confirm on current docs at design time), duration against the stream's primary recording, the resolved title against the YouTube title, tags, and date proximity last as a weak tiebreaker (edited versions go up months later). Marker: the single Sparkle icon (decided 2026-10-12; not the plural Sparkles, and not the star, which means "pick as primary" in the nav and launcher and toggles on click), with a short "Best match" label beside it. Filed 2026-10-12.
 
-- **STR-43** [ui] [impact:3] [blocked:STR-42] [done]
+- **STR-43** [ui] [impact:3] [done]
   Linked Video dropdown as a hybrid text field: typing filters the list to matching videos as the tag fields do, with the recommended entry and the pinned "Show linked" button keeping their places. Comes after STR-39 and STR-42, which settle the menu's contents. Filed 2026-10-12.
 
   Superseded 2026-10-23: video picker switching to a fully-featured modal.
@@ -695,7 +692,7 @@
   Context: STR-19 made this widget the only feedback for a confirmed cloud download once the prompt closes, which is why it needs to be findable.
 
 - **APP-38** [cleanup] [impact:2]
-  Move every remaining `<select>` onto the shared `select-themed` skin (APP-29). About twenty sites still use the older pattern of `appearance-none` plus a wrapper `div.relative` with an absolutely positioned ChevronDown: the Settings page's five template, preset, and category selects, the Converter page's preset, output, and audio-track selects (including the `ROW_SELECT` constant), the player's clip export preset select, the preset editor form, the Integrations page's Claude model select, the streams sidebar's privacy select, the YouTube link and import modals (their `SELECT_CLS` constants), and the archive preset picker in the legacy streams module. They render correctly, so this is housekeeping: switch each to `select-themed` with explicit `pl`/`pr` padding per the style guide's native select rule, delete the wrapper and the icon, and check any layout that depended on the wrapper (flex sizing, max widths). End state: one way to draw a select, and the style guide's "raw selects still exist in 12 files" line goes away. Not queued; filed 2026-09-15.
+  Move every remaining `<select>` onto the shared `select-themed` skin (APP-29). About twenty sites still use the older pattern of `appearance-none` plus a wrapper `div.relative` with an absolutely positioned ChevronDown: the Settings page's five template, preset, and category selects, the Converter page's preset, output, and audio-track selects (including the `ROW_SELECT` constant), the player's clip export preset select, the preset editor form, the Integrations page's Claude model select, the streams sidebar's privacy select, the YouTube link and import modals (their `SELECT_CLS` constants), and the archive preset picker in the legacy streams module. They render correctly, so this is housekeeping: switch each to `select-themed` with explicit `pl`/`pr` padding per the style guide's native select rule, delete the wrapper and the icon, and check any layout that depended on the wrapper (flex sizing, max widths). End state: one way to draw a select, and the style guide's "raw selects still exist in 12 files" line goes away. filed 2026-09-15.
 
 - **APP-39** [cleanup] [ui] [impact:4]
   One positioning engine for every anchored popup. `Tooltip` already owns the right machinery (portal to body, anchor rect from the trigger, side priority with fallback, cross-axis clamp) and every inline dropdown menu in the app re-implements a weaker version with `absolute top-full` and no room check; the Assets options menu ran off the window that way on 2026-09-16 and got a one-off hook (`hooks/useDropdownPlacement.ts`). Plan: extract Tooltip's core into a `Popover` primitive (portal, anchor, side priority, clamp, plus live tracking of the anchor while open, which Tooltip lacks today: a tooltip open while layout shifts under it floats at the old spot), then two thin skins on it: `Tooltip` (hover, tooltip chrome) and a new `DropdownMenu` (click to open, outside click and Escape to close, menu chrome, rows that keep the menu open for checkbox items). Portalling also frees menus from overflow-hidden ancestors, which is why the streams page filter menus carry a computed max height today. Migrate: the thumbnail editor's Assets options menu and variant picker, the streams page type and game filter menus and its two other `top-full` popups, the date picker's popup form, the player's track menu. The legacy streams module stays as is. Delete `useDropdownPlacement` when the last caller moves. Not queued; filed 2026-09-16. Added 2026-10-06 from the APP-41 sweep: the YouTube link and import modals use native `<select>`s styled with `appearance-none` (so no chevron) through two drifted private `SELECT_CLS` strings; they become `SelectMenu` in this migration, the only two native selects left in the live pages.

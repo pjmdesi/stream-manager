@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
-import { Search, Radio, Film, Check, Loader2, AlertCircle, Globe, Link as LinkIcon, Lock, ExternalLink, CheckCircle, X } from 'lucide-react'
+import { Search, Radio, Film, Check, Loader2, AlertCircle, AlertTriangle, Globe, Link as LinkIcon, Lock, ExternalLink, CheckCircle, X } from 'lucide-react'
 import type { YouTubeImportVideo } from '../../types'
 import { Modal } from '../ui/Modal'
 import { Button } from '../ui/Button'
@@ -7,6 +7,15 @@ import { Tooltip } from '../ui/Tooltip'
 import { TruncatedText } from '../ui/TruncatedText'
 import { useStore } from '../../hooks/useStore'
 import { formatTimecode } from '../../lib/formatTimecode'
+
+/** One imported video's outcome for the summary step. `alongside` is set
+ *  when its day already had a stream and the folder got a numeric suffix
+ *  (STR-41), so the summary can say so with the folder name. */
+interface ImportResult {
+  title: string
+  ok: boolean
+  alongside?: { date: string; folderName: string }
+}
 
 // Matches YouTube Studio / the streams list: Globe = public, Link = unlisted,
 // Lock = private.
@@ -39,7 +48,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
   const { config } = useStore()
   const [importing, setImporting] = useState(false)
   const [importProgress, setImportProgress] = useState<{ done: number; total: number } | null>(null)
-  const [summary, setSummary] = useState<{ title: string; ok: boolean }[] | null>(null)
+  const [summary, setSummary] = useState<ImportResult[] | null>(null)
 
   useEffect(() => {
     if (!isOpen) return
@@ -100,10 +109,11 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
     if (targets.length === 0 || importing) return
     setImporting(true); setSummary(null); setImportProgress({ done: 0, total: targets.length })
     const mode = (config.streamMode as 'folder-per-stream' | 'dump-folder') || 'folder-per-stream'
-    const results: { title: string; ok: boolean }[] = []
+    const results: ImportResult[] = []
     for (let i = 0; i < targets.length; i++) {
       const v = targets[i]
       let ok = false
+      let alongside: ImportResult['alongside']
       try {
         const privacy = (['public', 'unlisted', 'private'] as const).find(p => p === v.privacyStatus)
         const meta = {
@@ -118,6 +128,12 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
           ytLastPushedPrivacy: privacy, ytLastPushedDate: v.date,
         }
         const folderPath = await window.api.createStreamFolder(config.streamsDir, v.date, meta, undefined, mode)
+        // Main names the folder after the date and adds a numeric suffix
+        // when that day already has a stream (STR-41): a folder name that
+        // is not the bare date means this one landed alongside another,
+        // which the summary says, the way the New stream notice does.
+        const folderName = folderPath.split(/[\\/]/).pop() ?? folderPath
+        if (folderName !== v.date) alongside = { date: v.date, folderName }
         if (v.thumbnailUrl) {
           const dl = await window.api.youtubeDownloadThumbnail(folderPath, v.thumbnailUrl)
           if (dl) await window.api.updateStreamMeta(folderPath, { preferredThumbnail: dl.filename, ytThumbnailPushedHash: dl.hash })
@@ -126,7 +142,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
       } catch {
         ok = false
       }
-      results.push({ title: v.title || '(untitled)', ok })
+      results.push({ title: v.title || '(untitled)', ok, alongside })
       setImportProgress({ done: i + 1, total: targets.length })
     }
     setImporting(false)
@@ -138,6 +154,7 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
 
   const importedCount = videos ? videos.filter(v => linkedIds.has(v.videoId)).length : 0
   const okCount = summary?.filter(r => r.ok).length ?? 0
+  const alongsideCount = summary?.filter(r => r.alongside).length ?? 0
   const failCount = (summary?.length ?? 0) - okCount
 
   return (
@@ -178,12 +195,22 @@ export function YouTubeImportModal({ isOpen, onClose }: { isOpen: boolean; onClo
           <p className="text-base font-semibold text-gray-100">
             Imported {okCount} stream item{okCount === 1 ? '' : 's'}
             {failCount > 0 && <span className="text-amber-300 font-normal"> · {failCount} failed</span>}
+            {alongsideCount > 0 && <span className="text-amber-300 font-normal"> · {alongsideCount} on a day that already had a stream</span>}
           </p>
           <div className="w-full max-w-md max-h-[220px] overflow-y-auto rounded-lg border border-white/5 divide-y divide-white/5 text-left">
             {summary.map((r, i) => (
-              <div key={i} className="flex items-center gap-2 px-3 py-1.5">
-                {r.ok ? <Check size={12} className="text-green-400 shrink-0" /> : <X size={12} className="text-red-400 shrink-0" />}
-                <span className="text-xs text-gray-300 truncate">{r.title}</span>
+              <div key={i} className="flex flex-col gap-1 px-3 py-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  {r.ok ? <Check size={12} className="text-green-400 shrink-0" /> : <X size={12} className="text-red-400 shrink-0" />}
+                  <span className="text-xs text-gray-300 truncate">{r.title}</span>
+                </div>
+                {r.alongside && (
+                  // The New stream notice's wording, after the fact.
+                  <p className="text-xs text-amber-400 flex items-start gap-1.5 ps-5">
+                    <AlertTriangle size={11} className="shrink-0 mt-0.5" />
+                    <span>A stream already existed for {r.alongside.date}. Check that it is not the one you meant; this one was created alongside it as <span className="font-mono text-amber-300 whitespace-nowrap">{r.alongside.folderName}</span>.</span>
+                  </p>
+                )}
               </div>
             ))}
           </div>
