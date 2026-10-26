@@ -37,39 +37,38 @@
 4. APP-38
 5. APP-19
 6. APP-39
-7. NAV-1
-8. PLR-30
-9. STR-36
-10. STR-31
-11. STR-30
-12. STR-11
-13. STR-25
-14. STR-26
-15. PLR-26
-16. PLR-25
-17. PLR-32
-18. THU-38
-19. THU-35
-20. THU-36
-21. THU-37
-22. THU-39
-23. INTG-1
-24. APP-25
-25. APP-26
-26. APP-28
-27. APP-31
-28. APP-34
-29. APP-35
-30. SYNC-7
-31. STR-44
-32. THU-41
-33. STR-47
-34. STR-48
-35. STR-49
-36. STR-50
-37. STR-51
-38. APP-58
-39. THU-44
+7. PLR-30
+8. STR-36
+9. STR-31
+10. STR-30
+11. STR-11
+12. STR-25
+13. STR-26
+14. PLR-26
+15. PLR-25
+16. PLR-32
+17. THU-38
+18. THU-35
+19. THU-36
+20. THU-37
+21. THU-39
+22. INTG-1
+23. APP-25
+24. APP-26
+25. APP-28
+26. APP-31
+27. APP-34
+28. APP-35
+29. SYNC-7
+30. STR-44
+31. THU-41
+32. STR-47
+33. STR-48
+34. STR-49
+35. STR-50
+36. STR-51
+37. APP-58
+38. THU-44
 
 ## Improvement ideas
 
@@ -817,12 +816,12 @@
 
 ### Navigation
 
-- **NAV-1** [bug] [impact:1]
+- **NAV-1** [bug] [impact:1] [done]
   Fixed 2026-10-26, awaiting review. Reproduced during the THU-43 check: it shows when the editor reaches a stream through its own prev and next arrows. The streams page hands the editor a rendered title, but the arrows handed it the raw ytTitle, which is the title template, so the nav subtext read the template and the recents entry stored it (the overview showed it raw until its load re-rendered the titles). The arrows now render the title the same way, and opening from the recents list re-renders a stored one.
   Raw merge fields were visisble in the nav subtitle for some reason. Unable to reproduce, but I grabbed a screenshot:
   "D:\SMAUG\Desktop\stream-manager-thumbnails-new.webp"
 
-- **NAV-2** [ui] [impact:2]
+- **NAV-2** [ui] [impact:2] [done]
   Built 2026-10-26, awaiting review. The stream and episode navigation group (prev and next stream, the episode picker, prev and next episode) is drawn in five places: the streams page's detail sidebar, the player's Selected Stream block and its collapsed rail, the thumbnail editor's top bar, and the link picker modal. Each had its own button size and hover. Decisions 2026-10-26: one size and look everywhere, the sidebar's as the reference (p-1, 13 px icons), on a slightly darker rounded field that ties the buttons together; the variant now only sets the tooltip side and the rail's column layout. The thumbnail editor drew the group only once its library listing had resolved the open stream, a second or two after the editor; it now draws it from the first frame, disabled with a loading tooltip until then, so the space is reserved and the arrows are never hidden, a single stream included. Requested 2026-10-26.
 
 ## GitHub
