@@ -207,7 +207,23 @@ function audioTrackLabel(t: AudioTrackInfo, defaults: readonly string[] | undefi
   return `Track ${t.index + 1}${desc ? ` — ${desc}` : ''}${meta ? ` · ${meta}` : ''}`
 }
 
+/** The status icon's text color, shared with the progress figure under it
+ *  so the two read as one mark. A kept original (CONV-15) is amber in
+ *  both of its states; only an actual replacement is green. */
+function statusColorClass(status: ConversionJob['status'], kept?: ConversionJob['keptOriginal']): string {
+  if (status === 'done' && kept && kept.resolved !== 'replaced') return 'text-amber-300'
+  if (status === 'done')        return 'text-green-400'
+  if (status === 'error')       return 'text-red-400'
+  if (status === 'downloading') return 'text-blue-400'
+  if (status === 'running')     return 'text-accent-400'
+  if (status === 'replacing')   return 'text-accent-300'
+  if (status === 'paused')      return 'text-yellow-400'
+  if (status === 'cancelled')   return 'text-gray-400'
+  return 'text-blue-300'
+}
+
 function StatusIcon({ status, kept, size = 14 }: { status: ConversionJob['status']; kept?: ConversionJob['keptOriginal']; size?: number }) {
+  const cls = `${statusColorClass(status, kept)} shrink-0`
   // A kept original (CONV-15) is not a success tick: an amber caution
   // triangle while the larger output waits for a decision, an amber shield
   // once it is gone and the original stands. Only an actual replacement
@@ -215,17 +231,17 @@ function StatusIcon({ status, kept, size = 14 }: { status: ConversionJob['status
   // reused here.)
   if (status === 'done' && kept && kept.resolved !== 'replaced') {
     return kept.resolved
-      ? <ShieldCheck size={size} className="text-amber-300 shrink-0" />
-      : <AlertTriangle size={size} className="text-amber-300 shrink-0" />
+      ? <ShieldCheck size={size} className={cls} />
+      : <AlertTriangle size={size} className={cls} />
   }
-  if (status === 'done')        return <CheckCircle size={size} className="text-green-400 shrink-0" />
-  if (status === 'error')       return <AlertCircle size={size} className="text-red-400 shrink-0" />
-  if (status === 'downloading') return <Cloud size={size} className="text-blue-400 animate-pulse shrink-0" />
-  if (status === 'running')     return <RefreshCw size={size} className="text-accent-400 animate-spin shrink-0" />
-  if (status === 'replacing')   return <RefreshCw size={size} className="text-accent-300 animate-spin shrink-0" />
-  if (status === 'paused')      return <Pause size={size} className="text-yellow-400 shrink-0" />
-  if (status === 'cancelled')   return <XCircle size={size} className="text-gray-400 shrink-0" />
-  return <Clock size={size} className="text-blue-300 shrink-0" />
+  if (status === 'done')        return <CheckCircle size={size} className={cls} />
+  if (status === 'error')       return <AlertCircle size={size} className={cls} />
+  if (status === 'downloading') return <Cloud size={size} className={`${cls} animate-pulse`} />
+  if (status === 'running')     return <RefreshCw size={size} className={`${cls} animate-spin`} />
+  if (status === 'replacing')   return <RefreshCw size={size} className={`${cls} animate-spin`} />
+  if (status === 'paused')      return <Pause size={size} className={cls} />
+  if (status === 'cancelled')   return <XCircle size={size} className={cls} />
+  return <Clock size={size} className={cls} />
 }
 
 /** Progress rendered as the row's own background: a tinted fill that grows
@@ -867,6 +883,16 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
       : isDone && !(kept?.resolved && kept.resolved !== 'replaced')
         ? job.outputSize
         : undefined
+    // The progress figure, drawn under the status icon in its color. Guard:
+    // ffmpeg's first progress events can carry NaN before a real timemark
+    // lands, so a running row shows 0% instead of "NaN%".
+    const percentText = isActive
+      ? `${(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%`
+      : isDone
+        ? '100%'
+        : (isCancelled || isError)
+          ? `${job.progress.toFixed(1)}%`
+          : null
     const outputDir = job.outputFile.replace(/[\\/][^\\/]+$/, '')
     const outputName = job.outputFile.split(/[\\/]/).pop()
     // The raw dir keeps whichever separators built it ("\" from main's
@@ -898,8 +924,16 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
         </div>
         {/* Status column — between the thumbnail and the text stack so the
             state reads at a glance without hunting inside the filename row. */}
-        <div className="self-center shrink-0 flex items-center justify-center w-6">
+        <div className="relative self-center shrink-0 flex items-center justify-center w-6">
           <StatusIcon status={job.status} kept={job.keptOriginal} size={20} />
+          {/* The progress figure under the icon, in the icon's color, placed
+              absolutely so the icon stays centered exactly where it was
+              (moved off the stats line 2026-10-26 to give that line room). */}
+          {percentText && (
+            <span className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 text-xs leading-none tabular-nums whitespace-nowrap ${statusColorClass(job.status, job.keptOriginal)}`}>
+              {percentText}
+            </span>
+          )}
         </div>
         {/* Left: all content */}
         <div className="flex-1 min-w-0 flex flex-col gap-1.5">
@@ -966,15 +1000,12 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
             </div>
           )}
 
-          {/* The stats wrap: each figure keeps its own line unbroken, and a
-              row too narrow for all of them grows by a line instead of
-              running the figures under the buttons and squeezing the
-              folder link to nothing (seen 2026-10-26 at about 800 px). */}
+          {/* One line: the figures keep their order, the folder link stays
+              on the same line, truncating first, and whatever still does
+              not fit is clipped at the column's edge rather than run under
+              the buttons (seen 2026-10-26 at about 800 px). */}
           {isActive && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
-              {/* Guard: ffmpeg's first progress events can carry NaN before
-                  a real timemark lands — show 0% instead of "NaN%". */}
-              <span className="whitespace-nowrap">{(Number.isFinite(job.progress) ? job.progress : 0).toFixed(1)}%</span>
+            <div className="flex items-center gap-3 overflow-hidden text-xs text-gray-400 tabular-nums">
               {elapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(elapsed / 1000)}</span>}
               <span className="whitespace-nowrap">
                 {job.progress === 0
@@ -998,8 +1029,7 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           )}
 
           {isDone && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
-              <span className="whitespace-nowrap">100%</span>
+            <div className="flex items-center gap-3 overflow-hidden text-xs text-gray-400 tabular-nums">
               {finalElapsed > 0 && <span className="whitespace-nowrap">Elapsed: {formatTimecode(finalElapsed / 1000)}</span>}
               {finalSizeText && <span className="whitespace-nowrap">Final size: {finalSizeText}</span>}
               {!job.replaceInput && (
@@ -1032,9 +1062,8 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
           )}
 
           {isCancelled && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-gray-400 tabular-nums">
-              <span>{job.progress.toFixed(1)}%</span>
-              <span>Conversion cancelled</span>
+            <div className="flex items-center gap-3 overflow-hidden text-xs text-gray-400 tabular-nums">
+              <span className="whitespace-nowrap">Conversion cancelled</span>
               {/* A kept partial is a file in the output folder, so the folder
                   link stays; it goes only when the setting deletes partials
                   (and for archive swaps, whose temp is always removed). */}
@@ -1053,7 +1082,6 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
 
           {isError && (
             <div className="flex items-center gap-3 text-xs tabular-nums">
-              <span className="text-gray-400">{job.progress.toFixed(1)}%</span>
               <span className="text-red-400 whitespace-pre-wrap">{job.error}</span>
             </div>
           )}

@@ -485,7 +485,7 @@
 - **CONV-24** [impact:1] [maybe]
   Maybe... add an OBS/streaming tool detection (or maybe just detection through the stream relay?) which will suggest that the user pause conversion tasks to free up resources for the streaming app. This would be a failsafe in case the user forgets that there are running conversions.
 
-- **CONV-25** [impact:1]
+- **CONV-25** [impact:1] [done]
   Built 2026-10-26, awaiting review. Decisions 2026-10-26: Clear for finished rows, Remove for queued rows and the ready list; the list glyph (ListX) and the gray tone instead of the trash can and red, since those mean deletion elsewhere; a tooltip on each saying the files on disk are not touched; no icon was not an option because the row buttons collapse to their icon at narrow widths. The style guide's Remove tier follows, and the Combine page's three Remove-tier buttons (Clear job, Remove job, the per-file remove) get the same glyph, tone and tooltips.
   Update Remove button to read clear for completed items in the converter.
 
@@ -496,6 +496,9 @@
   Refreshing the UI with ctrl+r resets the ETA for conversion items. Very minor issue, basically only for me, but would still like the fix it if possible.
 
 ### Combine
+
+- **CONV-28** [ui] [big] [needs-design]
+  Converter page motion. Rows enter, leave and move with animation so the eye can follow each job through Queue, Converting and Finished (proposed 2026-10-26 after the CONV-25 review). Exit: the stream row's two-phase exit from STR-21 (an overlay fading in, then the height collapsing) with a neutral overlay instead of red and the shared timing, since clearing a row is routine where deleting a stream is deliberately slow. Entrance: the reverse, the height opening and the content fading in, no color. Moves: a job keeps its key across the three lists and slides from its old spot to its new one while the rows around it close the gap; archive groups, which render as one row, move as one; a Ready-list file turning into a job needs a shared key (its path) for the move into Converting. Layout: the three cards would become one card with three dividers carrying their Pause all, Cancel all and Clear all buttons, so the lists read as one flow (to confirm at design time). The motion library is already a dependency, used in the streams code, and covers the three motions (enter and exit, rows closing a gap, a row moving between containers); the animation settings hook scales the durations and turns them off. Watch: running rows re-render on every progress tick, so a row mid-slide can stutter; judge on a dist, not the dev server. Filed 2026-10-26.
 
 - **COMB-1** [needs-design]
   Dimension options for combining mismatched files: give the user choices for how differing files are combined. Whether the videos are cropped or bars are added, whether the final file gets the max framerate, min framerate, or some custom framerate, and explore other options. NEEDS A DESIGN PASS: combine was scoped as "not a converting tool" during the 2026-08 batch, so this likely routes the odd files through the CONVERTER (e.g. a one-click "normalize mismatched files" offer on the compatibility gate) rather than encoding inside combine. Groundwork that now exists from the 2026-08 batch:
