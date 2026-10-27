@@ -1460,6 +1460,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
   // Which part of the zoom bar is being dragged; its tooltip is held open
   // through the drag so the value reads live (PLR-32).
   const [barDrag, setBarDrag] = useState<'start' | 'end' | 'pan' | 'playhead' | null>(null)
+  // Where the bar's needle is drawn while it is dragged: the cursor's time,
+  // not the video's, which lands a frame or two after each seek and left
+  // the needle trailing the pointer (the timeline's playhead draws from
+  // the cursor the same way).
+  const [needleDragTime, setNeedleDragTime] = useState<number | null>(null)
 
   // Active handle popup: { regionId, which: 'in'|'out', value }
   const [handlePopup, setHandlePopup] = useState<{ regionId: string; which: 'in' | 'out'; value: string } | null>(null)
@@ -6323,13 +6328,14 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                     // fine because it's 12px wide (-6px is a whole pixel).
                     // floor (not round) + cap to scrollbarWidth-1 for the same reasons
                     // as the timeline playhead above.
-                    const px = Math.min(scrollbarWidth - 1, Math.max(0, Math.floor(((handleDragDisplayTime ?? currentTime) / duration) * scrollbarWidth)))
+                    const shown = needleDragTime ?? handleDragDisplayTime ?? currentTime
+                    const px = Math.min(scrollbarWidth - 1, Math.max(0, Math.floor((shown / duration) * scrollbarWidth)))
                     return (
                       // The needle's tooltip reads the playhead time, under the
                       // bar's rules: held open through its own drag, shut while
                       // another part is dragged, as is its hover look.
                       <Tooltip
-                        content={formatViewTime(handleDragDisplayTime ?? currentTime, videoInfo?.fps)}
+                        content={formatViewTime(shown, videoInfo?.fps)}
                         open={barDrag === null ? undefined : barDrag === 'playhead'}
                         triggerClassName="absolute -top-0.5 -bottom-0.5 w-3 -translate-x-1/2 z-30"
                         triggerStyle={{ left: `${px}px` }}
@@ -6347,10 +6353,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                             return Math.max(0, Math.min(dur, ((clientX - rect.left) / rect.width) * dur))
                           }
                           setBarDrag('playhead')
-                          fastSeekRef.current(getTime(e.clientX))
-                          const onMove = (me: MouseEvent) => fastSeekRef.current(getTime(me.clientX))
+                          const first = getTime(e.clientX)
+                          setNeedleDragTime(first)
+                          fastSeekRef.current(first)
+                          const onMove = (me: MouseEvent) => {
+                            const t = getTime(me.clientX)
+                            setNeedleDragTime(t)
+                            fastSeekRef.current(t)
+                          }
                           const onUp = () => {
                             setBarDrag(null)
+                            setNeedleDragTime(null)
                             window.removeEventListener('mousemove', onMove)
                             window.removeEventListener('mouseup', onUp)
                           }
