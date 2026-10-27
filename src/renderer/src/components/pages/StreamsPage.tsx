@@ -579,6 +579,12 @@ export function StreamsPage({
   useEffect(() => {
     if (!pendingSelect || pendingSelect.token === lastSelectTokenRef.current) return
     lastSelectTokenRef.current = pendingSelect.token
+    // A link from another page opens one stream's detail. Select mode,
+    // left on, stayed on around it, with the list still reading as a
+    // selection and a row click toggling rows instead of opening them
+    // (STR-47); it ends here, as the toggle's own exit does.
+    setSelectMode(false)
+    setSelectedPaths(new Set())
     if (pendingSelect.streamKey) setSelectedStreamKey(pendingSelect.streamKey)
     else if (pendingSelect.folderPath) selectByFolderPath(pendingSelect.folderPath)
   }, [pendingSelect]) // eslint-disable-line react-hooks/exhaustive-deps
