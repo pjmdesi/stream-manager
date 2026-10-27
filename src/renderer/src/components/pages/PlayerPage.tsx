@@ -4947,7 +4947,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                 // The TRIGGER carries the absolute placement so the bubble
                 // anchors to the badge; a positioned child inside an
                 // in-flow trigger left the trigger a zero-size box elsewhere.
-                <Tooltip content="Click to reset zoom (scroll wheel to zoom, middle-click drag to pan)" triggerClassName="absolute top-3 left-3 z-10 flex">
+                // Above the crop controls panel (z-20): at a high zoom the
+                // crop region maps to the stage's top-left corner and the
+                // panel, kept inside the stage, sat on the badge (PLR-32).
+                <Tooltip content="Click to reset zoom (scroll wheel to zoom, middle-click drag to pan)" triggerClassName="absolute top-3 left-3 z-30 flex">
                   <button
                     onClick={() => {
                       setVideoZoom(1); setVideoPan({ x: 0, y: 0 })

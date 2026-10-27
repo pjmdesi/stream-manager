@@ -30,6 +30,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 - The player's Selected Stream block links to the stream's item on the Streams page: click its thumbnail or title, in the open panel or the collapsed rail.
 - Dragging a track's volume slider in the player no longer leaves the slider focused, so the arrow keys and Space go back to the player as soon as the mouse button comes up; a slider reached with Tab keeps the keyboard.
+- The player's zoom badge no longer vanishes behind the crop controls at a high zoom.
 - Session Videos in the player fills in at once when a video opens or the stream changes, with each file's cloud status following a moment later; it used to wait a second or more on that check and showed the previous stream's files in the meantime.
 
 ## Combine
