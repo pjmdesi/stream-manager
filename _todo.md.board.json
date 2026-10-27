@@ -25,5 +25,9 @@
       "color": "#009980"
     }
   ],
-  "accent": "#d400ff"
+  "accent": "#d400ff",
+  "checklists": [
+    "*checklist*.md",
+    "archive/*checklist*.md"
+  ]
 }

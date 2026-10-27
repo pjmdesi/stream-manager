@@ -4,7 +4,7 @@ Build: Stream Manager 2.7.1_DEV.exe from dev @ cec4e33 (the APP-28 commit). Fixe
 
 Sweep fixes so far (each needs a fresh build; update the hash above when cut):
 
-- (none yet)
+- 2026-10-27: the thumbnail editor fell to the error page (React error 185, a state update loop) while layers were being moved on the 2026-11-1 stream; the page recovered on reopening the thumbnail, nothing lost. The stack ends in the layer actions tab's measurement, which re-measures whenever the selection or the layers change. The last action was a click and drag on the canvas at a loose text layer with effects and a gradient; the same steps did not bring it back. Filed as THU-47 with the reading so far; a dev-server run for the full error if it recurs.
 
 FROZEN 2026-10-26: the queue is fully built. Code changes from here are limited to bugs and fixes found during this sweep.
 
@@ -16,25 +16,25 @@ Every item below is checked in the packaged build, not the dev server. An item t
 
 ### Under the hood (APP-43, APP-41, APP-21, APP-48, APP-49, APP-51)
 
-- [ ] The installed app carries one ffprobe build, the Windows 64-bit one; the download is about a third smaller than 2.7.1's.
-- [ ] Nothing looks or behaves differently for the Electron 44.5.1 update across a normal session: launch, tray, the window controls, a stream night's relay lifecycle (covered again under Core regression).
-- [ ] Two-launch check: with the app in the tray, double-click the exe again; the running instance comes to the front, no second tray icon, no window flash.
+- [x] The installed app carries one ffprobe build, the Windows 64-bit one (checked 2026-10-27 in dist/win-unpacked: only win32/x64/ffprobe.exe under ffprobe-static).
+- [x] Nothing looks or behaves differently for the Electron 44.5.1 update across a normal session: launch, tray, the window controls, a stream night's relay lifecycle (covered again under Core regression).
+- [x] Two-launch check: with the app in the tray, double-click the exe again; the running instance comes to the front, no second tray icon, no window flash.
 
 ### Converter (CONV-15, CONV-16, CONV-17, CONV-18, CONV-13, CONV-4, CONV-25)
 
-- [ ] Archive a recording the preset cannot shrink (a short, already small file): the original stays, the row says the result was larger and is kept for two hours, Replace anyway asks before replacing, Discard now removes the larger file, and the stream is marked archived only after a real replacement.
-- [ ] A converting row shows the source size beside the source name, the output size growing beside the output name, an estimated final size with its share of the source from 5 percent on, and the time remaining; the Combine page shows the same while it runs.
-- [ ] Every conversion, archive, clip export and combine lands in the log on this PC: Settings, under System, Open logs folder; the records carry the files, the preset and its settings, the timings and how it ended.
-- [ ] A finished row's button reads Clear, a queued row's and the ready list's read Remove, all with the list icon and a gray hover; each tooltip says the files on disk are not touched; the Combine page's Clear job, Remove job and per-file remove read the same way.
-- [ ] A converting row at a narrow window: the percentage sits under the status icon in the icon's color, the figures stay on one line with the folder link visible, and the buttons collapse to icons below about 900 px of row width.
-- [ ] While a job runs, the output folder holds a temporary name; the final name appears only when the job ends. Cancel a job mid-write: no half-written file under the final name, and the kept partial is a "-partial" sibling that never takes an existing file's name.
-- [ ] Cancel a job in the moment after Start: no ffmpeg process lingers in Task Manager; the Converting list's Cancel all asks first and stops every job; quit the app with jobs running and the relay bound: no ffmpeg or relay process survives.
-- [ ] Drop a folder with subfolders on the Converter, the Combine page and the Player: the video files inside come in, other files are left out and the drop zone says what it skipped; the browse dialog behaves the same.
+- [x] Archive a recording the preset cannot shrink (a short, already small file): the original stays, the row says the result was larger and is kept for two hours, Replace anyway asks before replacing, Discard now removes the larger file, and the stream is marked archived only after a real replacement.
+- [x] A converting row shows the source size beside the source name, the output size growing beside the output name, an estimated final size with its share of the source from 5 percent on, and the time remaining; the Combine page shows the same while it runs.
+- [x] Every conversion, archive, clip export and combine lands in the log on this PC: Settings, under System, Open logs folder; the records carry the files, the preset and its settings, the timings and how it ended.
+- [x] A finished row's button reads Clear, a queued row's and the ready list's read Remove, all with the list icon and a gray hover; each tooltip says the files on disk are not touched; the Combine page's Clear job, Remove job and per-file remove read the same way.
+- [x] A converting row at a narrow window: the percentage sits under the status icon in the icon's color, the figures stay on one line with the folder link visible, and the buttons collapse to icons below about 900 px of row width.
+- [x] While a job runs, the output folder holds a temporary name; the final name appears only when the job ends. Cancel a job mid-write: no half-written file under the final name, and the kept partial is a "-partial" sibling that never takes an existing file's name.
+- [x] Cancel a job in the moment after Start: no ffmpeg process lingers in Task Manager; the Converting list's Cancel all asks first and stops every job; quit the app with jobs running and the relay bound: no ffmpeg or relay process survives.
+- [x] Drop a folder with subfolders on the Converter, the Combine page and the Player: the video files inside come in, other files are left out and the drop zone says what it skipped; the browse dialog behaves the same.
 
 ### Streams (STR-39, STR-42, STR-40, STR-41, STR-37, STR-47, STR-51, STR-20)
 
-- [ ] Link a video: the picker opens in place of the old menu with the stream and its current link at the top, a search field, and the channel's videos as rows with a thumbnail, the date, the privacy, livestream or upload, and the id; the privacy opens the video, the id opens it in Studio, each with a copy button; videos linked to another stream stay behind the filter; the stream and episode arrows work inside the picker; a second open lists at once from the kept list and picks up only newer videos.
-- [ ] For a stream with no link the picker leads with a Best match row and its reasons (length, title, tags, date, or the uploaded file's name); a linked stream shows no best match.
+- [x] Link a video: the picker opens in place of the old menu with the stream and its current link at the top, a search field, and the channel's videos as rows with a thumbnail, the date, the privacy, livestream or upload, and the id; the privacy opens the video, the id opens it in Studio, each with a copy button; videos linked to another stream stay behind the filter; the stream and episode arrows work inside the picker; a second open lists at once from the kept list and picks up only newer videos.
+- [x] For a stream with no link the picker leads with a Best match row and its reasons (length, title, tags, date, or the uploaded file's name); a linked stream shows no best match.
 - [ ] The sidebar footer shows the linked video as the picker's row with the date, privacy and id, and the Broadcast options under it; Link, Change and Unlink sit on the heading; for an upcoming stream with no link, Push to YouTube creates the broadcast with the chosen privacy, date and time and pushes the details, category and thumbnail included.
 - [ ] Convert a recording with a regular preset: the result's badge in the files grid carries the bolt, hover reads "Converted by Stream Manager"; an archived file keeps the green archive icon alone; a clip export and a combined file get the bolt after their first visit; offload the converted file and the placeholder keeps the bolt; a conversion from before this build shows none.
 - [ ] Import a YouTube video for a day that already has a stream: the summary row says so with the folder name, the heading counts it, a free date shows no notice, and two videos from one day in one run mark only the second.
@@ -119,6 +119,6 @@ Every item below is checked in the packaged build, not the dev server. An item t
 
 1. Release notes: edit `_release-notes-draft.md` into the GitHub copy. Plain category titles, modest scope claims, user vocabulary, no emojis, no em-dashes. The dump-folder retirement gets its own short section, since it is the one line users must read.
 2. New screenshots land on the website first (the website owns them); the README hero comes from that shoot.
-3. Merge dev into master, `npm run release:minor` (v2.8.0), push master and the tag; wait for the release workflow; smoke the CI exe (name, icon, no chips, the two-launch check); paste notes, mark latest, publish; confirm the release page.
+3. Merge dev into master, `npm run release:minor` (v2.8.0), push master and the tag; wait for the release workflow; smoke the CI exe (name, icon, no chips, the two-launch check); paste notes, mark latest, publish; confirm the release page. Read the CI exe's size against 2.7.1's 226.6 MB and set the release note's figure from it; a local _DEV exe says nothing here, since APP-51 builds it without compression.
 4. Coordinate the website deploy with the website instance (ask before opening a new conversation there); merge master back into dev.
 5. Archive this file to `archive/`.
