@@ -29,6 +29,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 - Moving to the previous or next stream when all of its videos are in the cloud no longer starts a download on its own or ends in an error. The player shows that stream with its videos and their cloud status; click one to download it, and again to open it once it has landed.
 
 - The player's Selected Stream block links to the stream's item on the Streams page: click its thumbnail or title, in the open panel or the collapsed rail.
+- Dragging a track's volume slider in the player no longer leaves the slider focused, so the arrow keys and Space go back to the player as soon as the mouse button comes up; a slider reached with Tab keeps the keyboard.
 - Session Videos in the player fills in at once when a video opens or the stream changes, with each file's cloud status following a moment later; it used to wait a second or more on that check and showed the previous stream's files in the meantime.
 
 ## Combine

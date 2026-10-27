@@ -5530,6 +5530,15 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                                           step={1}
                                           value={pct}
                                           onChange={e => setTrackVolume(track.index, parseInt(e.target.value, 10) / 100)}
+                                          // A mouse drag left the slider focused, and the arrow keys and
+                                          // Space then moved the volume instead of the player (PLR-30).
+                                          // A pointer-started interaction releases focus when the button
+                                          // comes up, wherever that happens; a Tab focus never starts
+                                          // with a pointer, so it keeps the slider as before.
+                                          onPointerDown={e => {
+                                            const el = e.currentTarget
+                                            window.addEventListener('pointerup', () => el.blur(), { once: true })
+                                          }}
                                           style={{
                                             background: `linear-gradient(to right, #c9d5e3 ${pct}%, rgba(255,255,255,0.1) ${pct}%)`,
                                           }}
