@@ -35,9 +35,9 @@
 31. PLR-30
 32. PLR-32
 33. THU-35
-34. APP-28
-35. STR-26
-36. THU-43
+34. THU-43
+35. APP-28
+36. STR-26
 
 ## Next up
 
@@ -390,6 +390,7 @@
   Filters section rework in the thumbnail editor's properties panel (not queued; filed 2026-09-15 while reviewing THU-31). 1. Move the Grayscale, Invert, and Emboss checkboxes to the top of the section. 2. Replace Sepia with Colorize: sepia is colorize with one fixed color, and colorize is what it would be used for. 3. Emboss gets its options when checked (Konva exposes strength, white level, direction, and blend). 4. Drop the second value label from the slider input groups; it repeats the field (done 2026-09-16 in the THU-33 review). 5. Drop shadows and some filters do not render together as expected; work out which combinations are incompatible and either resolve them or account for them (for instance, pixelate, blur, and similar disabled while a layer has a drop shadow, with the reason in a tooltip).
 
 - **THU-35** [bug] [ui] [impact:1]
+  Fixed 2026-10-26, awaiting review. Cause: the paste selected the new layer, and undo restored the layers without touching the selection, so the gone layer's id stayed selected and the panel's toolbar, which shows for any selection, stayed up. Fix: whatever drops out of the layers, by undo, redo or any other path, drops out of the selection too (an effect on the layers; the delete path already pruned on its own).
   When pasting in an image, and then using ctrl+Z to undo, the toolbar in the layer panel remains visible despite the layer now being absent (because the paste was undone.)
 
 - **THU-36** [bug] [investigate] [impact:2]

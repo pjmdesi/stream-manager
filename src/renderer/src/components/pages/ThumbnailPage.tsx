@@ -5368,6 +5368,17 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   /** Next "Base N" for a new layer; advances the file's counter. */
   const takeName = useCallback((base: string) => takeLayerName(nameCountersRef.current, base), [])
   const [selectedIds, setSelectedIds] = useState<string[]>([])
+  // A selection outlives its layers only by accident: undoing a paste took
+  // the pasted layer away and left its id selected, so the layer panel's
+  // toolbar stayed up for a layer that was gone (THU-35). Whatever drops
+  // out of the layers, by undo, redo or any other path, drops out of the
+  // selection too; the delete path prunes the same way on its own.
+  useEffect(() => {
+    setSelectedIds(prev => {
+      const kept = prev.filter(id => layers.some(l => l.id === id))
+      return kept.length === prev.length ? prev : kept
+    })
+  }, [layers])
   const selectedIdsRef = useRef<string[]>([])
   useEffect(() => { selectedIdsRef.current = selectedIds }, [selectedIds])
   // Session-tie breaker: changing the selected layer (or leaving the
