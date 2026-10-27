@@ -5569,8 +5569,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                   the dim never washes it out; below the hover line (z-[45]) and
                   region chrome (z-50+). The hit area stays low (z-10) so it
                   yields to handles and pills as before. */}
-              {duration > 0 && (handleDragDisplayTime ?? currentTime) >= vStart && (handleDragDisplayTime ?? currentTime) <= vEnd && (() => {
-                const t = handleDragDisplayTime ?? currentTime
+              {duration > 0 && (needleDragTime ?? handleDragDisplayTime ?? currentTime) >= vStart && (needleDragTime ?? handleDragDisplayTime ?? currentTime) <= vEnd && (() => {
+                // While the zoom bar's needle is dragged, this playhead draws
+                // from the cursor's time too: the video's time lands a frame
+                // or two after each seek, and the line stuttered behind the
+                // needle (2026-10-26).
+                const t = needleDragTime ?? handleDragDisplayTime ?? currentTime
                 const ratio = (t - vStart) / vSpan
                 // floor (not round) so the playhead lands on the pixel
                 // directly under the cursor while dragging — round would
