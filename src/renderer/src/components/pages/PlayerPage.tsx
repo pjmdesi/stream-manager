@@ -1459,7 +1459,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
   // Viewport range timecode editing
   // Which part of the zoom bar is being dragged; its tooltip is held open
   // through the drag so the value reads live (PLR-32).
-  const [barDrag, setBarDrag] = useState<'start' | 'end' | 'pan' | null>(null)
+  const [barDrag, setBarDrag] = useState<'start' | 'end' | 'pan' | 'playhead' | null>(null)
 
   // Active handle popup: { regionId, which: 'in'|'out', value }
   const [handlePopup, setHandlePopup] = useState<{ regionId: string; which: 'in' | 'out'; value: string } | null>(null)
@@ -6171,7 +6171,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
               {duration > 0 && (
                 <div
                   ref={scrollbarRef}
-                  className="relative h-3 w-full select-none mt-1"
+                  // While a part is dragged the other parts take no pointer
+                  // events (their hover looks flashed as the pointer crossed
+                  // them), so the drag's cursor lives on the bar itself.
+                  className={`relative h-3 w-full select-none mt-1 ${barDrag === 'pan' ? 'cursor-grabbing' : barDrag ? 'cursor-ew-resize' : ''}`}
                 >
                   {/* Track */}
                   <div className="absolute inset-y-1 inset-x-0 bg-white/5 rounded-full" />
@@ -6207,7 +6210,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                     triggerStyle={{ left: `${(vStart / duration) * 100}%`, width: `${(vSpan / duration) * 100}%`, minWidth: 4 }}
                   >
                     <div
-                      className="w-full h-full bg-accent-500/30 hover:bg-accent-500/40 cursor-grab active:cursor-grabbing"
+                      className={`w-full h-full bg-accent-500/30 ${barDrag === null ? 'hover:bg-accent-500/40 cursor-grab' : barDrag === 'pan' ? 'bg-accent-500/40 cursor-grabbing' : 'pointer-events-none'}`}
                       onMouseDown={e => {
                         if (e.button !== 0) return
                         e.preventDefault()
@@ -6243,7 +6246,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                     triggerStyle={{ left: `calc(${(vStart / duration) * 100}% - 10px)` }}
                   >
                     <div
-                      className="w-full h-full rounded-l-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors"
+                      className={`w-full h-full rounded-l-full bg-accent-400/60 transition-colors ${barDrag === null ? 'hover:bg-accent-400/90 cursor-ew-resize' : barDrag === 'start' ? 'bg-accent-400/90 cursor-ew-resize' : 'pointer-events-none'}`}
                       onMouseDown={e => {
                         if (e.button !== 0) return
                         e.preventDefault(); e.stopPropagation()
@@ -6276,7 +6279,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                     triggerStyle={{ left: `${(vEnd / duration) * 100}%` }}
                   >
                     <div
-                      className="w-full h-full rounded-r-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors"
+                      className={`w-full h-full rounded-r-full bg-accent-400/60 transition-colors ${barDrag === null ? 'hover:bg-accent-400/90 cursor-ew-resize' : barDrag === 'end' ? 'bg-accent-400/90 cursor-ew-resize' : 'pointer-events-none'}`}
                       onMouseDown={e => {
                         if (e.button !== 0) return
                         e.preventDefault(); e.stopPropagation()
@@ -6322,9 +6325,17 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                     // as the timeline playhead above.
                     const px = Math.min(scrollbarWidth - 1, Math.max(0, Math.floor(((handleDragDisplayTime ?? currentTime) / duration) * scrollbarWidth)))
                     return (
+                      // The needle's tooltip reads the playhead time, under the
+                      // bar's rules: held open through its own drag, shut while
+                      // another part is dragged, as is its hover look.
+                      <Tooltip
+                        content={formatViewTime(handleDragDisplayTime ?? currentTime, videoInfo?.fps)}
+                        open={barDrag === null ? undefined : barDrag === 'playhead'}
+                        triggerClassName="absolute -top-0.5 -bottom-0.5 w-3 -translate-x-1/2 z-30"
+                        triggerStyle={{ left: `${px}px` }}
+                      >
                       <div
-                        className="absolute -top-0.5 -bottom-0.5 w-3 -translate-x-1/2 cursor-ew-resize z-30 group"
-                        style={{ left: `${px}px` }}
+                        className={`w-full h-full group ${barDrag === null || barDrag === 'playhead' ? 'cursor-ew-resize' : 'pointer-events-none'}`}
                         onMouseDown={e => {
                           if (e.button !== 0) return
                           e.preventDefault()
@@ -6335,9 +6346,11 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                             const dur = durationRef.current
                             return Math.max(0, Math.min(dur, ((clientX - rect.left) / rect.width) * dur))
                           }
+                          setBarDrag('playhead')
                           fastSeekRef.current(getTime(e.clientX))
                           const onMove = (me: MouseEvent) => fastSeekRef.current(getTime(me.clientX))
                           const onUp = () => {
+                            setBarDrag(null)
                             window.removeEventListener('mousemove', onMove)
                             window.removeEventListener('mouseup', onUp)
                           }
@@ -6350,6 +6363,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                             the line exactly at the snapped pixel position). */}
                         <div className="playhead-line absolute top-0 bottom-0 w-px pointer-events-none" style={{ left: '6px' }} />
                       </div>
+                      </Tooltip>
                     )
                   })()}
                 </div>
