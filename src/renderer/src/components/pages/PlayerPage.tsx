@@ -6194,6 +6194,19 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                       }}
                     />
                   ))}
+                  {/* Marker ticks (2026-10-26): 3 px wide, a pixel past the
+                      track above and below, in the marker's own color, the
+                      swatch the timeline's triangle mirrors. Above the thumb
+                      and the handles, so the color comes through their tint,
+                      and under the playhead needle; no pointer events, so
+                      the parts beneath still take the drag. */}
+                  {displayMarkers.list.map(({ marker: m }) => (
+                    <div
+                      key={m.id}
+                      className={`absolute top-[3px] bottom-[3px] w-[3px] -translate-x-1/2 z-20 pointer-events-none ${(TAG_COLOR_MAP[m.color ?? DEFAULT_MARKER_COLOR] ?? TAG_COLOR_MAP[DEFAULT_MARKER_COLOR]).swatch}`}
+                      style={{ left: `${(m.time / duration) * 100}%` }}
+                    />
+                  ))}
                   {/* The zoom region: a thumb between two resize handles, each
                       with a live tooltip. The handles tell their view bound,
                       the thumb the visible length, all with the zoom level
