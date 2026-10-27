@@ -1,6 +1,6 @@
 import React, { useRef, useCallback, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import ReactDOM from 'react-dom'
-import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, ZoomIn, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical, CircleHelp } from 'lucide-react'
+import { Play, Pause, FolderOpen, Info, Layers, Check, RotateCcw, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, ChevronUp, ChevronDown, Camera, X, Loader2, Scissors, Crop, AudioWaveform, AudioLines, VolumeX, Upload, Tv2, Lock, Unlock, Repeat, PlusSquare, PencilLine, Trash2, GitMerge, Film, Cloud, SkipBack, SkipForward, Bookmark, TriangleAlert, GripVertical, CircleHelp } from 'lucide-react'
 import { TAG_COLORS, TAG_COLOR_MAP, DEFAULT_TRACK_COLORS, getWaveformFillClass, getMarkerFillClass, DEFAULT_MARKER_COLOR } from '../../constants/tagColors'
 import { v4 as uuidv4 } from 'uuid'
 import { useConversionJobs } from '../../context/ConversionContext'
@@ -1457,12 +1457,9 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
   const scrollbarRef = useRef<HTMLDivElement>(null)
 
   // Viewport range timecode editing
-  const [editingVStart, setEditingVStart] = useState(false)
-  const [vStartInput, setVStartInput] = useState('')
-  const vStartInputRef = useRef<HTMLInputElement>(null)
-  const [editingVEnd, setEditingVEnd] = useState(false)
-  const [vEndInput, setVEndInput] = useState('')
-  const vEndInputRef = useRef<HTMLInputElement>(null)
+  // Which part of the zoom bar is being dragged; its tooltip is held open
+  // through the drag so the value reads live (PLR-32).
+  const [barDrag, setBarDrag] = useState<'start' | 'end' | 'pan' | null>(null)
 
   // Active handle popup: { regionId, which: 'in'|'out', value }
   const [handlePopup, setHandlePopup] = useState<{ regionId: string; which: 'in' | 'out'; value: string } | null>(null)
@@ -3529,7 +3526,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
   const vEnd   = duration > 0 ? viewport.viewEnd   : duration
   const vSpan  = Math.max(0.001, vEnd - vStart)
   const zoomLevel = duration > 0 ? duration / vSpan : 1
-  const isZoomed  = isClipMode && zoomLevel > 1.01
 
   // ── Timeline markers: display merge + mutations (IDEA-4) ──────────────────
   // What the timeline shows = SM markers merged with file-embedded chapters
@@ -5134,106 +5130,6 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
 
                     <div className="flex-1" />
 
-                    {/* Visible range timecodes — stacks vertically below 2xl
-                        to free horizontal space. The em-dash separator is
-                        only meaningful in the row layout, so it hides too. */}
-                    <div className="flex flex-col 2xl:flex-row items-end 2xl:items-center gap-x-1 gap-y-0 shrink-0">
-                      {editingVStart ? (
-                        <input
-                          ref={vStartInputRef}
-                          value={vStartInput}
-                          onChange={e => setVStartInput(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter' || e.key === 'Tab') {
-                              const t = parseTimecode(vStartInput, videoInfo?.fps)
-                              if (t !== null) {
-                                const clamped = Math.max(0, Math.min(t, vEnd - 0.001))
-                                setViewportManual(v => ({ ...v, viewStart: clamped }))
-                              }
-                              setEditingVStart(false)
-                              if (e.key === 'Tab') { e.preventDefault(); setVEndInput(formatViewTime(vEnd, videoInfo?.fps)); setEditingVEnd(true); setTimeout(() => vEndInputRef.current?.select(), 0) }
-                            }
-                            if (e.key === 'Escape') setEditingVStart(false)
-                            const arrow = applyTimecodeArrow(e, vStartInput, vStartInputRef, videoInfo?.fps, 0, viewportRef.current.viewEnd - 0.001)
-                            if (arrow) { setVStartInput(arrow.newValue); setViewportManual(v => ({ ...v, viewStart: arrow.newTime })) }
-                          }}
-                          onBlur={() => {
-                            const t = parseTimecode(vStartInput, videoInfo?.fps)
-                            if (t !== null) setViewportManual(v => ({ ...v, viewStart: Math.max(0, Math.min(t, viewportRef.current.viewEnd - 0.001)) }))
-                            setEditingVStart(false)
-                          }}
-                          className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none text-right"
-                        />
-                      ) : (
-                        <Tooltip content="Click to set view start">
-                          <span
-                            className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
-                            onClick={() => { setVStartInput(formatViewTime(vStart, videoInfo?.fps)); setEditingVStart(true); setTimeout(() => vStartInputRef.current?.select(), 0) }}
-                          >
-                            {formatViewTime(vStart, videoInfo?.fps)}
-                          </span>
-                        </Tooltip>
-                      )}
-                      <span className="hidden 2xl:inline text-[11px] text-blue-400/30 select-none">—</span>
-                      {editingVEnd ? (
-                        <input
-                          ref={vEndInputRef}
-                          value={vEndInput}
-                          onChange={e => setVEndInput(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              const t = parseTimecode(vEndInput, videoInfo?.fps)
-                              if (t !== null) {
-                                const clamped = Math.min(duration, Math.max(t, vStart + 0.001))
-                                setViewportManual(v => ({ ...v, viewEnd: clamped }))
-                              }
-                              setEditingVEnd(false)
-                            }
-                            if (e.key === 'Escape') setEditingVEnd(false)
-                            const arrow = applyTimecodeArrow(e, vEndInput, vEndInputRef, videoInfo?.fps, viewportRef.current.viewStart + 0.001, duration)
-                            if (arrow) { setVEndInput(arrow.newValue); setViewportManual(v => ({ ...v, viewEnd: arrow.newTime })) }
-                          }}
-                          onBlur={() => {
-                            const t = parseTimecode(vEndInput, videoInfo?.fps)
-                            if (t !== null) setViewportManual(v => ({ ...v, viewEnd: Math.min(duration, Math.max(t, viewportRef.current.viewStart + 0.001)) }))
-                            setEditingVEnd(false)
-                          }}
-                          className="w-16 text-[11px] text-blue-300 tabular-nums bg-transparent border-b border-blue-500/60 focus:outline-none"
-                        />
-                      ) : (
-                        <Tooltip content="Click to set view end">
-                          <span
-                            className="text-[11px] text-blue-400/70 tabular-nums cursor-text hover:text-blue-300 transition-colors"
-                            onClick={() => { setVEndInput(formatViewTime(vEnd, videoInfo?.fps)); setEditingVEnd(true); setTimeout(() => vEndInputRef.current?.select(), 0) }}
-                          >
-                            {formatViewTime(vEnd, videoInfo?.fps)}
-                          </span>
-                        </Tooltip>
-                      )}
-                    </div>
-
-                    <div className="w-px h-3 bg-white/10 mx-1 shrink-0" />
-
-                    {/* Zoom level + reset (when zoomed). One divider trails
-                        the zoom controls to separate them from Export. The
-                        always-on extra divider that used to sit before
-                        Export was removed — we already have one above
-                        (after the timecodes) and don't need a duplicate. */}
-                    {isZoomed && (
-                      <>
-                        <span className="text-[10px] text-blue-400/60 tabular-nums">{zoomLevel.toFixed(1)}×</span>
-                        <Tooltip content="Reset zoom">
-                          <button
-                            onClick={() => setViewport({ viewStart: 0, viewEnd: duration })}
-                            className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-blue-400/70 border border-blue-500/20 hover:bg-blue-950/60 transition-colors"
-                          >
-                            <ZoomIn size={10} /> 1×
-                          </button>
-                        </Tooltip>
-                        <div className="w-px h-3 bg-white/10 mx-0.5 shrink-0" />
-                      </>
-                    )}
-
                     <Tooltip content={clipState.clipRegions.length > 0 ? 'Export clip' : 'Add at least one segment first'}>
                       <button
                         onClick={() => setShowExportDialog(true)}
@@ -6290,61 +6186,71 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                       }}
                     />
                   ))}
-                  {/* Thumb — accent-colored to distinguish from clip markers.
-                      Rectangular (not rounded) because the boundary
-                      markers now flank the thumb and provide the pill
-                      caps. The thumb's left/right edges sit exactly at
-                      the zoom region's vStart/vEnd — i.e. the flat
-                      inner sides of the markers indicate the true
-                      timeline boundaries, with the rounded outer half
-                      of each marker hanging off into the panel's
-                      px-3 padding area (which gives ~2px of slack
-                      before line 3161's overflow-hidden would clip). */}
-                  <div
-                    className="absolute inset-y-0 bg-accent-500/30 hover:bg-accent-500/40 cursor-grab active:cursor-grabbing flex items-center"
-                    style={{
-                      left: `${(vStart / duration) * 100}%`,
-                      width: `${(vSpan / duration) * 100}%`,
-                      minWidth: 4,
-                    }}
-                    onMouseDown={e => {
-                      if (e.button !== 0) return
-                      e.preventDefault()
-                      ;(document.activeElement as HTMLElement)?.blur()
-                      const rect = scrollbarRef.current!.getBoundingClientRect()
-                      const startX = e.clientX
-                      const { viewStart: svs, viewEnd: sve } = viewportRef.current
-                      const span = sve - svs
-                      const onMove = (me: MouseEvent) => {
-                        const dur = durationRef.current
-                        const dtSec = ((me.clientX - startX) / rect.width) * dur
-                        let ns = svs + dtSec
-                        let ne = sve + dtSec
-                        if (ns < 0) { ns = 0; ne = span }
-                        if (ne > dur) { ne = dur; ns = dur - span }
-                        setViewport({ viewStart: ns, viewEnd: ne })
-                      }
-                      const onUp = () => {
-                        window.removeEventListener('mousemove', onMove)
-                        window.removeEventListener('mouseup', onUp)
-                      }
-                      window.addEventListener('mousemove', onMove)
-                      window.addEventListener('mouseup', onUp)
-                    }}
+                  {/* The zoom region: a thumb between two resize handles, each
+                      with a live tooltip. The handles tell their view bound,
+                      the thumb the visible length, all with the zoom level
+                      (PLR-32: the readout they replace sat in the clip
+                      toolbar, where it had no business). The handles are
+                      siblings of the thumb, not children, so a hover on one
+                      shows its own tooltip alone; they are placed off the
+                      same vStart and vEnd as the thumb's edges, their flat
+                      sides flush with them and their rounded halves hanging
+                      into the scrollbar's margin. A tooltip is held open
+                      through its drag, so it follows the handle and reads
+                      the value as it changes. */}
+                  <Tooltip
+                    content={`${formatViewTime(vSpan, videoInfo?.fps)} visible · ${zoomLevel.toFixed(1)}×`}
+                    open={barDrag === 'pan' ? true : undefined}
+                    triggerClassName="absolute inset-y-0"
+                    triggerStyle={{ left: `${(vStart / duration) * 100}%`, width: `${(vSpan / duration) * 100}%`, minWidth: 4 }}
                   >
-                    {/* Left resize handle — flat side flush against the
-                        thumb's left edge at vStart; rounded side
-                        protrudes 10px to the left into the scrollbar's
-                        margin. */}
                     <div
-                      className="absolute right-full top-0 bottom-0 w-2.5 rounded-l-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors z-10"
+                      className="w-full h-full bg-accent-500/30 hover:bg-accent-500/40 cursor-grab active:cursor-grabbing"
                       onMouseDown={e => {
+                        if (e.button !== 0) return
+                        e.preventDefault()
+                        ;(document.activeElement as HTMLElement)?.blur()
+                        const rect = scrollbarRef.current!.getBoundingClientRect()
+                        const startX = e.clientX
+                        const { viewStart: svs, viewEnd: sve } = viewportRef.current
+                        const span = sve - svs
+                        setBarDrag('pan')
+                        const onMove = (me: MouseEvent) => {
+                          const dur = durationRef.current
+                          const dtSec = ((me.clientX - startX) / rect.width) * dur
+                          let ns = svs + dtSec
+                          let ne = sve + dtSec
+                          if (ns < 0) { ns = 0; ne = span }
+                          if (ne > dur) { ne = dur; ns = dur - span }
+                          setViewport({ viewStart: ns, viewEnd: ne })
+                        }
+                        const onUp = () => {
+                          setBarDrag(null)
+                          window.removeEventListener('mousemove', onMove)
+                          window.removeEventListener('mouseup', onUp)
+                        }
+                        window.addEventListener('mousemove', onMove)
+                        window.addEventListener('mouseup', onUp)
+                      }}
+                    />
+                  </Tooltip>
+                  <Tooltip
+                    content={`${formatViewTime(vStart, videoInfo?.fps)} · ${zoomLevel.toFixed(1)}×`}
+                    open={barDrag === 'start' ? true : undefined}
+                    triggerClassName="absolute top-0 bottom-0 w-2.5 z-10"
+                    triggerStyle={{ left: `calc(${(vStart / duration) * 100}% - 10px)` }}
+                  >
+                    <div
+                      className="w-full h-full rounded-l-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors"
+                      onMouseDown={e => {
+                        if (e.button !== 0) return
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
                         const rect = scrollbarRef.current!.getBoundingClientRect()
                         const startX = e.clientX
                         const startVStart = viewportRef.current.viewStart
                         const startVEnd = viewportRef.current.viewEnd
+                        setBarDrag('start')
                         const onMove = (me: MouseEvent) => {
                           const dur = durationRef.current
                           const dtSec = ((me.clientX - startX) / rect.width) * dur
@@ -6352,6 +6258,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                           setViewport({ viewStart: newVStart, viewEnd: startVEnd })
                         }
                         const onUp = () => {
+                          setBarDrag(null)
                           window.removeEventListener('mousemove', onMove)
                           window.removeEventListener('mouseup', onUp)
                         }
@@ -6359,18 +6266,24 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                         window.addEventListener('mouseup', onUp)
                       }}
                     />
-                    {/* Right resize handle — flat side flush against
-                        the thumb's right edge at vEnd; rounded side
-                        protrudes 10px to the right. */}
+                  </Tooltip>
+                  <Tooltip
+                    content={`${formatViewTime(vEnd, videoInfo?.fps)} · ${zoomLevel.toFixed(1)}×`}
+                    open={barDrag === 'end' ? true : undefined}
+                    triggerClassName="absolute top-0 bottom-0 w-2.5 z-10"
+                    triggerStyle={{ left: `${(vEnd / duration) * 100}%` }}
+                  >
                     <div
-                      className="absolute left-full top-0 bottom-0 w-2.5 rounded-r-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors z-10"
+                      className="w-full h-full rounded-r-full cursor-ew-resize bg-accent-400/60 hover:bg-accent-400/90 transition-colors"
                       onMouseDown={e => {
+                        if (e.button !== 0) return
                         e.preventDefault(); e.stopPropagation()
                         ;(document.activeElement as HTMLElement)?.blur()
                         const rect = scrollbarRef.current!.getBoundingClientRect()
                         const startX = e.clientX
                         const startVStart = viewportRef.current.viewStart
                         const startVEnd = viewportRef.current.viewEnd
+                        setBarDrag('end')
                         const onMove = (me: MouseEvent) => {
                           const dur = durationRef.current
                           const dtSec = ((me.clientX - startX) / rect.width) * dur
@@ -6378,6 +6291,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                           setViewport({ viewStart: startVStart, viewEnd: newVEnd })
                         }
                         const onUp = () => {
+                          setBarDrag(null)
                           window.removeEventListener('mousemove', onMove)
                           window.removeEventListener('mouseup', onUp)
                         }
@@ -6385,7 +6299,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                         window.addEventListener('mouseup', onUp)
                       }}
                     />
-                  </div>
+                  </Tooltip>
                   {/* Playhead position needle — draggable scrubber for
                       the full timeline. Hit area is 12px wide (matches
                       the resize handles' feel) so it's easy to grab,
