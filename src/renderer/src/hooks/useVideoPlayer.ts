@@ -131,6 +131,9 @@ export function useVideoPlayer() {
   useEffect(() => { multiTrackEnabledRef.current = state.multiTrackEnabled }, [state.multiTrackEnabled])
 
   const isSeeking = useRef(false)
+  /** True while the per-frame time loop runs (playing); timeupdate then
+   *  leaves the time alone. */
+  const frameLoopRef = useRef(false)
   const pendingSeekTime = useRef<number | null>(null)
   // Current playback rate — remembered so audio-track elements created
   // later (extraction finishing mid-session) and files loaded later
@@ -482,6 +485,9 @@ export function useVideoPlayer() {
       }
     }
     const onTimeUpdate = () => {
+      // The frame loop below owns the time while playing; a second writer
+      // at its own cadence made the playhead hop between two spots.
+      if (frameLoopRef.current) return
       setState(prev => ({ ...prev, currentTime: video.currentTime }))
     }
 
@@ -501,16 +507,21 @@ export function useVideoPlayer() {
   // The time once per presented frame while playing (2026-10-26):
   // timeupdate fires about four times a second, so the timecode and the
   // playheads moved in steps of several frames. requestVideoFrameCallback
-  // hands every presented frame with its exact media time; where it is
-  // missing, an animation-frame loop samples currentTime instead. Paused
-  // updates keep coming from the seek paths. A frame that lands while a
-  // seek is in flight is skipped, so the display never steps back to the
-  // frame before the seek.
+  // runs once per presented frame; where it is missing, an animation-frame
+  // loop stands in. The value taken is the element's clock, currentTime,
+  // not the frame's own media time: at a high playback rate the picture
+  // falls behind the clock and catches up in bursts, and a playhead on
+  // the frame's time drifted away from one on the clock (the timeupdate
+  // handler's) and snapped back, hopping between the two. The clock is
+  // what the audio follows and what every seek path writes. The loop owns
+  // the time while it runs (timeupdate stands down, see frameLoopRef);
+  // paused updates keep coming from the seek paths, and a frame landing
+  // while a seek is in flight is skipped, so the display never steps back.
   useEffect(() => {
     const video = videoRef.current
     if (!video || !state.isPlaying) return
     type FrameVideo = HTMLVideoElement & {
-      requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number
+      requestVideoFrameCallback?: (cb: () => void) => number
       cancelVideoFrameCallback?: (id: number) => void
     }
     const v = video as FrameVideo
@@ -518,6 +529,7 @@ export function useVideoPlayer() {
     let cancelled = false
     let id = 0
     let last = -1
+    frameLoopRef.current = true
     const emit = (t: number) => {
       if (!Number.isFinite(t) || t === last) return
       last = t
@@ -525,18 +537,17 @@ export function useVideoPlayer() {
     }
     const schedule = () => {
       if (cancelled) return
-      id = hasFrameCallback
-        ? v.requestVideoFrameCallback!(onFrame)
-        : requestAnimationFrame(() => onFrame(0, { mediaTime: v.currentTime }))
+      id = hasFrameCallback ? v.requestVideoFrameCallback!(onFrame) : requestAnimationFrame(onFrame)
     }
-    const onFrame = (_now: number, meta: { mediaTime: number }) => {
+    const onFrame = () => {
       if (cancelled) return
-      if (!isSeeking.current) emit(meta.mediaTime)
+      if (!isSeeking.current) emit(v.currentTime)
       schedule()
     }
     schedule()
     return () => {
       cancelled = true
+      frameLoopRef.current = false
       if (hasFrameCallback) v.cancelVideoFrameCallback?.(id)
       else cancelAnimationFrame(id)
     }
