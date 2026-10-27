@@ -498,6 +498,50 @@ export function useVideoPlayer() {
     }
   }, [state.videoUrl])
 
+  // The time once per presented frame while playing (2026-10-26):
+  // timeupdate fires about four times a second, so the timecode and the
+  // playheads moved in steps of several frames. requestVideoFrameCallback
+  // hands every presented frame with its exact media time; where it is
+  // missing, an animation-frame loop samples currentTime instead. Paused
+  // updates keep coming from the seek paths. A frame that lands while a
+  // seek is in flight is skipped, so the display never steps back to the
+  // frame before the seek.
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !state.isPlaying) return
+    type FrameVideo = HTMLVideoElement & {
+      requestVideoFrameCallback?: (cb: (now: number, meta: { mediaTime: number }) => void) => number
+      cancelVideoFrameCallback?: (id: number) => void
+    }
+    const v = video as FrameVideo
+    const hasFrameCallback = typeof v.requestVideoFrameCallback === 'function'
+    let cancelled = false
+    let id = 0
+    let last = -1
+    const emit = (t: number) => {
+      if (!Number.isFinite(t) || t === last) return
+      last = t
+      setState(prev => prev.currentTime === t ? prev : { ...prev, currentTime: t })
+    }
+    const schedule = () => {
+      if (cancelled) return
+      id = hasFrameCallback
+        ? v.requestVideoFrameCallback!(onFrame)
+        : requestAnimationFrame(() => onFrame(0, { mediaTime: v.currentTime }))
+    }
+    const onFrame = (_now: number, meta: { mediaTime: number }) => {
+      if (cancelled) return
+      if (!isSeeking.current) emit(meta.mediaTime)
+      schedule()
+    }
+    schedule()
+    return () => {
+      cancelled = true
+      if (hasFrameCallback) v.cancelVideoFrameCallback?.(id)
+      else cancelAnimationFrame(id)
+    }
+  }, [state.isPlaying, state.videoUrl])
+
   // Drift correction — audio elements have independent clocks, so they
   // gradually slip from the video. Snap any track that strays beyond
   // 150ms back to the video's currentTime.
