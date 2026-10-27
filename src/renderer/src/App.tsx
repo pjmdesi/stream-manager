@@ -46,17 +46,26 @@ import type { PendingThumbnailStream } from './context/ThumbnailEditorContext'
 function PersistentPage({ active, children }: { active: boolean; children: React.ReactNode }) {
   const [settling, setSettling] = useState(false)
   const wasActive = useRef(active)
+  // Decided in render, so the mark lands in the same DOM commit as the
+  // un-hide. A child's layout effect runs before this component's own and
+  // can force a style pass by measuring; a transition that starts in that
+  // pass keeps its duration whatever the mark says afterwards. That is how
+  // the streams page's detail sidebar, which fades in from its starting
+  // style whenever it is rendered afresh, still faded on every return.
+  const justShown = active && !wasActive.current
   useLayoutEffect(() => {
     const shown = active && !wasActive.current
     wasActive.current = active
     if (!shown) return
+    // Keep the mark for two frames: the first paints the page in its final
+    // state, the second drops the mark with nothing left to transition.
     setSettling(true)
     let second = 0
     const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setSettling(false)) })
     return () => { cancelAnimationFrame(first); cancelAnimationFrame(second) }
   }, [active])
   return (
-    <div className={`h-full ${active ? '' : 'hidden'}`} data-settling={settling || undefined}>
+    <div className={`h-full ${active ? '' : 'hidden'}`} data-settling={(justShown || settling) || undefined}>
       {children}
     </div>
   )
