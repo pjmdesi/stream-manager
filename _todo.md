@@ -424,7 +424,7 @@
 - **THU-46** [ui] [impact:2]
   Undo and redo restore the selection they were made with. Decision 2026-10-26 (after THU-35, where an undone paste left its layer selected): not Blender's model, where every selection click is an undo step and Ctrl+Z wades through clicks before reaching an edit (Blender ships an option to leave selection out for that reason), but the model Figma, Sketch and Affinity use: a selection change is never a step of its own, yet each history step remembers the selection it was made with, and undo or redo restores that selection with the content. Redo of a paste brings the layer back selected; undo of a move reselects the moved layers; a plain click never enters the history. In the editor the history already keeps whole layer snapshots (useUndoRedo), so each snapshot gains the selection as it stood at commit time, and undo and redo apply both; the THU-35 prune stays as the safety net under it. An hour or two. Filed 2026-10-26.
 
-- **THU-43** [impact:2]
+- **THU-43** [impact:2] [done]
   Built 2026-10-26, awaiting review. Keyboard: Ctrl+] and Ctrl+[ (Shift for top and bottom) now take any selection; the selection's roots step among their own siblings, parent by parent, keeping their order, and a block stops as a unit at the edge instead of leapfrogging itself. Mouse: dragging a selected row in the layer panel carries every selected root, in paint order, to the drop slot, where they land in that order; dragging an unselected row moves that row alone as before; a mask slot takes a single dragged shape only. Two tree helpers carry it, moveLayersTo and moveSelectionAmongSiblings, both refusing a slot inside what moves.
   Ability to move multiple layers with keyboard shortcuts and with mouse in layer panel
 
@@ -692,6 +692,7 @@
   Let the Help modal pop out into its own window (2026-09-06). The modal is the default, but a modal covering the exact UI the user is trying to understand defeats the purpose: add a button (footer candidate) that breaks the Help content out into a separate window the user can place beside the app. No state passes between Help and the rest of the app, so the content is fully self-contained. Implementation notes: the player's pop-out video window is the precedent (own BrowserWindow + dedicated preload, see out/preload/popup.js); the pop-out should preserve the section the user was reading, remember its size/position, and reopening Help while the window is open should focus the window instead of showing the modal. Close buttons follow the style guide's same-slot rule.
 
 - **APP-28** [ui] [impact:1]
+  Built 2026-10-26, awaiting review: a field's blue dot reads "Changed, not saved yet. Save applies it." on hover; a section chip's corner dot is too small to hover, so the chip itself reads "Unsaved changes in this section. Save applies them." while the section has any, and nothing otherwise.
   Maybe add a tooltip to the blue "changed" dots in the settings that tells users they must save for settings to apply.
 
 - **APP-31** [bug] [blocked:INTG-1] [impact:2]

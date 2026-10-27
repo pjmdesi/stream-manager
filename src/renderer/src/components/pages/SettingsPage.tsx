@@ -374,9 +374,16 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
   const keyDirty = (key: keyof typeof config) =>
     JSON.stringify(local[key]) !== JSON.stringify(config[key])
   const sectionDirty = (keys: (keyof typeof config)[]) => keys.some(keyDirty)
+  // The dot says what it means on hover (APP-28); the nav chips' dots
+  // carry the same line.
+  const DIRTY_TIP = 'Changed, not saved yet. Save applies it.'
   const dirtyDot = (key: keyof typeof config) =>
     keyDirty(key)
-      ? <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400 ml-1.5 align-middle shrink-0" />
+      ? (
+        <Tooltip content={DIRTY_TIP} side="top" triggerClassName="inline-flex align-middle ml-1.5 shrink-0">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-blue-400" />
+        </Tooltip>
+      )
       : null
 
   const save = async () => {
@@ -455,18 +462,22 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
             const active = activeSection === s.id
             const dirty = sectionDirty(s.keys)
             return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => jumpTo(s.id)}
-                className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs whitespace-nowrap transition-colors ${
-                  active ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
-                }`}
-              >
-                <span className={active ? 'text-accent-300' : (s.dev ? 'text-yellow-600' : 'text-gray-500')}>{s.icon}</span>
-                {s.label}
-                {dirty && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400" />}
-              </button>
+              // The chip's corner dot is too small to hover, so the chip
+              // itself explains it, only while the section has unsaved
+              // changes (APP-28).
+              <Tooltip key={s.id} content="Unsaved changes in this section. Save applies them." side="bottom" open={dirty ? undefined : false}>
+                <button
+                  type="button"
+                  onClick={() => jumpTo(s.id)}
+                  className={`relative flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs whitespace-nowrap transition-colors ${
+                    active ? 'bg-accent-600/25 text-accent-200' : 'text-gray-400 hover:text-gray-200 hover:bg-white/5'
+                  }`}
+                >
+                  <span className={active ? 'text-accent-300' : (s.dev ? 'text-yellow-600' : 'text-gray-500')}>{s.icon}</span>
+                  {s.label}
+                  {dirty && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-blue-400" />}
+                </button>
+              </Tooltip>
             )
           })}
         </div>
