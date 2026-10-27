@@ -6197,10 +6197,12 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                       sides flush with them and their rounded halves hanging
                       into the scrollbar's margin. A tooltip is held open
                       through its drag, so it follows the handle and reads
-                      the value as it changes. */}
+                      the value as it changes; the other two are held shut
+                      meanwhile, since the pointer crosses them as the UI
+                      catches up and their hover tooltips flashed. */}
                   <Tooltip
                     content={`${formatViewTime(vSpan, videoInfo?.fps)} visible · ${zoomLevel.toFixed(1)}×`}
-                    open={barDrag === 'pan' ? true : undefined}
+                    open={barDrag === null ? undefined : barDrag === 'pan'}
                     triggerClassName="absolute inset-y-0"
                     triggerStyle={{ left: `${(vStart / duration) * 100}%`, width: `${(vSpan / duration) * 100}%`, minWidth: 4 }}
                   >
@@ -6236,7 +6238,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                   </Tooltip>
                   <Tooltip
                     content={`${formatViewTime(vStart, videoInfo?.fps)} · ${zoomLevel.toFixed(1)}×`}
-                    open={barDrag === 'start' ? true : undefined}
+                    open={barDrag === null ? undefined : barDrag === 'start'}
                     triggerClassName="absolute top-0 bottom-0 w-2.5 z-10"
                     triggerStyle={{ left: `calc(${(vStart / duration) * 100}% - 10px)` }}
                   >
@@ -6269,7 +6271,7 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
                   </Tooltip>
                   <Tooltip
                     content={`${formatViewTime(vEnd, videoInfo?.fps)} · ${zoomLevel.toFixed(1)}×`}
-                    open={barDrag === 'end' ? true : undefined}
+                    open={barDrag === null ? undefined : barDrag === 'end'}
                     triggerClassName="absolute top-0 bottom-0 w-2.5 z-10"
                     triggerStyle={{ left: `${(vEnd / duration) * 100}%` }}
                   >
