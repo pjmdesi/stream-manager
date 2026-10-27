@@ -45,6 +45,7 @@ import {
   walkSelection, enterGroup, leaveGroup,
   isMask, maskOf, pinMasks, adoptOrphans, canBeGroupMask, setGroupMask, releaseGroupMask, insertGroupMask,
   canApplyAsMaskBelow, applyAsMaskBelow,
+  moveLayersTo, moveSelectionAmongSiblings,
 } from '../../lib/layerTree'
 import { traceMaskPath, traceShapeOutlineLocal } from '../../lib/groupMask'
 import type { PanelRow } from '../../lib/layerTree'
@@ -5396,6 +5397,10 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
   // Drag-and-drop reordering state: the row being dragged, and below it the
   // computed drop target.
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null)
+  // Every root the drag carries (THU-43): the selection's roots when the
+  // dragged row is selected, else the row alone. draggingLayerId stays the
+  // row the pointer holds.
+  const [draggingIds, setDraggingIds] = useState<string[]>([])
   // Panel drop target (THU-18): the gap the indicator draws in (row index,
   // indented to the target depth) plus where the drop lands in the tree.
   const [panelDrop, setPanelDrop] = useState<{ gapIdx: number; depth: number; parentId: string | null; afterId: string | null } | null>(null)
@@ -6978,6 +6983,12 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const next = moveAmongSiblings(layers, id, direction)
     if (next) commitLayers(next)
   }, [layers, commitLayers])
+  /** The bracket keys with any selection (THU-43): the selection's roots
+   *  step among their siblings and keep their order. */
+  const moveSelectedLayers = useCallback((direction: 'up' | 'down' | 'top' | 'bottom') => {
+    const next = moveSelectionAmongSiblings(layers, selectedIds, direction)
+    if (next) commitLayers(next)
+  }, [layers, selectedIds, commitLayers])
 
   /** The Transform card's width and height for a group (THU-33): scale the
    *  members by the factors, the same math a canvas resize bakes in. */
@@ -8196,16 +8207,16 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
       // Shift held, e.key becomes '}'/'{', so matching on code avoids that.
       // ] = forward/up, [ = backward/down; Shift = all the way to front/back.
       if ((e.ctrlKey || e.metaKey) && (e.code === 'BracketRight' || e.code === 'BracketLeft')) {
-        if (selectedIds.length === 1) {
+        if (selectedIds.length > 0) {
           e.preventDefault()
           const forward = e.code === 'BracketRight'
-          moveLayer(selectedIds[0], e.shiftKey ? (forward ? 'top' : 'bottom') : (forward ? 'up' : 'down'))
+          moveSelectedLayers(e.shiftKey ? (forward ? 'top' : 'bottom') : (forward ? 'up' : 'down'))
         }
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [isVisible, mode, undo, redo, manualSave, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, nudgeSelected, groupSelected, ungroupSelected, selectFromKeyboard])
+  }, [isVisible, mode, undo, redo, manualSave, setGridSnapEnabled, layers, selectedIds, clipboardLayers, setClipboardLayers, commitLayers, setSelectedIds, moveLayer, moveSelectedLayers, nudgeSelected, groupSelected, ungroupSelected, selectFromKeyboard])
 
   // The layers panel scrolls the selected row into view whenever a single
   // layer becomes selected (keyboard walk, canvas click); a row already in
@@ -9448,7 +9459,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                           const { layer, depth } = row
                           const isSelected = selectedIds.includes(layer.id)
                           const isRenaming = renamingLayerId === layer.id
-                          const isDragging = draggingLayerId === layer.id
+                          const isDragging = draggingLayerId === layer.id || draggingIds.includes(layer.id)
                           const group = isGroup(layer)
                           const collapsed = collapsedGroups.has(layer.id)
                           // Members of a hidden group read as hidden too.
@@ -9477,13 +9488,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 draggable={!isRenaming && !rowIsMask}
                                 onDragStart={e => {
                                   setDraggingLayerId(layer.id)
+                                  setDraggingIds(selectedIds.includes(layer.id) ? selectionRoots(layers, selectedIds) : [layer.id])
                                   e.dataTransfer.effectAllowed = 'move'
                                   // Required for drag to work in some browsers; the
                                   // payload is unused since we track via state.
                                   e.dataTransfer.setData('text/plain', layer.id)
                                 }}
                                 onDragOver={e => {
-                                  if (!draggingLayerId || draggingLayerId === layer.id) return
+                                  if (!draggingLayerId || draggingLayerId === layer.id || draggingIds.includes(layer.id)) return
                                   const rect = e.currentTarget.getBoundingClientRect()
                                   const above = e.clientY < rect.top + rect.height / 2
                                   const target = dropFor(rowIdx, above)
@@ -9493,7 +9505,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   // indicator nor the move cursor: without
                                   // preventDefault the browser shows not-allowed,
                                   // which is the truth.
-                                  const valid = moveLayerTo(layers, draggingLayerId, target.parentId, target.afterId) !== null
+                                  const valid = moveLayersTo(layers, draggingIds.length > 0 ? draggingIds : [draggingLayerId], target.parentId, target.afterId) !== null
                                   if (!valid) { setPanelDrop(null); setSlotDrop(null); return }
                                   e.preventDefault()
                                   e.dataTransfer.dropEffect = 'move'
@@ -9512,14 +9524,14 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 onDrop={e => {
                                   e.preventDefault()
                                   if (draggingLayerId && panelDrop) {
-                                    const next = moveLayerTo(layers, draggingLayerId, panelDrop.parentId, panelDrop.afterId)
+                                    const next = moveLayersTo(layers, draggingIds.length > 0 ? draggingIds : [draggingLayerId], panelDrop.parentId, panelDrop.afterId)
                                     if (next) commitLayers(next)
                                   }
-                                  setDraggingLayerId(null)
+                                  setDraggingLayerId(null); setDraggingIds([])
                                   setPanelDrop(null)
                                 }}
                                 onDragEnd={() => {
-                                  setDraggingLayerId(null)
+                                  setDraggingLayerId(null); setDraggingIds([])
                                   setPanelDrop(null)
                                   setSlotDrop(null)
                                 }}
@@ -9648,12 +9660,12 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                   // over the icon.
                                   onDragEnter={e => {
                                     e.stopPropagation()
-                                    const d = draggingLayerId ? layers.find(l => l.id === draggingLayerId) : undefined
+                                    const d = draggingLayerId && draggingIds.length <= 1 ? layers.find(l => l.id === draggingLayerId) : undefined
                                     if (d && d.type === 'shape' && !isMask(d)) e.preventDefault()
                                   }}
                                   onDragOver={e => {
                                     e.stopPropagation()
-                                    if (!draggingLayerId) return
+                                    if (!draggingLayerId || draggingIds.length > 1) return
                                     const d = layers.find(l => l.id === draggingLayerId)
                                     const ok = !!d && d.type === 'shape' && !isMask(d)
                                     if (!ok) { setPanelDrop(null); setSlotDrop(null); return }
@@ -9675,7 +9687,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                       dropShapeIntoSlot(draggingLayerId, layer.id)
                                       toggleGroupCollapsed(layer.id)
                                     }
-                                    setDraggingLayerId(null)
+                                    setDraggingLayerId(null); setDraggingIds([])
                                     setPanelDrop(null)
                                     setSlotDrop(null)
                                   }}
@@ -9712,11 +9724,11 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 // Anything else gets the not-allowed cursor and
                                 // no indicator anywhere.
                                 onDragEnter={e => {
-                                  const d = draggingLayerId ? layers.find(l => l.id === draggingLayerId) : undefined
+                                  const d = draggingLayerId && draggingIds.length <= 1 ? layers.find(l => l.id === draggingLayerId) : undefined
                                   if (d && d.type === 'shape' && !isMask(d)) e.preventDefault()
                                 }}
                                 onDragOver={e => {
-                                  if (!draggingLayerId) return
+                                  if (!draggingLayerId || draggingIds.length > 1) return
                                   const d = layers.find(l => l.id === draggingLayerId)
                                   const ok = !!d && d.type === 'shape' && !isMask(d)
                                   if (!ok) { setPanelDrop(null); setSlotDrop(null); return }
@@ -9733,7 +9745,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
                                 onDrop={e => {
                                   e.preventDefault()
                                   if (draggingLayerId && slotDrop === layer.id) dropShapeIntoSlot(draggingLayerId, layer.id)
-                                  setDraggingLayerId(null)
+                                  setDraggingLayerId(null); setDraggingIds([])
                                   setPanelDrop(null)
                                   setSlotDrop(null)
                                 }}

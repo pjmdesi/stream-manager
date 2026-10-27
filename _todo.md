@@ -37,7 +37,6 @@
 33. THU-35
 34. THU-43
 35. APP-28
-36. STR-26
 
 ## Next up
 
@@ -52,27 +51,28 @@
 9. STR-31
 10. STR-30
 11. STR-11
-12. STR-25
-13. PLR-25
-14. THU-38
-15. THU-36
-16. THU-37
-17. THU-39
-18. INTG-1
-19. APP-25
-20. APP-26
-21. APP-31
-22. APP-34
-23. APP-35
-24. SYNC-7
-25. STR-44
-26. THU-41
-27. STR-48
-28. STR-49
-29. STR-50
-30. APP-58
-31. THU-44
-32. APP-60
+12. STR-26
+13. STR-25
+14. PLR-25
+15. THU-38
+16. THU-36
+17. THU-37
+18. THU-39
+19. INTG-1
+20. APP-25
+21. APP-26
+22. APP-31
+23. APP-34
+24. APP-35
+25. SYNC-7
+26. STR-44
+27. THU-41
+28. STR-48
+29. STR-49
+30. STR-50
+31. APP-58
+32. THU-44
+33. APP-60
 
 ## Improvement ideas
 
@@ -389,7 +389,7 @@
 - **THU-32**
   Filters section rework in the thumbnail editor's properties panel (not queued; filed 2026-09-15 while reviewing THU-31). 1. Move the Grayscale, Invert, and Emboss checkboxes to the top of the section. 2. Replace Sepia with Colorize: sepia is colorize with one fixed color, and colorize is what it would be used for. 3. Emboss gets its options when checked (Konva exposes strength, white level, direction, and blend). 4. Drop the second value label from the slider input groups; it repeats the field (done 2026-09-16 in the THU-33 review). 5. Drop shadows and some filters do not render together as expected; work out which combinations are incompatible and either resolve them or account for them (for instance, pixelate, blur, and similar disabled while a layer has a drop shadow, with the reason in a tooltip).
 
-- **THU-35** [bug] [ui] [impact:1]
+- **THU-35** [bug] [ui] [impact:1] [done]
   Fixed 2026-10-26, awaiting review. Cause: the paste selected the new layer, and undo restored the layers without touching the selection, so the gone layer's id stayed selected and the panel's toolbar, which shows for any selection, stayed up. Fix: whatever drops out of the layers, by undo, redo or any other path, drops out of the selection too (an effect on the layers; the delete path already pruned on its own).
   When pasting in an image, and then using ctrl+Z to undo, the toolbar in the layer panel remains visible despite the layer now being absent (because the paste was undone.)
 
@@ -421,7 +421,11 @@
 - **THU-45** [bug] [impact:3] [done]
   Fixed 2026-10-26, awaiting review. Opening a stream with no thumbnail, picking a template, and landing in the editor, the page bounced to the overview a second or two later and the thumbnail was never written. Cause: the editor listens for streams-changed events and treats the open variant as deleted when the disk has no file for it; a brand-new variant has no file until its first save lands, and that save first loads the template's images, so any event for the stream in that window (the files grid's one-time probe writing its converted verdicts to _meta.json since STR-40, the likeliest source) sent the editor to the overview, which unmounted the stage and aborted the save. Start blank had the same hole with no save at all. Fix: the editor keeps the set of variants known to exist on disk (what the open found, plus each one a save wrote) and only treats a variant in that set as deleted. Reported 2026-10-26.
 
+- **THU-46** [ui] [impact:2]
+  Undo and redo restore the selection they were made with. Decision 2026-10-26 (after THU-35, where an undone paste left its layer selected): not Blender's model, where every selection click is an undo step and Ctrl+Z wades through clicks before reaching an edit (Blender ships an option to leave selection out for that reason), but the model Figma, Sketch and Affinity use: a selection change is never a step of its own, yet each history step remembers the selection it was made with, and undo or redo restores that selection with the content. Redo of a paste brings the layer back selected; undo of a move reselects the moved layers; a plain click never enters the history. In the editor the history already keeps whole layer snapshots (useUndoRedo), so each snapshot gains the selection as it stood at commit time, and undo and redo apply both; the THU-35 prune stays as the safety net under it. An hour or two. Filed 2026-10-26.
+
 - **THU-43** [impact:2]
+  Built 2026-10-26, awaiting review. Keyboard: Ctrl+] and Ctrl+[ (Shift for top and bottom) now take any selection; the selection's roots step among their own siblings, parent by parent, keeping their order, and a block stops as a unit at the edge instead of leapfrogging itself. Mouse: dragging a selected row in the layer panel carries every selected root, in paint order, to the drop slot, where they land in that order; dragging an unselected row moves that row alone as before; a mask slot takes a single dragged shape only. Two tree helpers carry it, moveLayersTo and moveSelectionAmongSiblings, both refusing a slot inside what moves.
   Ability to move multiple layers with keyboard shortcuts and with mouse in layer panel
 
 - **THU-44** [impact:1]

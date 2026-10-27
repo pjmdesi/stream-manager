@@ -405,6 +405,97 @@ export function moveAmongSiblings(layers: ThumbnailLayer[], id: string, directio
   return moveLayerTo(layers, id, parentId, afterId)
 }
 
+/** True when `id` sits under `parentId` directly above `afterId` (or at the
+ *  bottom of that parent when `afterId` is null), masks left out of the
+ *  count since they stay pinned where they are. */
+function sitsAbove(layers: ThumbnailLayer[], id: string, parentId: string | null, afterId: string | null): boolean {
+  const l = byId(layers, id)
+  if (!l || parentIdOf(l) !== parentId) return false
+  const sibs = childrenOf(layers, parentId).filter(s => !isMask(s))
+  const i = sibs.findIndex(s => s.id === id)
+  if (i < 0) return false
+  return afterId === null ? i === 0 : sibs[i - 1]?.id === afterId
+}
+
+/**
+ * Several layers to one slot (THU-43): the selection's roots, in paint
+ * order, land under `parentId` directly above `afterId` and keep their
+ * order, each placed above the one before it. Null when a move is refused
+ * (the slot inside what moves, a mask, the nesting limit) or when nothing
+ * changes.
+ */
+export function moveLayersTo(layers: ThumbnailLayer[], ids: string[], parentId: string | null, afterId: string | null): ThumbnailLayer[] | null {
+  const roots = new Set(selectionRoots(layers, ids))
+  const ordered = layers.filter(l => roots.has(l.id)).map(l => l.id)
+  if (ordered.length === 0) return null
+  for (const id of ordered) {
+    const block = subtreeIds(layers, id)
+    if ((parentId && block.includes(parentId)) || (afterId && block.includes(afterId))) return null
+  }
+  let next = layers
+  let changed = false
+  let prev = afterId
+  for (const id of ordered) {
+    const r = moveLayerTo(next, id, parentId, prev)
+    if (r) { next = r; changed = true }
+    else if (!sitsAbove(next, id, parentId, prev)) return null
+    prev = id
+  }
+  return changed ? next : null
+}
+
+/** The new order of one parent's children for a step of the selected ones
+ *  (bottom to top): a selected layer steps past an unselected neighbor and
+ *  never past a selected one, so a block moves as a unit and stops at the
+ *  edge; top and bottom gather the selected ones at that end in order. */
+function steppedOrder(order: string[], sel: Set<string>, direction: 'up' | 'down' | 'top' | 'bottom'): string[] {
+  const o = [...order]
+  const swap = (i: number, j: number) => { const t = o[i]; o[i] = o[j]; o[j] = t }
+  if (direction === 'up') {
+    for (let i = o.length - 2; i >= 0; i--) if (sel.has(o[i]) && !sel.has(o[i + 1])) swap(i, i + 1)
+    return o
+  }
+  if (direction === 'down') {
+    for (let i = 1; i < o.length; i++) if (sel.has(o[i]) && !sel.has(o[i - 1])) swap(i, i - 1)
+    return o
+  }
+  const picked = o.filter(id => sel.has(id))
+  const rest = o.filter(id => !sel.has(id))
+  return direction === 'top' ? [...rest, ...picked] : [...picked, ...rest]
+}
+
+/**
+ * Z-order step for a whole selection (the bracket keys with several layers
+ * selected, THU-43): the selection's roots step among their own siblings,
+ * parent by parent, and keep their order. Null when nothing changes.
+ */
+export function moveSelectionAmongSiblings(layers: ThumbnailLayer[], ids: string[], direction: 'up' | 'down' | 'top' | 'bottom'): ThumbnailLayer[] | null {
+  const roots = new Set(selectionRoots(layers, ids))
+  if (roots.size === 0) return null
+  const parents: (string | null)[] = []
+  for (const l of layers) {
+    if (!roots.has(l.id)) continue
+    const p = parentIdOf(l)
+    if (!parents.includes(p)) parents.push(p)
+  }
+  let next = layers
+  let changed = false
+  for (const parentId of parents) {
+    const sibs = childrenOf(next, parentId).filter(s => !isMask(s)).map(s => s.id)
+    const order = steppedOrder(sibs, roots, direction)
+    if (order.every((id, i) => id === sibs[i])) continue
+    let prev: string | null = null
+    for (const id of order) {
+      if (roots.has(id)) {
+        const r = moveLayerTo(next, id, parentId, prev)
+        if (r) { next = r; changed = true }
+      }
+      prev = id
+    }
+  }
+  return changed ? next : null
+}
+
 /**
  * Pixel snap for a resized box (THU-27). With snapping on, width and height
  * land on whole pixels, except that an aspect-locked image keeps its
