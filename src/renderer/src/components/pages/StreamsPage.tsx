@@ -1131,7 +1131,7 @@ export function StreamsPage({
         // video, a lookup by id).
         setYtVods(prev => {
           const fresh = new Map(r.items.map(v => [v.id, v]))
-          return [...prev.filter(v => !fresh.has(v.id) && !v.cached), ...r.items]
+          return [...prev.filter(v => !fresh.has(v.id) && !v.cached), ...fresh.values()]
         })
         patchVodList({ phase: 'ready' })
       } catch (err: any) {
@@ -1148,8 +1148,17 @@ export function StreamsPage({
         if (!cache) { void runFull(false); return }
         ytVodsFetchedAtRef.current = cache.fetchedAt
         setYtVods(prev => {
+          // One entry per id, whatever the copy on disk holds: a walk
+          // that met a video twice wrote both copies (STR-53), and a
+          // duplicate in the list multiplies its row on every re-render.
           const have = new Set(prev.map(v => v.id))
-          return [...prev, ...cache.items.filter(v => !have.has(v.id)).map(v => ({ ...v, cached: true }))]
+          const add: LiveBroadcast[] = []
+          for (const v of cache.items) {
+            if (have.has(v.id)) continue
+            have.add(v.id)
+            add.push({ ...v, cached: true })
+          }
+          return [...prev, ...add]
         })
         patchVodList({ phase: 'ready' })
         void runDelta()

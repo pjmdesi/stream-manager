@@ -69,6 +69,10 @@ async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) =
   // walk sets things straight.
   const maxPages = mode === 'delta' ? 4 : Infinity
   let reachedKnown = false
+  // The playlist can list a video on two pages (the import's walk saw the
+  // same), and a copy in the list multiplies its row on every re-render
+  // (React and duplicate keys): one entry per id.
+  const seen = new Set<string>()
   const playlistId = await getUploadsPlaylistId(clientId, clientSecret)
   while (playlistId && pages < maxPages) {
     const page = await getUploadsPage(playlistId, pageToken, clientId, clientSecret)
@@ -76,6 +80,8 @@ async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) =
     const fresh: LiveBroadcast[] = []
     for (const item of page.items) {
       if (mode === 'delta' && known.has(item.id)) { reachedKnown = true; break }
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
       fresh.push(item)
     }
     collected.push(...fresh)
