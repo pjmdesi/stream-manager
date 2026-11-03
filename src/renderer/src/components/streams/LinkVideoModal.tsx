@@ -82,7 +82,9 @@ interface LinkVideoModalProps {
  * own box under it, then a search field and the list: rows of one shape
  * (VideoRow) with the thumbnail flush to the row's edges, the title, the
  * date and privacy, and a chip line. Videos already linked to another
- * stream stay out until the filter pill above the list says otherwise.
+ * stream stay out until the filter pill above the list says otherwise,
+ * and so do regular videos (uploads that were not livestreams), behind
+ * a pill of their own (STR-53): most streams link their recording.
  * Rows never move once shown: the list has a fixed height, a status line
  * of fixed height sits above it, and new videos land under that line,
  * at the top, where the one you came for is.
@@ -90,6 +92,7 @@ interface LinkVideoModalProps {
 export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, currentId, currentThumbBust, otherFolderLinks, state, onPick, onThumbFailed }: LinkVideoModalProps) {
   const [query, setQuery] = useState('')
   const [showLinked, setShowLinked] = useState(false)
+  const [showUploads, setShowUploads] = useState(false)
   const noun = kind === 'video' ? 'video' : 'broadcast'
 
   // The page's Ctrl+arrow shortcuts stand down while a modal is open, so
@@ -132,6 +135,13 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
   // filter pill asks for them.
   const isLinkedElsewhere = (b: LiveBroadcast) => b.id !== currentId && linkMap.has(b.id)
   const linkedCount = items.filter(b => isLinkedElsewhere(b) && matches(b)).length
+  // A regular video, an upload that was not a livestream: left out until
+  // its own pill asks for it (STR-53). An entry that did not say which
+  // it is lists like a livestream.
+  const isUpload = (b: LiveBroadcast) => b.isLivestream === false
+  const uploadCount = items.filter(b => isUpload(b) && matches(b)).length
+  // The regular videos the pill would add right now, for the empty line.
+  const hiddenUploads = showUploads ? 0 : items.filter(b => isUpload(b) && b.id !== currentId && matches(b) && (showLinked || !isLinkedElsewhere(b))).length
   // The current link sits in its own box above the list whatever the
   // search says, so the comparison it is there for never scrolls away.
   const current = currentId ? items.find(b => b.id === currentId) ?? null : null
@@ -143,11 +153,11 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
     return bestVideoMatch(stream, candidates)
   }, [currentId, items, linkMap, stream])
   const bestVideo = best ? items.find(b => b.id === best.id) ?? null : null
-  const visible = items.filter(b => b.id !== currentId && b.id !== best?.id && matches(b) && (showLinked || !isLinkedElsewhere(b)))
+  const visible = items.filter(b => b.id !== currentId && b.id !== best?.id && matches(b) && (showLinked || !isLinkedElsewhere(b)) && (showUploads || !isUpload(b)))
   const newSet = new Set(state.newIds)
 
-  const close = () => { setQuery(''); setShowLinked(false); onClose() }
-  const pick = (id: string) => { setQuery(''); setShowLinked(false); onPick(id) }
+  const close = () => { setQuery(''); setShowLinked(false); setShowUploads(false); onClose() }
+  const pick = (id: string) => { setQuery(''); setShowLinked(false); setShowUploads(false); onPick(id) }
 
   const statusLine = (() => {
     if (state.error) {
@@ -178,6 +188,12 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
   const emptyLine = (() => {
     if (state.phase === 'loading' && items.length === 0) return null
     if (visible.length > 0 || bestVideo) return null
+    if (hiddenUploads > 0) {
+      const them = hiddenUploads === 1 ? 'the one that does' : `the ${hiddenUploads} that do`
+      return words.length > 0
+        ? `No livestreams match. Turn on Show regular videos for ${them}.`
+        : `Turn on Show regular videos for the ${hiddenUploads} regular ${hiddenUploads === 1 ? 'video' : 'videos'} on your channel.`
+    }
     if (words.length > 0) return `No ${noun}s match.`
     if (linkedCount > 0) return `Every ${noun} is linked to another stream.`
     if (current) return `No other ${noun}s on your channel.`
@@ -300,20 +316,35 @@ export function LinkVideoModal({ isOpen, onClose, kind, stream, nav, items, curr
             aria-label="Search by title"
           />
           {/* Fixed-height status row: the line's text changes, its space
-              does not; the filter pill on the right lists the videos other
-              streams already own. */}
+              does not; the filter pills on the right list the videos other
+              streams already own and, for a past stream, the channel's
+              regular videos (STR-53). The regular-videos pill is always
+              there and sits last, so the linked pill's coming and going
+              with the search never moves it. */}
           <div className="h-8 flex items-center justify-between gap-3 text-[11px] text-gray-400 min-w-0">
             <div className="min-w-0 flex items-center">{statusLine}</div>
-            {linkedCount > 0 && (
-              <TogglePill
-                checked={showLinked}
-                onChange={setShowLinked}
-                tooltip={showLinked
-                  ? `Leave out the ${linkedCount} ${noun}s already linked to other streams`
-                  : `Also list the ${linkedCount} ${noun}s already linked to other streams`}
-                label={`Show already linked ${noun}s (${linkedCount})`}
-              />
-            )}
+            <div className="flex items-center gap-2 shrink-0">
+              {linkedCount > 0 && (
+                <TogglePill
+                  checked={showLinked}
+                  onChange={setShowLinked}
+                  tooltip={showLinked
+                    ? `Leave out the ${linkedCount} ${noun}s already linked to other streams`
+                    : `Also list the ${linkedCount} ${noun}s already linked to other streams`}
+                  label={`Show already linked ${noun}s (${linkedCount})`}
+                />
+              )}
+              {kind === 'video' && (
+                <TogglePill
+                  checked={showUploads}
+                  onChange={setShowUploads}
+                  tooltip={showUploads
+                    ? `List livestreams only, leaving out the ${uploadCount} regular ${uploadCount === 1 ? 'video' : 'videos'}`
+                    : `Also list the ${uploadCount} regular ${uploadCount === 1 ? 'video' : 'videos'} on your channel (uploads that were not livestreams)`}
+                  label={`Show regular videos (${uploadCount})`}
+                />
+              )}
+            </div>
           </div>
           {/* Fixed-height list: the modal keeps its size while pages land.
               The best match leads it, whatever the search says. */}

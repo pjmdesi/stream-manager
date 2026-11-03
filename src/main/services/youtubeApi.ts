@@ -173,7 +173,8 @@ export interface LiveBroadcast {
   }
   /** A livestream (or its recording) rather than an upload. True for
    *  anything from the liveBroadcasts resource; read off the video
-   *  resource's liveStreamingDetails for lookups by id. */
+   *  resource's liveStreamingDetails for lookups by id and for the link
+   *  picker's uploads walk, which lists both kinds (STR-53). */
   isLivestream?: boolean
   /** The video's length, from the extras lookup, for matching it to a
    *  stream's recording (STR-42). */
@@ -494,6 +495,92 @@ function isoToLocalDate(iso: string | undefined): string {
  *  belong to a larger stream item, so the importer skips them. */
 const SHORT_MAX_SECONDS = 61
 
+/** The connected channel's uploads playlist id, or null for a channel
+ *  without one. One quota unit. */
+export async function getUploadsPlaylistId(clientId: string, clientSecret: string): Promise<string | null> {
+  const ch = await ytRequest(
+    `/channels?${new URLSearchParams({ part: 'contentDetails', mine: 'true' })}`,
+    { method: 'GET' }, clientId, clientSecret,
+  )
+  return (ch?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads as string | undefined) ?? null
+}
+
+/** Whether a videos.list item is a Short: a non-livestream at or under
+ *  the Shorts cap that is portrait, or whose dimensions the record does
+ *  not carry (the Data API has no Short flag). Shorts belong to a larger
+ *  stream item, so the import and the link picker both leave them out. */
+function isShort(item: any): boolean {
+  if (item.liveStreamingDetails) return false
+  const durationSeconds = parseIsoDuration(item.contentDetails?.duration)
+  if (durationSeconds == null || durationSeconds > SHORT_MAX_SECONDS) return false
+  const vs = item.fileDetails?.videoStreams?.[0]
+  const portrait = vs?.aspectRatio != null
+    ? Number(vs.aspectRatio) < 1
+    : (vs?.widthPixels && vs?.heightPixels) ? vs.heightPixels > vs.widthPixels : undefined
+  return portrait !== false
+}
+
+/** One page of the channel's uploads playlist, newest first, in the app's
+ *  shape with the extras already on it (tags, category, length, uploaded
+ *  file name): the link picker's list (STR-39), which lists regular
+ *  videos as well as livestream recordings (STR-53). Upcoming and live
+ *  broadcasts, the persistent default broadcast among them, are left
+ *  out, since the broadcasts pool lists them; Shorts are left out the way
+ *  the import leaves them out. Two quota units per page: the playlist
+ *  page and the videos lookup for its ids. */
+export async function getUploadsPage(
+  playlistId: string,
+  pageToken: string | undefined,
+  clientId: string,
+  clientSecret: string
+): Promise<{ items: LiveBroadcast[]; nextPageToken?: string }> {
+  const params = new URLSearchParams({ part: 'contentDetails', playlistId, maxResults: '50' })
+  if (pageToken) params.set('pageToken', pageToken)
+  const page = await ytRequest(`/playlistItems?${params}`, { method: 'GET' }, clientId, clientSecret)
+  const ids: string[] = []
+  for (const it of (page?.items ?? [])) {
+    const vid = it?.contentDetails?.videoId
+    if (vid && !ids.includes(vid)) ids.push(vid)
+  }
+  const nextPageToken = page?.nextPageToken || undefined
+  if (ids.length === 0) return { items: [], nextPageToken }
+  const data = await ytRequest(
+    `/videos?${new URLSearchParams({ part: 'snippet,status,contentDetails,liveStreamingDetails,fileDetails', id: ids.join(','), maxResults: '50' })}`,
+    { method: 'GET' }, clientId, clientSecret,
+  )
+  const items: LiveBroadcast[] = []
+  for (const item of (data?.items ?? [])) {
+    const live = item.liveStreamingDetails
+    if (live && !live.actualEndTime) continue
+    if (isShort(item)) continue
+    const sn = item.snippet ?? {}
+    const b: LiveBroadcast = {
+      id: item.id,
+      snippet: {
+        title: sn.title ?? '',
+        description: sn.description ?? '',
+        scheduledStartTime: live?.scheduledStartTime,
+        // A regular video is dated by its publish time, as the lookup by
+        // id dates every video.
+        actualStartTime: live?.actualStartTime ?? sn.publishedAt,
+        thumbnailUrl: pickRowThumbUrl(sn.thumbnails),
+      },
+      status: {
+        lifeCycleStatus: 'complete',
+        privacyStatus: item.status?.privacyStatus ?? '',
+      },
+      isLivestream: !!live,
+    }
+    if (sn.tags?.length) b.snippet.tags = sn.tags
+    if (sn.categoryId) b.snippet.categoryId = String(sn.categoryId)
+    const durationSec = parseIsoDuration(item.contentDetails?.duration)
+    if (durationSec) b.durationSec = durationSec
+    if (item.fileDetails?.fileName) b.fileName = String(item.fileDetails.fileName)
+    items.push(b)
+  }
+  return { items, nextPageToken }
+}
+
 /** List every video on the connected channel (uploads playlist), newest first,
  *  with the metadata + thumbnail needed to import each as a stream item. Walks
  *  channels.list → uploads playlist → playlistItems (paged) → videos.list
@@ -503,12 +590,7 @@ export async function getChannelVideos(
   clientId: string,
   clientSecret: string,
 ): Promise<YouTubeImportVideo[]> {
-  // Uploads playlist id for the connected account.
-  const ch = await ytRequest(
-    `/channels?${new URLSearchParams({ part: 'contentDetails', mine: 'true' })}`,
-    { method: 'GET' }, clientId, clientSecret,
-  )
-  const uploads = ch?.items?.[0]?.contentDetails?.relatedPlaylists?.uploads as string | undefined
+  const uploads = await getUploadsPlaylistId(clientId, clientSecret)
   if (!uploads) return []
 
   // Collect all upload video ids (playlistItems returns newest-first). Dedupe —
@@ -547,17 +629,11 @@ export async function getChannelVideos(
     )
     for (const item of (data?.items ?? [])) {
       if (defaultIds.has(item.id)) continue // hide the persistent default broadcast
+      // Skip Shorts: they belong to a larger stream item, not their own.
+      if (isShort(item)) continue
       const sn = item.snippet ?? {}
       const live = item.liveStreamingDetails
       const durationSeconds = parseIsoDuration(item.contentDetails?.duration)
-      // Skip Shorts — they belong to a larger stream item, not their own. Detect
-      // via aspect ratio (Shorts are portrait) + the 1m1s cap. When fileDetails
-      // has no stream dimensions, fall back to the duration cap alone.
-      const vs = item.fileDetails?.videoStreams?.[0]
-      const portrait = vs?.aspectRatio != null
-        ? Number(vs.aspectRatio) < 1
-        : (vs?.widthPixels && vs?.heightPixels) ? vs.heightPixels > vs.widthPixels : undefined
-      if (!live && durationSeconds != null && durationSeconds <= SHORT_MAX_SECONDS && portrait !== false) continue
       // Upcoming scheduled broadcasts have no actualStartTime yet — date
       // them by their scheduled start, not the day they were created in
       // Studio (importing next Friday's broadcast used to make a folder
@@ -673,28 +749,6 @@ export async function getCompletedBroadcasts(
   await hydrateVideoExtras(broadcasts, clientId, clientSecret)
 
   return broadcasts
-}
-
-/** One page of the channel's completed broadcasts, newest first, in the
- *  app's shape and without the tags lookup: the link picker (STR-39)
- *  shows pages as they land and fills tags in afterwards. One quota unit
- *  per page. */
-export async function getCompletedBroadcastsPage(
-  pageToken: string | undefined,
-  clientId: string,
-  clientSecret: string
-): Promise<{ items: LiveBroadcast[]; nextPageToken?: string }> {
-  const params: Record<string, string> = { part: 'snippet,status', broadcastStatus: 'completed', maxResults: '50' }
-  if (pageToken) params.pageToken = pageToken
-  const data = await ytRequest(
-    `/liveBroadcasts?${new URLSearchParams(params)}`,
-    { method: 'GET' },
-    clientId, clientSecret
-  )
-  return {
-    items: (data?.items ?? []).map(toLiveBroadcast),
-    nextPageToken: data?.nextPageToken || undefined,
-  }
 }
 
 /** Fills tags and categoryId in place from the videos resource, which the

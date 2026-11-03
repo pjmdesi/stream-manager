@@ -1334,7 +1334,8 @@ export function StreamsPage({
       next[id] = {
         ...st,
         missing: false,
-        isLivestream: true,
+        // The VOD pool carries regular videos too (STR-53).
+        isLivestream: pooled.isLivestream ?? true,
         privacyStatus: st.privacyStatus || pooled.status?.privacyStatus || '',
       }
       changed = true

@@ -5,7 +5,7 @@ import path from 'path'
 import crypto from 'crypto'
 import Store from 'electron-store'
 import { startOAuthFlow, exchangeCode, clearTokens, isConnected, getValidToken, REDIRECT_URI } from '../services/youtubeAuth'
-import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos, getCompletedBroadcastsPage, hydrateVideoExtras, type LiveBroadcast } from '../services/youtubeApi'
+import { getLiveBroadcasts, getCompletedBroadcasts, updateBroadcastSnippet, updateBroadcastStatus, updateVideoStatus, deleteVideo, updateVideoTags, categorizeYouTubeThumbnails, uploadThumbnail, getVideoById, getVideosByIds, getBroadcastById, checkBroadcastsAreLive, fetchVideoStatuses, createBroadcast, getMyChannelId, clearChannelIdCache, getDefaultStreamKey, getVideoCategories, getChannelVideos, getUploadsPlaylistId, getUploadsPage, type LiveBroadcast } from '../services/youtubeApi'
 import * as ytQuotaState from '../services/ytQuotaState'
 import { getConfig, getConfigDecrypted } from './store'
 
@@ -42,18 +42,21 @@ const ytVodCache = new Store<{ items: LiveBroadcast[]; fetchedAt: number | null;
 })
 /** Bumped when the cached shape changes; an older cache is walked again.
  *  2: row-sized thumbnail URLs. 3: isLivestream on every entry. 4: the
- *  length and uploaded file name for matching (STR-42). */
-const VOD_CACHE_VERSION = 4
+ *  length and uploaded file name for matching (STR-42). 5: the uploads
+ *  playlist, regular videos included (STR-53). */
+const VOD_CACHE_VERSION = 5
 
 /** A sync already running for a mode; a second caller shares its result
  *  instead of paging the channel twice. */
 const vodSyncInFlight = new Map<'full' | 'delta', Promise<{ items: LiveBroadcast[]; fetchedAt: number }>>()
 
-/** Walks the channel's completed broadcasts. `full` replaces the cache,
- *  sending each page to the window as it lands so the modal can show it;
- *  `delta` stops at the first id the cache already holds and prepends
- *  what came before it. The tags lookup runs after the list is in, so
- *  the first rows are one request away. */
+/** Walks the channel's uploads playlist: livestream recordings and
+ *  regular videos alike (STR-53; the completed broadcasts alone until
+ *  then, which is why regular videos never showed). `full` replaces the
+ *  cache, sending each page to the window as it lands so the modal can
+ *  show it; `delta` stops at the first id the cache already holds and
+ *  prepends what came before it. Each page comes shaped with its extras,
+ *  so rows are complete when they land. */
 async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) => void): Promise<{ items: LiveBroadcast[]; fetchedAt: number }> {
   const { clientId, clientSecret } = getCreds()
   const cached = ytVodCache.get('items') ?? []
@@ -66,8 +69,9 @@ async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) =
   // walk sets things straight.
   const maxPages = mode === 'delta' ? 4 : Infinity
   let reachedKnown = false
-  do {
-    const page = await getCompletedBroadcastsPage(pageToken, clientId, clientSecret)
+  const playlistId = await getUploadsPlaylistId(clientId, clientSecret)
+  while (playlistId && pages < maxPages) {
+    const page = await getUploadsPage(playlistId, pageToken, clientId, clientSecret)
     pages++
     const fresh: LiveBroadcast[] = []
     for (const item of page.items) {
@@ -77,8 +81,8 @@ async function syncVods(mode: 'full' | 'delta', send: (items: LiveBroadcast[]) =
     collected.push(...fresh)
     if (mode === 'full' && fresh.length > 0) send(fresh)
     pageToken = reachedKnown ? undefined : page.nextPageToken
-  } while (pageToken && pages < maxPages)
-  if (collected.length > 0) await hydrateVideoExtras(collected, clientId, clientSecret)
+    if (!pageToken) break
+  }
   if (mode === 'full') {
     const fetchedAt = Date.now()
     ytVodCache.set('items', collected)
