@@ -2,40 +2,44 @@
 
 ## Queue
 
-1. STR-34
-2. SYNC-10
-3. STR-32
-4. APP-38
-5. APP-19
-6. APP-39
-7. STR-36
-8. STR-31
-9. STR-30
-10. STR-11
-11. STR-26
-12. STR-25
-13. PLR-25
-14. THU-38
-15. THU-36
-16. THU-37
-17. THU-39
-18. INTG-1
-19. APP-25
-20. APP-26
-21. APP-31
-22. APP-34
-23. APP-35
-24. SYNC-7
-25. STR-44
-26. THU-41
-27. STR-48
-28. STR-49
-29. STR-50
-30. APP-58
-31. THU-44
-32. APP-60
-33. CONV-27
-34. CONV-29
+1. IDEA-6
+2. APP-20
+3. APP-2
+4. STR-34
+5. SYNC-10
+6. STR-32
+7. APP-38
+8. APP-19
+9. APP-39
+10. STR-36
+11. STR-31
+12. STR-30
+13. STR-11
+14. STR-26
+15. STR-25
+16. PLR-25
+17. THU-38
+18. THU-36
+19. THU-37
+20. THU-39
+21. INTG-1
+22. APP-25
+23. APP-26
+24. APP-31
+25. APP-34
+26. APP-35
+27. SYNC-7
+28. STR-44
+29. THU-41
+30. STR-48
+31. STR-49
+32. STR-50
+33. APP-58
+34. THU-44
+35. APP-60
+36. CONV-27
+37. CONV-29
+38. THU-48
 
 ## Next up
 
@@ -190,6 +194,10 @@
 - **STR-50** [impact:1]
   Add ability to negate tags and keywords with "!" in the search
 
+- **STR-52** [bug] [impact:2]
+  Fixed 2026-11-03 during the v2.8.0 sweep, awaiting review: the open sidebar's five-minute by-id refresh now treats an empty answer from both lookups as the broadcast being gone, drops the id from both pools and marks it missing, so the badge and the footer flip within five minutes while the item is open; the launch-time guard for brand-new broadcasts is untouched. Not covered: a deleted completed VOD that the kept VOD list still holds after a relaunch stays suppressed until the daily full walk; worth its own line if it is ever seen.
+  A broadcast deleted in YouTube Studio stays linked and alive-looking in the app until a relaunch; the footer's links lead to dead pages meanwhile. Seen 2026-11-03 on a scheduled broadcast that never went live, past its date. Cause, read 2026-11-03: the "video was deleted" state comes only from the linked-ids status fetch (at launch, on a link change, then every 15 minutes active, 30 idle, 60 hidden), and even when that fetch reports the id missing, the page suppresses the flag for any id still in its in-memory broadcast or VOD pool, a guard meant for brand-new broadcasts whose videos index lags. The pool is loaded at launch and by the header's reload button; the open sidebar's own five-minute refresh looks the broadcast up by id, and when YouTube answers nothing (an authoritative absence, since a failed request throws and is caught separately) it returns without touching the pool, so the stale entry lives all session and keeps the suppression on. Fix shape: that refresh, on an empty answer from both lookups, drops the id from both pools and marks it missing in the status map, so the badge and the footer flip within five minutes while the item is open; the launch-time suppression stays for genuinely new broadcasts. Small. Filed 2026-11-03.
+
 ### Player
 
 - **PLR-3** [perf] [maybe]
@@ -306,14 +314,18 @@
 - **THU-41** [impact:2]
   Add setting to asset panel menu to show assets from streams on the same day
 
+- **THU-44** [impact:1]
+  Add temperature and tint to filer options in layer properties
+
 - **THU-46** [ui] [impact:2]
   Undo and redo restore the selection they were made with. Decision 2026-10-26 (after THU-35, where an undone paste left its layer selected): not Blender's model, where every selection click is an undo step and Ctrl+Z wades through clicks before reaching an edit (Blender ships an option to leave selection out for that reason), but the model Figma, Sketch and Affinity use: a selection change is never a step of its own, yet each history step remembers the selection it was made with, and undo or redo restores that selection with the content. Redo of a paste brings the layer back selected; undo of a move reselects the moved layers; a plain click never enters the history. In the editor the history already keeps whole layer snapshots (useUndoRedo), so each snapshot gains the selection as it stood at commit time, and undo and redo apply both; the THU-35 prune stays as the safety net under it. An hour or two. Filed 2026-10-26.
+  Still to be decided (raised 2026-10-27): file-level undo, the history stack written into the canvas JSON so a reopened thumbnail allows undo and redo at once. Implications weighed: a snapshot is the whole layer list, so fifty of them make a 1 to 2 MB file rewritten on every autosave, which a cloud sync client re-uploads each time (relief: store diffs between neighbors, or cap the stored depth near twenty); load-time migrations must run on every stored snapshot, and an image a snapshot references may be gone from the assets cache by then; the stored step would carry the selection too, so this and the selection memory are one design; each variant and template has its own file and so its own history, and copies (Duplicate current, New alternative) should start clean; a stored history is valid only if its newest snapshot equals the present layers on load, else it is dropped; a redo branch survives a reopen until the first new edit. Diffs are a day, full snapshots with a cap an afternoon.
 
 - **THU-47** [bug] [investigate] [impact:2]
   The thumbnail editor fell to the page error (React error 185, a state update loop) once on 2026-10-27, on the 2026-11-1 stream's thumbnail, during the v2.8.0 sweep. The last action was a click and drag on the canvas, aimed at a loose text layer (no group, no mask, several effects and a gradient); the same steps did not bring it back, and reopening the thumbnail worked without a restart, nothing lost. The minified stack ends in the layer actions tab's measurement, which re-measures from a layout effect whenever the selection or the layers change, so something changed one of those on every render for that moment. Read without finding the loop: the canvas drag writes no React state per move, the two effects that write the selection return the same array when nothing changes, and no effect rewrites the layers from the layers. First suspects by date: THU-35 (the selection following the layers) and THU-43 (multi-layer moves), both from 2026-10-26. Next step when it recurs: the same steps on the dev server (the Dev pane's Dev button) for the full error with the component stack. Filed 2026-10-27.
 
-- **THU-44** [impact:1]
-  Add temperature and tint to filer options in layer properties
+- **THU-48** [impact:2]
+  Add option to switch to rendering bounding box wrapped to clipping mask for groups. This means that the bounding (selection) box would use a layer's clipping mask as the bounds of the layer instead of the whole layer. This would help users size and position layers based on how they render visually instead of what the layer physically contains. After the option is added the clip-wrapped version should be the default.
 
 ### Converter
 
@@ -457,7 +469,7 @@
 
 ### App-wide & foundation
 
-- **APP-2**
+- **APP-2** [impact:2]
   Add proper logging for the YouTube, Twitch, and Claude API calls. These will be log files located in the config directory in a logs folder. The logs should record every interaction with the APIs, including the request and response data, timestamps, and any errors that occur. Not sure what the best timeframe is for log rotation, perhaps monthly? We don't need to expose these in the UI, it's purely for advanced troubleshooting.
   Note (2026-09-03): the logs folder location and rotation live in the shared logging infrastructure, APP-20; this item's files go there like every other SM log.
 
@@ -499,7 +511,7 @@
 - **APP-19** [impact:2]
   Promote the tag color palette to a shared app-level palette module. constants/tagColors.ts is already the de-facto shared content-color palette (tag chips, audio track colors, waveform fills, and future consumers like player markers and milestone cards), so rename and reshape it as the app's reusable palette (e.g. constants/palette.ts) with the color KEYS byte-stable, since they are persisted in users' tag and track color data. Pure refactor, no visual change. Deliberately NOT part of the theming chain (APP-16/15/14): this palette is user-content color choice, which the APP-15 catalog explicitly excludes. Two coordination notes: the Gray entry's purple-* utility classes will be renamed by APP-16's sweep, so whichever of these lands second touches that file; and when APP-14 themes land, give this palette a quick contrast check on Light and OLED. No blockers either direction: marker or card work landing first simply imports tagColors and this refactor updates the import later.
 
-- **APP-20**
+- **APP-20** [impact:3]
   One shared logs location for everything SM ever writes as a log, plus an "Open logs folder" button in Settings (and possibly About) that opens it in Explorer. A `logs` folder under the app's config directory, owned by one small shared helper that also handles rotation (size or date based) so individual logs never reinvent it. Known consumers: the main-process log from IDEA-6, the API interaction logs from APP-2 (which already names this location), and future logs like relay session records. Local-only forever; nothing here transmits, consistent with the published principles. Not blocking either consumer: whichever ships first brings the helper with it, this ticket is the convention plus the Settings button.
   The helper and the Settings button were built with CONV-4, 2026-10-23.
 
@@ -664,6 +676,7 @@
   - Capture what actually diagnoses problems: uncaught exceptions and unhandled rejections in main, plus the ffmpeg/relay/converter child-process stderr tails already collected for error messages, all routed into the same stream.
   - Viewer: in-app surface showing the live buffer (level filter, copy button). The rotating FILE is the fallback when the app is too broken for the viewer; also the future "send me your log" support path. The file lands in the shared logs location and the "Open logs folder" Settings button is APP-20's. Local-only forever, consistent with the published principles.
   - Shortcut Ctrl+Shift+backtick as the pair to Ctrl+backtick (renderer devtools), bound via before-input-event on the physical Backquote key code with Ctrl+Shift, NOT a menu accelerator (the Ctrl+Plus zoom lesson: accelerators only match US layouts).
+  - Renderer half (added 2026-10-27, after a page error during the v2.8.0 sweep left only a minified stack in the devtools console, THU-47): the renderer forwards its errors to main's log over IPC so they land in the same file and viewer: the page error boundary's catch with React's component stack, the window's error and unhandledrejection events, and console.error and console.warn teed the way main's are. Each line carries the page and, when one is open, the stream. The file is then the record a user can paste from the logs folder when the app shows "Something went wrong on this page", in place of a console that only a dev build shows in full.
 
 - **IDEA-10**
   If possible, we should attempt to measure and store the time it takes for files to hydrate from the cloud. After enough samples, we could use that data to estimate how long it will take to hydrate a file based on its size and the user's connection speed. We could then add this estimate to the various tooltips, & modals where hydration is involved. This would give the user a good idea of how long it will take to hydrate a file before they start the process, and they can plan accordingly. Since it's not possible to actually track the connection speed or the actual rate of download while its happening, we would make it clear that this is a rough estimate somehow. If multiple files are being downloaded at once, the estimates would probably be very inaccurate (for instance when pinning several items local at the same time).

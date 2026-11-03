@@ -1301,6 +1301,18 @@ export function StreamsPage({
     const iv = setInterval(netRecoveryPoke, 60_000)
     return () => clearInterval(iv)
   }, [netProblem, netRecoveryPoke])
+  // A linked broadcast or video that YouTube no longer answers for, learned
+  // from the open sidebar's own by-id refresh (STR-52). The status fetch
+  // alone could not surface a deletion: its missing flag is suppressed for
+  // any id still in the pools below, a guard for brand-new broadcasts, and
+  // nothing removed a deleted broadcast from the launch-loaded pool during
+  // a session. Dropping it here lets the flag through and flips the badge
+  // and the footer at once.
+  const markLinkedVideoGone = useCallback((id: string) => {
+    setYtBroadcasts(prev => prev.some(b => b.id === id) ? prev.filter(b => b.id !== id) : prev)
+    setYtVods(prev => prev.some(v => v.id === id) ? prev.filter(v => v.id !== id) : prev)
+    setYtVideoStatusMap(prev => prev[id]?.missing ? prev : { ...prev, [id]: { ...(prev[id] ?? { privacyStatus: '', isLivestream: true }), missing: true } })
+  }, [])
   // Effective status map for the UI: `missing` flags cross-checked
   // against the loaded broadcast/VOD pools. An id present in either
   // pool is provably alive whatever videos.list says (its index can lag
@@ -4504,6 +4516,7 @@ export function StreamsPage({
               ytVods={ytVods}
               setYtVods={setYtVods}
               setYtBroadcasts={setYtBroadcasts}
+              onLinkedVideoGone={markLinkedVideoGone}
               broadcastLinks={broadcastLinks}
               ytBroadcastsLoading={ytBroadcastsLoading}
               onLoadAllVods={ensureVods}
@@ -6424,7 +6437,7 @@ function SidebarDetail({
   folder, folders, prevEpisode, nextEpisode, seriesEpisodes, onPickEpisode, prevStream, nextStream, onPickStream, onClose, onUpdateMeta: onUpdateMetaRaw, onUpdateMetaFor, cloudSyncActive,
   allGames, allStreamTypes, tagColors, tagTextures, onNewStreamType, onReschedule, onNewEpisode, onOffload, onPinLocal, onArchive, isArchiving,
   thumbsKey, onDeleteThumbnail,
-  ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, ytVodList, defaultBroadcastTime, claudeEnabled,
+  ytBroadcasts, ytVods, setYtVods, setYtBroadcasts, onLinkedVideoGone, broadcastLinks, ytBroadcastsLoading, onLoadAllVods, ytVodList, defaultBroadcastTime, claudeEnabled,
   onSendFileToPlayer, onSendFileToConverter, onSendFilesToConverter, onSendFilesToCombine, allowFileImport, filesGridRef, onFilesDeleted, onOpenFolder, onOpenThumbnails, onDelete, deleteBlockReason, fileHighlight, linkedVideoMissing, netProblem,
   onPushToYoutube, onPushToTwitch, ytConnected, ytCategories, ytQuota, twConnected, twitchChannel, setTwitchChannel, banners, onDismissBanner, onMissingYtCategory,
   onSuggestCategoryRename,
@@ -6492,6 +6505,9 @@ function SidebarDetail({
   /** Lets the create-broadcast flow prepend a newly-scheduled broadcast
    *  to the upcoming list so the picker dropdown shows it immediately. */
   setYtBroadcasts: React.Dispatch<React.SetStateAction<LiveBroadcast[]>>
+  /** The linked id answered nothing on a by-id lookup: it is gone on
+   *  YouTube (STR-52). The page drops it from the pools and marks it. */
+  onLinkedVideoGone: (id: string) => void
   broadcastLinks: BroadcastLinkRef[]
   ytBroadcastsLoading: boolean
   /** Brings the VOD list up to date for the link modal (STR-39). */
@@ -7427,7 +7443,12 @@ function SidebarDetail({
       try {
         const fresh = (await window.api.youtubeGetBroadcastById(linkedId))
           ?? (await window.api.youtubeGetVideoById(linkedId))
-        if (cancelled || !fresh) return
+        if (cancelled) return
+        // Nothing from either lookup is an answer, not a failure (a failed
+        // request throws into the catch below): the broadcast or video is
+        // gone on YouTube. Say so instead of leaving the stale pool entry
+        // alive all session (STR-52).
+        if (!fresh) { onLinkedVideoGone(linkedId); return }
         // Upsert into whichever pool the broadcast belongs to. We don't
         // know live vs VOD at the call site, so try both — only one
         // will match an existing id, and the unmatched setter no-ops.
@@ -7456,7 +7477,7 @@ function SidebarDetail({
       clearTimeout(initialTimer)
       clearInterval(interval)
     }
-  }, [ytConnected, linkedId, quotaExceeded, setYtBroadcasts, setYtVods, deferMs])
+  }, [ytConnected, linkedId, quotaExceeded, setYtBroadcasts, setYtVods, onLinkedVideoGone, deferMs])
 
   const selectedBroadcast = useMemo(
     () => broadcastPool.find(b => b.id === linkedId && !b.cached) ?? null,
