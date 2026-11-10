@@ -360,8 +360,8 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('store:setWatchRules', rules),
 
   // ── Streams ───────────────────────────────────────────────────────────────
-  listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder') =>
-    ipcRenderer.invoke('streams:list', dir, mode),
+  listStreams: (dir: string, mode?: 'folder-per-stream' | 'dump-folder', opts?: { light?: boolean; join?: boolean }) =>
+    ipcRenderer.invoke('streams:list', dir, mode, opts),
 
   /** Scoped single-stream fetch for targeted streams:changed events.
    *  Folder-per-stream mode only; null = stream gone (splice it out). */

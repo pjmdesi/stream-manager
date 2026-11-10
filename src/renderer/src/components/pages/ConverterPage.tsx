@@ -412,7 +412,9 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
     let timer: ReturnType<typeof setTimeout> | null = null
     let disposed = false
     const load = () => {
-      window.api.listStreams(dir, 'folder-per-stream').then(folders => {
+      // The light list: this page reads titles and audio settings from it,
+      // nothing a thumbnail cloud check would add (STR-55).
+      window.api.listStreams(dir, 'folder-per-stream', { light: true }).then(folders => {
         if (disposed) return
         const map: Record<string, string> = {}
         const overrides: Record<string, Record<string, Record<number, AudioTrackSetting>>> = {}

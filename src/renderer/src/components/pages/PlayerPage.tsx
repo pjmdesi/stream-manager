@@ -1785,6 +1785,10 @@ export function PlayerPage({ isVisible, initialFile, onNavigateToConverter, onNa
           const folders = await window.api.listStreams(
             config.streamsDir,
             (config.streamMode || 'folder-per-stream') as 'folder-per-stream' | 'dump-folder',
+            // A current list is all this page needs, and it holds no edits
+            // of its own: it shares a scan already running (the Streams
+            // page's, at launch) instead of adding one (STR-55).
+            { join: true },
           )
           if (!cancelled) { setAllStreamFolders(folders); hasListedRef.current = true }
         } catch { /* swallow */ }

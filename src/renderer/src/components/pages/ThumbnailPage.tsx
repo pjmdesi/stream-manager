@@ -5769,7 +5769,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     const load = async () => {
       const myToken = ++token
       try {
-        const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
+        const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream', { light: true })
         if (cancelled || myToken !== token) return
         // The same listing feeds the toolbar's stream and episode
         // navigation (THU-19), so it stays current with the watcher too.
@@ -6269,7 +6269,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     Promise.all([
       window.api.thumbnailListTemplates(config.streamsDir),
       window.api.thumbnailGetRecents(),
-      window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream'),
+      window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream', { light: true }),
     ]).then(async ([tmpl, rec, allStreams]) => {
       if (cancelled) return
       setTemplates(tmpl)
@@ -7643,7 +7643,7 @@ export function ThumbnailPage({ isVisible, onNavigateToStream }: {
     // live stream renders it (NAV-1).
     let title = entry.title
     try {
-      const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream')
+      const all = await window.api.listStreams(config.streamsDir, config.streamMode || 'folder-per-stream', { light: true })
       const f = all.find(x => x.folderPath === entry.folderPath && x.date === entry.date)
         ?? all.find(x => x.folderPath === entry.folderPath)
       if (f) {

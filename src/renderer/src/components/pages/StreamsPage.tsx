@@ -2666,11 +2666,16 @@ export function StreamsPage({
   // AFTER a newer one and overwrite fresher data with staler data. Only the
   // latest request's response is applied; superseded ones are discarded.
   const listReqSeqRef = useRef(0)
+  // When the latest full reload was requested (performance.now). A change
+  // event that arrived before it is already in that reload's scan, so the
+  // event's own reload is skipped (STR-55).
+  const lastFullListAtRef = useRef(0)
   const loadFolders = useCallback(async (): Promise<StreamFolder[]> => {
     // Returns the freshly-loaded list so same-task callers don't race the
     // state/ref updates (foldersRef syncs on the NEXT render).
     if (!streamsDir) return foldersRef.current
     const seq = ++listReqSeqRef.current
+    lastFullListAtRef.current = performance.now()
     setLoading(true)
     let loaded: StreamFolder[] | null = null
     const editMark = beginListRead()
@@ -2812,8 +2817,11 @@ export function StreamsPage({
     // Dump mode never takes the scoped path (keys are folder-mode
     // relativePaths).
     let burstKeys: Set<string> | null = new Set()
+    // When the burst's latest event arrived (performance.now).
+    let burstLastEventAt = 0
     const off = window.api.onStreamsChanged(info => {
       if (timer) clearTimeout(timer)
+      burstLastEventAt = performance.now()
       if (!info?.quiet) burstQuiet = false
       if (!info?.streamKeys || streamMode === 'dump-folder') burstKeys = null
       else if (burstKeys) for (const k of info.streamKeys) burstKeys.add(k)
@@ -2830,12 +2838,27 @@ export function StreamsPage({
         deferred = false
         burstQuiet = true
         burstKeys = new Set()
+        // A full reload requested after the burst's last event has scanned
+        // everything the burst announced: the page's own reload after New
+        // stream, a reschedule or a delete, with main's event for the same
+        // change arriving just before it. Fetching again would be the
+        // second and third scan of one change (STR-55). The cache-bust is
+        // not skipped: a changed file still needs its new address.
+        const covered = lastFullListAtRef.current > burstLastEventAt
         if (keys && keys.size > 0) {
           // Every change in the burst mapped to specific streams — splice
           // just those. Quiet (echo/deferred) splices skip the thumb bump.
-          void spliceStreams([...keys], { bumpThumbs: !quiet })
+          if (!covered) void spliceStreams([...keys], { bumpThumbs: !quiet })
+          else if (!quiet) {
+            const now = Date.now()
+            setStreamThumbsKeys(prev => {
+              const merged = { ...prev }
+              for (const k of keys) merged[k] = now
+              return merged
+            })
+          }
         } else {
-          loadFolders()
+          if (!covered) loadFolders()
           if (!quiet) setThumbsKey(Date.now())
         }
       }, 400)
@@ -4716,16 +4739,16 @@ export function StreamsPage({
               // renderedFolder cleared and the empty-state calendar flashed
               // through before the new details mounted. Reloading first keeps
               // the old folder resolved until the new one exists.
-              await loadFolders()
-              // Bump thumbsKey so every <ThumbImage> URL invalidates alongside
-              // the folder refresh. Without this, the chokidar-driven
-              // streams:changed listener is the only thing that bumps it, and
-              // its awaitWriteFinish + debounce window (~1.8s) is long enough
-              // for the user to see stale thumbnail URLs after a rename —
-              // especially bad in back-to-back reschedules that swap dates
-              // between streams, where the renderer can briefly serve cached
-              // bytes for paths that no longer exist.
-              setThumbsKey(Date.now())
+              const fresh = await loadFolders()
+              // The renamed stream's thumbnails get a new address alongside the
+              // folder refresh: back-to-back reschedules that swap dates between
+              // streams reuse paths, and the renderer could serve cached bytes
+              // for a path whose file is now another image. Only that stream is
+              // re-stamped; this used to re-stamp the page, which reloaded every
+              // thumbnail after each reschedule (STR-55).
+              const moved = fresh.find(f => f.folderPath === newFolderPath)
+              if (moved) setStreamThumbsKeys(prev => ({ ...prev, [moved.relativePath]: Date.now() }))
+              else setThumbsKey(Date.now())
               selectByFolderPath(newFolderPath)
             }}
             onPushYoutube={async (newScheduledStartTime, privacy) => {

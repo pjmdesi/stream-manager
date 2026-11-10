@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, app } from 'electron'
+import { ipcMain, BrowserWindow, app, type IpcMainInvokeEvent } from 'electron'
 import { createHash } from 'crypto'
 import fs from 'fs'
 import path from 'path'
@@ -13,7 +13,7 @@ import { isInFlightWrite } from '../services/inFlightWrites'
 import { broadcast } from '../services/broadcast'
 import { isVideoExtension } from '../../shared/videoExts'
 import { DATE_IN_NAME_RE, isStreamFolderName, streamFolderDate, streamFolderIndex, relativeKey, streamKeyOfFolder, streamKeyOfFile } from '../../shared/streamKey'
-import { consumeSelfWrite } from '../services/selfWrites'
+import { consumeSelfWrite, expectSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
 
@@ -954,7 +954,15 @@ export function registerStreamsIPC(): void {
   // degrades to stale-but-real flags instead of an all-cloud library.
   const lastKnownThumbLocal = new Map<string, boolean>()
 
-  ipcMain.handle('streams:list', async (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream'): Promise<StreamFolder[]> => {
+  // The library scan behind streams:list. `light` is the listing alone:
+  // folders, files and the stored metadata, read and returned in one
+  // synchronous pass. It skips the thumbnail cloud check (a PowerShell
+  // run, nearly all of a full scan's second), the videoMap prune and the
+  // probe, so it writes nothing, sends nothing and leaves
+  // thumbnailLocalFlags unset. For callers that draw no row thumbnails
+  // from it: the Converter reads titles and audio settings, the
+  // Thumbnails page its navigation and asset lists (STR-55).
+  const scanStreams = async (event: IpcMainInvokeEvent, dir: string, mode: 'folder-per-stream' | 'dump-folder', light: boolean): Promise<StreamFolder[]> => {
     if (!dir || !fs.existsSync(dir)) return []
 
     migrateMeta(dir)
@@ -1111,7 +1119,7 @@ export function registerStreamsIPC(): void {
     // decisions from a minutes-old file listing applied to a fresh future
     // _meta.json could wrongly delete entries for files that appeared in
     // the meantime (e.g. a clip exported mid-probe).
-    if (pruneStaleVideoMapEntries(videoEntries, allMeta)) {
+    if (!light && pruneStaleVideoMapEntries(videoEntries, allMeta)) {
       try { writeAllMeta(dir, allMeta) }
       catch (err) { console.error('[streams:list] prune write failed:', err) }
     }
@@ -1119,7 +1127,7 @@ export function registerStreamsIPC(): void {
     // Compute thumbnail local-flags so the renderer can skip rendering an <img>
     // for cloud-placeholder thumbnails (avoids hanging Chromium's network thread
     // on a cloud provider that's stuck or unreachable).
-    const allThumbs = folders.flatMap(f => f.thumbnails)
+    const allThumbs = light ? [] : folders.flatMap(f => f.thumbnails)
     if (allThumbs.length > 0) {
       try {
         const t0 = Date.now()
@@ -1166,7 +1174,7 @@ export function registerStreamsIPC(): void {
     // The mtime drift check is stat-only — cheap next to the directory
     // walk that just happened; ffprobe still only runs inside
     // refreshVideoMaps for the files that actually changed.
-    const videoSetChanged = videoEntries.some(({ key, folderPath, videos }) => {
+    const videoSetChanged = !light && videoEntries.some(({ key, folderPath, videos }) => {
       const cached = allMeta[key]?.videoMap
       if (!cached) return videos.length > 0
       const currentNames = videos.map(v => relativeKey(folderPath, v))
@@ -1244,6 +1252,50 @@ export function registerStreamsIPC(): void {
     }
 
     return folders
+  }
+
+  // Full scans run one at a time per library. Several pages ask for the
+  // list around the same moment (three at launch, more after a change),
+  // and each full scan pays the cloud check, so scans that overlapped
+  // each paid it and slowed one another: three at once took two seconds
+  // where one takes one (measured 2026-11-10, STR-55). A request that
+  // arrives while a scan is running gets the FOLLOW-UP scan, which starts
+  // when the running one ends and is shared by everyone who asked in the
+  // meantime: a burst costs two scans at most, and no caller is handed a
+  // scan that started before it asked, which the Streams page relies on
+  // (its reloads follow its own changes, and STR-54 lays its edits over
+  // an answer by the moment of the request). `join` is for a caller that
+  // only wants a current list and holds no edits of its own (the Player):
+  // it takes the scan already running when there is one.
+  interface FullScanSlot {
+    running: Promise<StreamFolder[]>
+    next: { promise: Promise<StreamFolder[]>; start: () => void } | null
+  }
+  const fullScans = new Map<string, FullScanSlot>()
+  const startFullScan = (key: string, event: IpcMainInvokeEvent, dir: string, mode: 'folder-per-stream' | 'dump-folder'): FullScanSlot => {
+    const slot: FullScanSlot = { running: scanStreams(event, dir, mode, false), next: null }
+    fullScans.set(key, slot)
+    const settled = (): void => {
+      if (slot.next) slot.next.start()
+      else if (fullScans.get(key) === slot) fullScans.delete(key)
+    }
+    slot.running.then(settled, settled)
+    return slot
+  }
+  ipcMain.handle('streams:list', (event, dir: string, mode: 'folder-per-stream' | 'dump-folder' = 'folder-per-stream', opts?: { light?: boolean; join?: boolean }): Promise<StreamFolder[]> => {
+    if (opts?.light) return scanStreams(event, dir, mode, true)
+    const key = `${mode}|${dir}`
+    const slot = fullScans.get(key)
+    if (!slot) return startFullScan(key, event, dir, mode).running
+    if (opts?.join) return slot.running
+    if (!slot.next) {
+      let start: () => void = () => {}
+      const promise = new Promise<StreamFolder[]>((resolve, reject) => {
+        start = () => { startFullScan(key, event, dir, mode).running.then(resolve, reject) }
+      })
+      slot.next = { promise, start }
+    }
+    return slot.next.promise
   })
 
   // Scoped single-stream fetch — the data source for targeted
@@ -1808,15 +1860,26 @@ export function registerStreamsIPC(): void {
           try { return fs.statSync(path.join(prevDir, f)).isFile() } catch { return false }
         })
         for (const file of pickEpisodeThumbFiles(files, sourceThumbName)) {
-          fs.copyFileSync(path.join(prevDir, file), path.join(parentDir, episodeThumbNewName(file, date)))
+          const dest = path.join(parentDir, episodeThumbNewName(file, date))
+          expectSelfWrite(dest)
+          fs.copyFileSync(path.join(prevDir, file), dest)
         }
       }
+      broadcast('streams:changed', { quiet: true })
       return parentDir
     }
 
     // Folder-per-stream mode — auto-assign suffix for same-day streams
     const folderName = nextFolderName(parentDir, date)
     const folderPath = path.join(parentDir, folderName)
+    // The app's own folder, announced the way its file writes are, so the
+    // watcher drops the echo. Unannounced, the new folder came back 1.4 s
+    // later as a foreign structural change: a second full scan, and every
+    // thumbnail on the Streams page re-stamped and reloaded, which is the
+    // flash and the stall after New stream (STR-55). The one quiet event at
+    // the end tells the other pages there is a new stream; the page that
+    // asked reloads on its own and skips this one.
+    expectSelfWrite(folderPath)
     fs.mkdirSync(folderPath, { recursive: true })
     if (meta) {
       const allMeta = readAllMeta(parentDir)
@@ -1828,9 +1891,12 @@ export function registerStreamsIPC(): void {
         try { return fs.statSync(path.join(prevEpisodeFolderPath, f)).isFile() } catch { return false }
       })
       for (const file of pickEpisodeThumbFiles(files, sourceThumbName)) {
-        fs.copyFileSync(path.join(prevEpisodeFolderPath, file), path.join(folderPath, episodeThumbNewName(file, date)))
+        const dest = path.join(folderPath, episodeThumbNewName(file, date))
+        expectSelfWrite(dest)
+        fs.copyFileSync(path.join(prevEpisodeFolderPath, file), dest)
       }
     }
+    broadcast('streams:changed', { quiet: true })
     return folderPath
   })
 
@@ -2351,6 +2417,10 @@ export function registerStreamsIPC(): void {
       // Directory events are structural (a date-named dir appearing or
       // vanishing is a stream create/delete/reschedule): full reload.
       onDir: (p, kind) => {
+        // The app's own folder creation, announced like its file writes
+        // (New stream): not a foreign change, and its creator has already
+        // told the pages (STR-55).
+        if (consumeSelfWrite(p)) return
         // Diagnostic: surface every date-named folder appearing in or
         // leaving the streams root, with timestamp. Helps pin down the
         // phantom "2024-06-18" reappearance. The mkdir monkey-patch in

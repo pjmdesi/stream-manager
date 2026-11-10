@@ -47,6 +47,7 @@ Target: TBD · emptied 2026-10-02 after the v2.7.0 release. The "Questions and b
 
 - The files grid shows the archived marker in the same place for every kind of video (inside the Recording, Clip or Combined badge); clips and combined files used to carry it next to the name instead.
 - A broadcast or video deleted in YouTube Studio is now marked as gone in the open stream's sidebar within five minutes; it used to look linked and alive until the app was restarted.
+- Creating, deleting or rescheduling a stream no longer reloads the stream list several times over, and no longer reloads every thumbnail on the Streams page a moment after New stream or a reschedule. The app also starts with one library scan where it ran three.
 - A YouTube link, or any other detail edited in the sidebar, could be undone a moment later when the stream list refreshed, and in one case was lost from the library's metadata as well. Edits made while a refresh is running now stay.
 - New stream no longer refuses a date that already has a stream. It says so and creates the new one alongside (a dump folder still holds one stream per date, and says that instead).
 - In a dump-folder library, Offload and Pin local on a stream now act on that stream's files only; they used to queue the whole folder.

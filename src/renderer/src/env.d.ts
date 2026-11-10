@@ -200,7 +200,13 @@ declare global {
       setGameTagsLinks(v: Record<string, string>): Promise<void>
 
       // ── Streams ──────────────────────────────────────────────────────────────
-      listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder'): Promise<StreamFolder[]>
+      /** The library scan. `light` is the listing and stored metadata alone,
+       *  without the thumbnail cloud check (thumbnailLocalFlags stays unset),
+       *  the videoMap prune or the probe: for callers that draw no row
+       *  thumbnails from it. `join` takes a full scan already running when
+       *  there is one, for a caller that holds no edits of its own; without
+       *  it a full scan never started before the request (STR-55). */
+      listStreams(dir: string, mode?: 'folder-per-stream' | 'dump-folder', opts?: { light?: boolean; join?: boolean }): Promise<StreamFolder[]>
       /** Scoped single-stream fetch for targeted streams:changed events.
        *  Folder-per-stream mode only; null = stream gone (splice it out). */
       listStreamOne(dir: string, streamKey: string): Promise<StreamFolder | null>
