@@ -1093,6 +1093,29 @@ export function registerStreamsIPC(): void {
       if (cached && !folder.meta) folder.meta = cached
     }
 
+    // Keys are paths relative to each stream folder (forward-slash); for flat layouts
+    // this equals the bare filename, so legacy maps are still valid.
+    const videoEntries = folders
+      .filter(f => f.videos.length > 0 && !f.isMissing)
+      .map(f => ({ key: f.relativePath, folderPath: f.folderPath, date: f.date, videos: f.videos }))
+
+    // Prune videoMap entries for files that no longer exist (renames/deletes
+    // done outside the app). This needs only scan-time data, so it runs, and
+    // persists, right here: BEFORE the first await of this handler, so the
+    // read of _meta.json above, the prune and the write are one synchronous
+    // step that nothing can interleave. It used to sit after the thumbnail
+    // cloud check below, a wait of a second or more (fifteen at worst), and
+    // wrote the start-of-scan copy back whole: any edit saved during that
+    // wait, a YouTube link among them, was erased from disk (STR-54). It
+    // must NOT ride along with the async probe further down either: prune
+    // decisions from a minutes-old file listing applied to a fresh future
+    // _meta.json could wrongly delete entries for files that appeared in
+    // the meantime (e.g. a clip exported mid-probe).
+    if (pruneStaleVideoMapEntries(videoEntries, allMeta)) {
+      try { writeAllMeta(dir, allMeta) }
+      catch (err) { console.error('[streams:list] prune write failed:', err) }
+    }
+
     // Compute thumbnail local-flags so the renderer can skip rendering an <img>
     // for cloud-placeholder thumbnails (avoids hanging Chromium's network thread
     // on a cloud provider that's stuck or unreachable).
@@ -1131,23 +1154,6 @@ export function registerStreamsIPC(): void {
           f.thumbnailLocalFlags = f.thumbnails.map(p => lastKnownThumbLocal.get(p) ?? false)
         }
       }
-    }
-
-    // Keys are paths relative to each stream folder (forward-slash) — for flat layouts
-    // this equals the bare filename, so legacy maps are still valid.
-    const videoEntries = folders
-      .filter(f => f.videos.length > 0 && !f.isMissing)
-      .map(f => ({ key: f.relativePath, folderPath: f.folderPath, date: f.date, videos: f.videos }))
-
-    // Prune videoMap entries for files that no longer exist (renames/deletes
-    // done outside the app). This needs only scan-time data, so it runs — and
-    // persists — synchronously right here. It must NOT ride along with the
-    // async probe below: prune decisions from a minutes-old file listing
-    // applied to a fresh future _meta.json could wrongly delete entries for
-    // files that appeared in the meantime (e.g. a clip exported mid-probe).
-    if (pruneStaleVideoMapEntries(videoEntries, allMeta)) {
-      try { writeAllMeta(dir, allMeta) }
-      catch (err) { console.error('[streams:list] prune write failed:', err) }
     }
 
     // Probe when video files APPEARED since the last cache (the prune
@@ -1274,6 +1280,17 @@ export function registerStreamsIPC(): void {
 
     const folder = buildStreamFolder(folderPath, streamKey, allMeta)
 
+    // The videoMap prune, before the first await for the reason spelled out
+    // in streams:list: read, prune and write as one synchronous step, so the
+    // write never carries a copy that an edit has since overtaken (STR-54).
+    const videoEntry = !folder.isMissing && folder.videos.length > 0
+      ? { key: folder.relativePath, folderPath: folder.folderPath, date: folder.date, videos: folder.videos }
+      : null
+    if (videoEntry && pruneStaleVideoMapEntries([videoEntry], allMeta)) {
+      try { writeAllMeta(dir, allMeta) }
+      catch (err) { console.error('[streams:listOne] prune write failed:', err) }
+    }
+
     // Thumbnail cloud classification for just this folder — same safety net
     // as the full scan: on failure mark everything non-local so the renderer
     // shows cloud icons instead of risking a hung file:// load.
@@ -1292,15 +1309,12 @@ export function registerStreamsIPC(): void {
       }
     }
 
-    // Folder-scoped videoMap maintenance — the same prune / probe / merge
-    // pipeline streams:list runs, restricted to this one stream. The merge
-    // notify is scoped and quiet for the same reasons as the full scan's.
-    if (!folder.isMissing && folder.videos.length > 0) {
-      const entry = { key: folder.relativePath, folderPath: folder.folderPath, date: folder.date, videos: folder.videos }
-      if (pruneStaleVideoMapEntries([entry], allMeta)) {
-        try { writeAllMeta(dir, allMeta) }
-        catch (err) { console.error('[streams:listOne] prune write failed:', err) }
-      }
+    // Folder-scoped videoMap maintenance: the same probe / merge pipeline
+    // streams:list runs, restricted to this one stream (its prune ran above,
+    // before the cloud check). The merge notify is scoped and quiet for the
+    // same reasons as the full scan's.
+    if (videoEntry) {
+      const entry = videoEntry
       const cached = allMeta[entry.key]?.videoMap
       const currentNames = entry.videos.map(v => relativeKey(entry.folderPath, v))
       const videoSetChanged = !cached

@@ -1717,6 +1717,46 @@ export function StreamsPage({
     setSelectedStreamKey(cur => cur === streamKey ? null : streamKey)
   }, [])
 
+  // ── Meta edits against reloads in flight (STR-54) ──────────────────────
+  // A reload (the full list or a one-stream fetch) answers with the
+  // metadata main read when the request reached it, and only after the
+  // thumbnail cloud check, a second or more later. An edit this page makes
+  // in that wait is on disk, but the answer does not hold it, and applying
+  // the answer as it came wiped the edit from the screen: a link picked a
+  // moment earlier showed as unlinked until some later reload. Requests
+  // from this window reach main in the order they were sent, and the meta
+  // write completes inside its handler, so an answer holds every edit sent
+  // before its request and may miss any sent after. Each edit is therefore
+  // logged with a running number, each reload notes the number current
+  // when it was requested, and the edits numbered after it are laid back
+  // over its answer, in order, at the moment the answer is applied.
+  const metaEditSeqRef = useRef(0)
+  const metaEditLogRef = useRef<Array<{ seq: number; key: string; partial: Partial<StreamMeta> }>>([])
+  const listReadStartsRef = useRef<number[]>([])
+  /** Call right before a list request is sent; returns its mark. */
+  const beginListRead = useCallback((): number => {
+    const start = metaEditSeqRef.current
+    listReadStartsRef.current.push(start)
+    return start
+  }, [])
+  /** Call once the answer has been applied or dropped. Edits that no
+   *  reload still in flight could need leave the log. */
+  const endListRead = useCallback((start: number) => {
+    const i = listReadStartsRef.current.indexOf(start)
+    if (i !== -1) listReadStartsRef.current.splice(i, 1)
+    const oldest = listReadStartsRef.current.length > 0 ? Math.min(...listReadStartsRef.current) : Infinity
+    metaEditLogRef.current = metaEditLogRef.current.filter(e => e.seq > oldest)
+  }, [])
+  /** The folder with this page's edits made after `start` laid over it. */
+  const withMetaEditsSince = useCallback((folder: StreamFolder, start: number): StreamFolder => {
+    let meta: StreamMeta | null = null
+    for (const e of metaEditLogRef.current) {
+      if (e.seq <= start || e.key !== folder.relativePath) continue
+      meta = { ...(meta ?? folder.meta ?? ({} as StreamMeta)), ...e.partial }
+    }
+    return meta ? { ...folder, meta, hasMeta: true } : folder
+  }, [])
+
   // Partial-merge meta update used by every inline editable field in the
   // sidebar. Keyed by the canonical stream key (relativePath — unique in
   // BOTH modes; folderPath is shared by every dump-mode stream) and always
@@ -1740,12 +1780,22 @@ export function StreamsPage({
     // then the user clicks Pull-from-YouTube which fires its own write;
     // if Pull's IPC resolves first the user sees the pulled values
     // briefly, then the slower blur write completes and reverts them.
+    // Logged before the write is sent: a reload already under way read the
+    // file before this edit, and its answer must not undo it (STR-54).
+    const edit = { seq: ++metaEditSeqRef.current, key: streamKey, partial }
+    metaEditLogRef.current.push(edit)
     setFolders(prev => prev.map(f =>
       f.relativePath === streamKey
         ? { ...f, meta: { ...(f.meta ?? {} as StreamMeta), ...partial }, hasMeta: true }
         : f
     ))
-    await window.api.updateStreamMeta(folder.folderPath, partial, key)
+    try {
+      await window.api.updateStreamMeta(folder.folderPath, partial, key)
+    } catch (err) {
+      // Not on disk, so no reload's answer should be made to show it.
+      metaEditLogRef.current = metaEditLogRef.current.filter(e => e !== edit)
+      throw err
+    }
   }, [folders, streamsDir])
   // Record a post-stream Twitch push the way the sidebar's manual push
   // records itself: seed the channel cache with what was sent and snapshot
@@ -2623,16 +2673,22 @@ export function StreamsPage({
     const seq = ++listReqSeqRef.current
     setLoading(true)
     let loaded: StreamFolder[] | null = null
+    const editMark = beginListRead()
     try {
-      const result = await window.api.listStreams(streamsDir, streamMode as any)
+      const fetched = await window.api.listStreams(streamsDir, streamMode as any)
+      // This page's edits made while the scan ran, laid back over its
+      // answer in the same task that applies it (STR-54).
+      const result = fetched.map(f => withMetaEditsSince(f, editMark))
       if (seq === listReqSeqRef.current) setFolders(result)
       loaded = result
     } catch (err) {
       console.error('Failed to load streams', err)
+    } finally {
+      endListRead(editMark)
     }
     if (seq === listReqSeqRef.current) setLoading(false)
     return loaded ?? foldersRef.current
-  }, [streamsDir, streamMode])
+  }, [streamsDir, streamMode, beginListRead, endListRead, withMetaEditsSince])
 
   // Scoped reload: re-fetch just the streams named by a targeted
   // streams:changed event and splice them into state — replace in place,
@@ -2654,12 +2710,21 @@ export function StreamsPage({
     const seq = listReqSeqRef.current
     // Sequential on purpose: bounds concurrent PowerShell spawns from a
     // multi-stream burst, and lets a superseding full reload abort early.
-    const results: Array<{ key: string; folder: StreamFolder | null | undefined }> = []
+    const results: Array<{ key: string; folder: StreamFolder | null | undefined; editMark: number }> = []
+    const endReads = () => { for (const r of results) endListRead(r.editMark) }
     for (const key of keys) {
       // undefined = fetch failed (leave the row as-is); null = stream gone.
-      results.push({ key, folder: await window.api.listStreamOne(streamsDir, key).catch(() => undefined) })
-      if (seq !== listReqSeqRef.current) return
+      const r: (typeof results)[number] = { key, folder: undefined, editMark: beginListRead() }
+      results.push(r)
+      r.folder = await window.api.listStreamOne(streamsDir, key).catch(() => undefined)
+      if (seq !== listReqSeqRef.current) { endReads(); return }
     }
+    // This page's edits made since each fetch was requested, laid back over
+    // its answer here, in the task that applies it, so an edit made while
+    // a later stream of the burst was still being fetched counts too
+    // (STR-54).
+    for (const r of results) if (r.folder) r.folder = withMetaEditsSince(r.folder, r.editMark)
+    endReads()
     setFolders(prev => {
       const next = [...prev]
       let changed = false
@@ -2690,7 +2755,7 @@ export function StreamsPage({
         return merged
       })
     }
-  }, [streamsDir, loadFolders])
+  }, [streamsDir, loadFolders, beginListRead, endListRead, withMetaEditsSince])
 
   // _meta.json health — pushed by main whenever the metadata store enters or
   // leaves a failed-read state (locked or corrupt). While failed, main also
