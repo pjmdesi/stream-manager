@@ -124,3 +124,14 @@ export function streamKeyOfFile(root: string, filePath: string): string | null {
   }
   return null
 }
+
+/** The thumbnail editor's own folder at the library root: its templates
+ *  and cached images. It holds no stream. */
+export const THUMBNAIL_ASSETS_DIR = '_thumbnail-assets'
+
+/** Whether `p` is that folder or anything inside it. */
+export function isThumbnailAssetsPath(root: string, p: string): boolean {
+  const rel = relativeUnder(root, p)
+  if (rel === null) return false
+  return rel.split('/')[0].toLowerCase() === THUMBNAIL_ASSETS_DIR
+}

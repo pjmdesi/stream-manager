@@ -12,7 +12,7 @@ import { probeFile, parseClipProvenance, probeContainerTags, isArchiveTag, isCon
 import { isInFlightWrite } from '../services/inFlightWrites'
 import { broadcast } from '../services/broadcast'
 import { isVideoExtension } from '../../shared/videoExts'
-import { DATE_IN_NAME_RE, isStreamFolderName, streamFolderDate, streamFolderIndex, relativeKey, streamKeyOfFolder, streamKeyOfFile } from '../../shared/streamKey'
+import { DATE_IN_NAME_RE, isStreamFolderName, streamFolderDate, streamFolderIndex, relativeKey, streamKeyOfFolder, streamKeyOfFile, isThumbnailAssetsPath } from '../../shared/streamKey'
 import { consumeSelfWrite, expectSelfWrite } from '../services/selfWrites'
 
 export type VideoCategory = 'full' | 'short' | 'clip' | 'combined'
@@ -2401,8 +2401,15 @@ export function registerStreamsIPC(): void {
       //     cancelled job's file-handle release into an EPERM. The
       //     completion/cancel paths fire their own explicit events, so
       //     nothing is missed. (Via the inFlightWrites registry.)
+      //   - the thumbnail editor's assets folder (_thumbnail-assets:
+      //     templates and cached images). It holds no stream, so its files
+      //     resolve to no stream key, and a write there (saving a template,
+      //     caching an image) used to escalate to a full reload that
+      //     rescanned the library and reloaded every thumbnail on the
+      //     Streams page for a change nothing on that page shows (STR-56).
       ignored: (p: string) => {
         if (path.basename(p).startsWith('_meta.') || /\.tmp$/i.test(p) || /__arc_tmp\.[^.]+$/.test(p)) return true
+        if (isThumbnailAssetsPath(dir, p)) return true
         return isInFlightWrite(p)
       },
       // File events resolve to the owning stream folder so the renderer can

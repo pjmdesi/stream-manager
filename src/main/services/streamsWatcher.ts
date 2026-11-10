@@ -22,7 +22,8 @@ import path from 'path'
  * of the raw events is rebuilt here: rename events are classified as add or
  * unlink with one stat (a stat does not hydrate a placeholder), file events
  * wait for write stability the way awaitWriteFinish did, directory events
- * are told apart from file events, and a buffer overflow (a burst larger
+ * are told apart from file events, an event that is only a file being
+ * read is dropped (see isAccessOnly), and a buffer overflow (a burst larger
  * than the change buffer, after which Windows reports a null filename)
  * surfaces as `onOverflow` so the caller can reconcile once.
  */
@@ -66,6 +67,35 @@ interface Pending {
 
 const SLOW_POLL_AFTER_MS = 30_000
 const SLOW_POLL_MS = 2_000
+
+/**
+ * An access is not a change (STR-56). The root subscription also reports
+ * LAST-ACCESS updates, and where Windows keeps access times (the default
+ * on most machines: fsutil reports DisableLastAccess = 2, system managed,
+ * updates enabled) NTFS moves a file's access time whenever it is read
+ * and the stored one is more than an hour old. So the app merely SHOWING a
+ * thumbnail, or reading a frame of a video, came back as a change event
+ * for that file: every stream viewed for the first time in an hour
+ * reloaded itself and its thumbnails a few seconds later, once per group
+ * of files as they settled, and opening the thumbnail editor, which reads
+ * its assets at the library root, reloaded every thumbnail on the Streams
+ * page. The hour made it look random.
+ *
+ * The raw event does not say what moved, but the file does: after a read
+ * its access time is far ahead of both its modified time and its change
+ * time, while any write, attribute change or hydration moves the change
+ * time with it (measured 2026-11-10: a read moved the access time alone, a
+ * write that restored an old modified time still moved the change time).
+ * All three stamps come from the file's own clock, so a share whose clock
+ * differs from this machine's cannot fool the comparison. A minute of slack
+ * covers a stat that ran late behind a busy main process while a sync
+ * client was already reading the freshly written file. Erring this way
+ * only lets an access through as a change, which is what happened before.
+ */
+const ACCESS_ONLY_GAP_MS = 60_000
+function isAccessOnly(st: fs.Stats): boolean {
+  return st.atimeMs - Math.max(st.mtimeMs, st.ctimeMs) > ACCESS_ONLY_GAP_MS
+}
 
 export function startStreamsWatcher(opts: StreamsWatcherOptions): StreamsWatcher {
   const stabilityMs = opts.stabilityMs ?? 1000
@@ -162,6 +192,11 @@ export function startStreamsWatcher(opts: StreamsWatcherOptions): StreamsWatcher
         if (eventType === 'rename') emitDir(abs, 'addDir')
         return
       }
+      // A change event for a file that shows only an access since its last
+      // write is the app, or anything else, reading it. A rename is a
+      // create or a move, and a file already waiting out its stability
+      // window is being written: both pass as before.
+      if (eventType !== 'rename' && !pending.has(abs) && isAccessOnly(st)) return
       fileTouched(abs, eventType === 'rename' ? 'add' : 'change', st)
     })
   }

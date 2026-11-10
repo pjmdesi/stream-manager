@@ -3,7 +3,7 @@ import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
 import { getStore, getStreamsDir, getStreamMode } from './store'
-import { streamKeyOfFolder } from '../../shared/streamKey'
+import { THUMBNAIL_ASSETS_DIR, streamKeyOfFolder } from '../../shared/streamKey'
 import { checkLocalFiles } from './files'
 import { expectSelfWrite } from '../services/selfWrites'
 
@@ -33,7 +33,7 @@ export interface ThumbnailRecentEntry {
 
 // ── Path helpers ─────────────────────────────────────────────────────────────
 
-function assetsDir(streamsDir: string) { return path.join(streamsDir, '_thumbnail-assets') }
+function assetsDir(streamsDir: string) { return path.join(streamsDir, THUMBNAIL_ASSETS_DIR) }
 function templatesDir(streamsDir: string) { return path.join(assetsDir(streamsDir), 'templates') }
 function imagesDir(streamsDir: string) { return path.join(assetsDir(streamsDir), 'images') }
 
