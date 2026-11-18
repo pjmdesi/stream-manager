@@ -50,6 +50,10 @@ export interface StreamsWatcherOptions {
    *  as a recording in progress). */
   stabilityMs?: number
   pollMs?: number
+  /** What a scan last saw of a file (its size, its modified time, whether
+   *  its data is on disk), for a file a scan has seen. A change event for
+   *  a file that still matches is not reported: see isAccessOnly. */
+  baseline?: (absPath: string) => { size: number; mtimeMs: number; hydrated: boolean } | undefined
 }
 
 export interface StreamsWatcher {
@@ -91,6 +95,15 @@ const SLOW_POLL_MS = 2_000
  * covers a stat that ran late behind a busy main process while a sync
  * client was already reading the freshly written file. Erring this way
  * only lets an access through as a change, which is what happened before.
+ *
+ * That test fails inside a cloud sync folder, where a read moves the
+ * change time together with the access time (measured 2026-11-18 in a
+ * Synology Drive library; the measurement above ran outside it). There
+ * the file itself cannot say what happened, so the caller can supply what
+ * its last scan saw (`baseline`): a file whose size, modified time and
+ * on-disk state are what the scan noted has not changed in any way the
+ * caller shows, whatever touched its other stamps. The time-stamp test
+ * stays for a file no scan has seen.
  */
 const ACCESS_ONLY_GAP_MS = 60_000
 function isAccessOnly(st: fs.Stats): boolean {
@@ -196,7 +209,13 @@ export function startStreamsWatcher(opts: StreamsWatcherOptions): StreamsWatcher
       // write is the app, or anything else, reading it. A rename is a
       // create or a move, and a file already waiting out its stability
       // window is being written: both pass as before.
-      if (eventType !== 'rename' && !pending.has(abs) && isAccessOnly(st)) return
+      if (eventType !== 'rename' && !pending.has(abs)) {
+        const known = opts.baseline?.(abs)
+        const unchanged = known
+          ? known.size === st.size && known.mtimeMs === st.mtimeMs && known.hydrated === (st.blocks > 0)
+          : isAccessOnly(st)
+        if (unchanged) return
+      }
       fileTouched(abs, eventType === 'rename' ? 'add' : 'change', st)
     })
   }

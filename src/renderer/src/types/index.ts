@@ -527,6 +527,11 @@ export interface StreamFolder {
   thumbnails: string[]
   /** Parallel to `thumbnails`; false → cloud placeholder, skip <img> render. */
   thumbnailLocalFlags?: boolean[]
+  /** Parallel to `thumbnails`: each file's modified time and size as the
+   *  scan read them. A reload compares them to tell a thumbnail that was
+   *  overwritten in place from one that was only looked at (STR-56). Unset
+   *  on a light list. */
+  thumbnailStamps?: string[]
   videoCount: number
   videos: string[]
   isMissing?: boolean

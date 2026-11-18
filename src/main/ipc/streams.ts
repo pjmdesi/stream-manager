@@ -135,6 +135,10 @@ export interface StreamFolder {
    *  renderer skips loading non-local thumbnails to avoid hanging on a bad
    *  cloud-sync state, and offers an on-demand hydrate from the lightbox. */
   thumbnailLocalFlags?: boolean[]
+  /** Parallel to `thumbnails`: each file's modified time and size as this
+   *  scan read them (see stampFolder). The page compares them between
+   *  reloads; unset on a light list. */
+  thumbnailStamps?: string[]
   videoCount: number
   videos: string[]
   isMissing?: boolean
@@ -909,6 +913,46 @@ function pruneStaleVideoMapEntries(
   return changed
 }
 
+// ── What a scan saw of each file (STR-56) ──────────────────────────────
+// Inside a cloud sync folder a file being READ gets a new change time as
+// well as a new access time (measured 2026-11-18 in a Synology Drive
+// library; outside the sync root only the access time moves). The watcher
+// cannot tell that from an attribute change, so merely showing a stream's
+// thumbnails came back two seconds later as a change to that stream. The
+// scan therefore notes, for every file it lists, the size, the modified
+// time and whether the data is on disk, and the watcher drops a change
+// event for a file that still matches: nothing the list shows has moved.
+// `hydrated` reads from the same stat: an offloaded placeholder has no
+// blocks allocated (in that library all 497 offloaded files had none and
+// all 1,265 local ones had some), so an offload or a download, which moves
+// neither the size nor the modified time, still gets through.
+interface FileStamp { size: number; mtimeMs: number; hydrated: boolean }
+const knownFiles = new Map<string, FileStamp>()
+const stampKey = (p: string): string => p.replace(/\\/g, '/').toLowerCase()
+function stampFile(p: string): FileStamp | null {
+  try {
+    const st = fs.statSync(p)
+    const stamp: FileStamp = { size: st.size, mtimeMs: st.mtimeMs, hydrated: st.blocks > 0 }
+    knownFiles.set(stampKey(p), stamp)
+    return stamp
+  } catch {
+    knownFiles.delete(stampKey(p))
+    return null
+  }
+}
+/** Notes every thumbnail and video of a stream, and gives the entry its
+ *  thumbnail stamps, which the page compares between reloads. A stat
+ *  reads no file data: about 40 microseconds a file, 70 ms for a library
+ *  of 1,766 listed files. */
+function stampFolder(folder: StreamFolder): void {
+  if (folder.isMissing) return
+  folder.thumbnailStamps = folder.thumbnails.map(p => {
+    const st = stampFile(p)
+    return st ? `${st.mtimeMs}:${st.size}` : ''
+  })
+  for (const v of folder.videos) stampFile(v)
+}
+
 /** Assemble one folder-mode StreamFolder from disk + the meta store.
  *  Shared by the full streams:list scan and the scoped streams:listOne
  *  fetch so the two can never drift. (Dump mode has its own grouping
@@ -1100,6 +1144,12 @@ export function registerStreamsIPC(): void {
       const cached = allMeta[folder.relativePath]
       if (cached && !folder.meta) folder.meta = cached
     }
+
+    // Note what every listed file looks like right now (STR-56): the page
+    // compares the thumbnail stamps between reloads, and the watcher's
+    // baseline comes from here. A light list is for callers that neither
+    // draw thumbnails nor compare, so it skips the stats.
+    if (!light) for (const folder of folders) stampFolder(folder)
 
     // Keys are paths relative to each stream folder (forward-slash); for flat layouts
     // this equals the bare filename, so legacy maps are still valid.
@@ -1331,6 +1381,7 @@ export function registerStreamsIPC(): void {
     }
 
     const folder = buildStreamFolder(folderPath, streamKey, allMeta)
+    stampFolder(folder)
 
     // The videoMap prune, before the first await for the reason spelled out
     // in streams:list: read, prune and write as one synchronous step, so the
@@ -2381,6 +2432,9 @@ export function registerStreamsIPC(): void {
       depth: isDump ? 0 : 6,
       stabilityMs: 1000,
       pollMs: 300,
+      // What the last scan saw of a file, so that a change event for one
+      // that still looks the same (it was only read) is dropped (STR-56).
+      baseline: (p: string) => knownFiles.get(stampKey(p)),
       // Ignore files the app writes itself, otherwise the watcher fires
       // 'change' events for every internal write and the renderer re-runs
       // loadFolders and refreshVideoMaps in a tight feedback loop:

@@ -42,6 +42,7 @@ import { v4 as uuidv4 } from 'uuid'
 import type { ConversionPreset, ConversionJob, LiveBroadcast } from '../../types'
 import { BroadcastLinkRef } from '../ui/BroadcastPicker'
 import { LinkVideoModal, type VodListState } from '../streams/LinkVideoModal'
+import { mergeStreamList, sameStreamFolder, thumbnailOverwritten } from '../../lib/streamListMerge'
 import { VideoRow, bustThumbUrl } from '../streams/VideoRow'
 import { TogglePill } from '../ui/TogglePill'
 import { Globe, Lock, Link as LinkIcon, Link2, Unlink } from 'lucide-react'
@@ -2670,6 +2671,18 @@ export function StreamsPage({
   // event that arrived before it is already in that reload's scan, so the
   // event's own reload is skipped (STR-55).
   const lastFullListAtRef = useRef(0)
+  /** New thumbnail addresses for these streams, so their images load
+   *  again. Called for a stream with a thumbnail overwritten in place and
+   *  for nothing else (STR-56). */
+  const restampStreams = useCallback((keys: string[]) => {
+    if (keys.length === 0) return
+    const now = Date.now()
+    setStreamThumbsKeys(prev => {
+      const merged = { ...prev }
+      for (const k of keys) merged[k] = now
+      return merged
+    })
+  }, [])
   const loadFolders = useCallback(async (): Promise<StreamFolder[]> => {
     // Returns the freshly-loaded list so same-task callers don't race the
     // state/ref updates (foldersRef syncs on the NEXT render).
@@ -2684,8 +2697,18 @@ export function StreamsPage({
       // This page's edits made while the scan ran, laid back over its
       // answer in the same task that applies it (STR-54).
       const result = fetched.map(f => withMetaEditsSince(f, editMark))
-      if (seq === listReqSeqRef.current) setFolders(result)
-      loaded = result
+      if (seq === listReqSeqRef.current) {
+        // An entry that says what the page already shows is kept as it is,
+        // so nothing under it re-renders, and only a stream with a thumbnail
+        // overwritten in place gets new thumbnail addresses (STR-56; see
+        // lib/streamListMerge).
+        const merged = mergeStreamList(foldersRef.current, result)
+        setFolders(merged.list)
+        restampStreams(merged.restamp)
+        loaded = merged.list
+      } else {
+        loaded = result
+      }
     } catch (err) {
       console.error('Failed to load streams', err)
     } finally {
@@ -2693,23 +2716,23 @@ export function StreamsPage({
     }
     if (seq === listReqSeqRef.current) setLoading(false)
     return loaded ?? foldersRef.current
-  }, [streamsDir, streamMode, beginListRead, endListRead, withMetaEditsSince])
+  }, [streamsDir, streamMode, beginListRead, endListRead, withMetaEditsSince, restampStreams])
 
   // Scoped reload: re-fetch just the streams named by a targeted
   // streams:changed event and splice them into state — replace in place,
   // insert new (sorted), remove when main reports the stream gone. The
   // captured sequence token drops the splice if a FULL reload started
-  // while we were fetching (its data supersedes ours). `bumpThumbs`
-  // refreshes only the spliced streams' thumbnail cache keys — the whole
-  // point of the scoped pipeline: nobody else's thumbnails flash.
-  const spliceStreams = useCallback(async (keys: string[], opts: { bumpThumbs: boolean }) => {
+  // while we were fetching (its data supersedes ours). A stream whose
+  // answer says what the page already shows is left alone, and its
+  // thumbnails get new addresses only when one was overwritten in place
+  // (STR-56): a reload that found nothing new is not visible.
+  const spliceStreams = useCallback(async (keys: string[]) => {
     if (!streamsDir || keys.length === 0) return
     // Beyond a handful of streams, ONE full scan is cheaper than N
     // per-stream fetches — each listOne spawns its own PowerShell
     // hydration check, and a large parallel burst made them all time out.
     if (keys.length > 6) {
       void loadFolders()
-      if (opts.bumpThumbs) setThumbsKey(Date.now())
       return
     }
     const seq = listReqSeqRef.current
@@ -2730,6 +2753,12 @@ export function StreamsPage({
     // (STR-54).
     for (const r of results) if (r.folder) r.folder = withMetaEditsSince(r.folder, r.editMark)
     endReads()
+    const restamp: string[] = []
+    for (const { key, folder } of results) {
+      if (!folder) continue
+      const old = foldersRef.current.find(f => f.relativePath === key)
+      if (old && !sameStreamFolder(old, folder) && thumbnailOverwritten(old, folder)) restamp.push(key)
+    }
     setFolders(prev => {
       const next = [...prev]
       let changed = false
@@ -2739,6 +2768,8 @@ export function StreamsPage({
         if (folder === null) {
           if (idx !== -1) { next.splice(idx, 1); changed = true }
         } else if (idx !== -1) {
+          // An answer that says what the page already shows changes nothing.
+          if (sameStreamFolder(next[idx], folder)) continue
           next[idx] = folder
           changed = true
         } else {
@@ -2752,15 +2783,8 @@ export function StreamsPage({
       next.sort((a, b) => b.date.localeCompare(a.date) || streamFolderIndex(b.folderName) - streamFolderIndex(a.folderName))
       return next
     })
-    if (opts.bumpThumbs) {
-      const now = Date.now()
-      setStreamThumbsKeys(prev => {
-        const merged = { ...prev }
-        for (const k of keys) merged[k] = now
-        return merged
-      })
-    }
-  }, [streamsDir, loadFolders, beginListRead, endListRead, withMetaEditsSince])
+    restampStreams(restamp)
+  }, [streamsDir, loadFolders, beginListRead, endListRead, withMetaEditsSince, restampStreams])
 
   // _meta.json health — pushed by main whenever the metadata store enters or
   // leaves a failed-read state (locked or corrupt). While failed, main also
@@ -2796,8 +2820,7 @@ export function StreamsPage({
     // event manually.
     void window.api.watchStreamsDir(streamsDir, streamMode as 'folder-per-stream' | 'dump-folder')
     // Debounced: streams:changed can arrive in a burst (a delete touches several
-    // files, saves fire their own, etc.), and each reload is a full listStreams +
-    // thumbnail classification plus a thumbsKey bump (the visible flash). Coalesce
+    // files, saves fire their own, etc.), and each reload is a scan. Coalesce
     // them so one logical change is one reload.
     //
     // Events landing inside the self-delete stand-down (selfDeleteUntilRef)
@@ -2805,13 +2828,10 @@ export function StreamsPage({
     // the filesystem echoes of our own delete (grid already updated in
     // place), but they can just as well be a converter finishing an encode
     // or an external file landing — dropped ones stayed invisible until an
-    // unrelated event. Deferred passes (and bursts made up only of main's
-    // `quiet` echo fires) reload the data WITHOUT the thumbsKey bump: new
-    // files have new paths and render fine without a cache-bust, which
-    // preserves the no-flash behavior the stand-down was built for.
+    // unrelated event. No pass gives thumbnails new addresses by itself any
+    // more: the reload does, and only for a thumbnail whose file was
+    // overwritten in place (STR-56), so main's `quiet` mark is not read here.
     let timer: ReturnType<typeof setTimeout> | null = null
-    let deferred = false
-    let burstQuiet = true
     // Stream keys accumulated across the burst. null = at least one event
     // was unscoped (structural) → the burst escalates to a full reload.
     // Dump mode never takes the scoped path (keys are folder-mode
@@ -2822,45 +2842,29 @@ export function StreamsPage({
     const off = window.api.onStreamsChanged(info => {
       if (timer) clearTimeout(timer)
       burstLastEventAt = performance.now()
-      if (!info?.quiet) burstQuiet = false
       if (!info?.streamKeys || streamMode === 'dump-folder') burstKeys = null
       else if (burstKeys) for (const k of info.streamKeys) burstKeys.add(k)
-      deferred = false
       timer = setTimeout(function fire() {
         const waitMs = selfDeleteUntilRef.current - Date.now()
         if (waitMs > 0) {
-          deferred = true
           timer = setTimeout(fire, waitMs + 100)
           return
         }
         const keys = burstKeys
-        const quiet = deferred || burstQuiet
-        deferred = false
-        burstQuiet = true
         burstKeys = new Set()
         // A full reload requested after the burst's last event has scanned
         // everything the burst announced: the page's own reload after New
         // stream, a reschedule or a delete, with main's event for the same
         // change arriving just before it. Fetching again would be the
-        // second and third scan of one change (STR-55). The cache-bust is
-        // not skipped: a changed file still needs its new address.
-        const covered = lastFullListAtRef.current > burstLastEventAt
-        if (keys && keys.size > 0) {
-          // Every change in the burst mapped to specific streams — splice
-          // just those. Quiet (echo/deferred) splices skip the thumb bump.
-          if (!covered) void spliceStreams([...keys], { bumpThumbs: !quiet })
-          else if (!quiet) {
-            const now = Date.now()
-            setStreamThumbsKeys(prev => {
-              const merged = { ...prev }
-              for (const k of keys) merged[k] = now
-              return merged
-            })
-          }
-        } else {
-          if (!covered) loadFolders()
-          if (!quiet) setThumbsKey(Date.now())
-        }
+        // second and third scan of one change (STR-55). That reload also
+        // gave new addresses to any thumbnail overwritten in place.
+        if (lastFullListAtRef.current > burstLastEventAt) return
+        // Every change in the burst mapped to specific streams: splice just
+        // those. Otherwise the whole list. Either way a thumbnail loads
+        // again only when its own file was overwritten, which the reload
+        // reads from the scan's stamps (STR-56).
+        if (keys && keys.size > 0) void spliceStreams([...keys])
+        else void loadFolders()
       }, 400)
     })
     return () => {
@@ -2993,6 +2997,9 @@ export function StreamsPage({
         thumbnailLocalFlags: f.thumbnailLocalFlags
           ? keptThumbs.map(([, i]) => f.thumbnailLocalFlags![i])
           : f.thumbnailLocalFlags,
+        thumbnailStamps: f.thumbnailStamps
+          ? keptThumbs.map(([, i]) => f.thumbnailStamps![i])
+          : f.thumbnailStamps,
       }
     }))
   }, [updateMeta])
@@ -3017,6 +3024,7 @@ export function StreamsPage({
         ...f,
         thumbnails: f.thumbnails.filter((_, i) => i !== idx),
         thumbnailLocalFlags: f.thumbnailLocalFlags?.filter((_, i) => i !== idx),
+        thumbnailStamps: f.thumbnailStamps?.filter((_, i) => i !== idx),
       }
     }))
     try {

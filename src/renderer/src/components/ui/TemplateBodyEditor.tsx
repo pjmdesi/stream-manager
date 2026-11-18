@@ -395,6 +395,21 @@ const HIST_COALESCE_MS = 600
  * source-text changes and rebuilds the DOM while preserving the
  * cursor via offset helpers.
  */
+/** Same members. The page hands the editor a freshly built set and map on
+ *  every render of its own, so their identity says nothing (STR-56). */
+function sameKeySet(a: ReadonlySet<string> | undefined, b: ReadonlySet<string> | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.size !== b.size) return false
+  for (const k of a) if (!b.has(k)) return false
+  return true
+}
+function sameValueMap(a: ReadonlyMap<string, string> | undefined, b: ReadonlyMap<string, string> | undefined): boolean {
+  if (a === b) return true
+  if (!a || !b || a.size !== b.size) return false
+  for (const [k, v] of a) if (b.get(k) !== v) return false
+  return true
+}
+
 export function TemplateBodyEditor({
   value, onSave, placeholder, knownKeys, inapplicableKeys, resolvedValues, tabAttached, tabActive, multiline, minHeight, insertRef, autoFocus, height, onHeightChange, aiFetcher, onAiReject, attachLeft,
 }: {
@@ -543,13 +558,18 @@ export function TemplateBodyEditor({
   }, [applyHistory])
 
   // Re-render the editor whenever local diverges from what the DOM
-  // currently shows OR when the inapplicable set changes (chip colors
-  // need to refresh). Preserves cursor across the rebuild.
+  // currently shows OR when the inapplicable set or the resolved values
+  // change (chip colors and chip values need to refresh). The two are
+  // compared by what they hold: the page builds them afresh whenever it
+  // re-renders, and comparing them by identity rebuilt the editor under
+  // the cursor on every reload of the stream list, which collapsed a text
+  // selection to a caret (STR-56). A rebuild that is due keeps the
+  // selection, or the caret when nothing is selected.
   useLayoutEffect(() => {
     const el = editorRef.current
     if (!el) return
-    const inapplicableChanged = lastInapplicableRef.current !== inapplicableKeys
-    const resolvedChanged = lastResolvedRef.current !== resolvedValues
+    const inapplicableChanged = !sameKeySet(lastInapplicableRef.current, inapplicableKeys)
+    const resolvedChanged = !sameValueMap(lastResolvedRef.current, resolvedValues)
     // The serialize comparison alone can't spot a known `{key}` token
     // sitting in the DOM as plain text (e.g. one just pasted): the text
     // reads back identical to the source. Also require the DOM's chip
@@ -558,10 +578,12 @@ export function TemplateBodyEditor({
     const domIsCanonical = el.querySelectorAll('[data-token]').length === countKnownTokens(local, knownKeys)
     if (!inapplicableChanged && !resolvedChanged && domIsCanonical && serialize(el) === local) return
     const owns = document.activeElement === el
+    const selected = owns ? getSelectedSourceRange(el) : null
     const offset = owns ? getCursorOffset(el) : -1
     render(el, local, knownKeys, inapplicableKeys, resolvedValues)
     lastInapplicableRef.current = inapplicableKeys
     lastResolvedRef.current = resolvedValues
+    if (selected && selectSourceRange(el, selected.start, selected.end)) return
     if (offset >= 0) setCursorOffset(el, offset)
   }, [local, knownKeys, inapplicableKeys, resolvedValues])
 
