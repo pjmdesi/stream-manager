@@ -4,6 +4,7 @@ import { audioCacheManager } from '../services/audioCacheManager'
 import { thumbnailCacheManager } from '../services/thumbnailCacheManager'
 import { waveformCacheManager } from '../services/waveformCacheManager'
 import { scheduleCacheEnforcement } from '../services/cacheLimit'
+import { getHelperCopyState, type HelperCopyState } from '../services/helperBinaries'
 import { getStore, getConfig } from './store'
 
 // In-process waveform cache. Bounded FIFO (Maps iterate in insertion order):
@@ -128,6 +129,11 @@ export function registerVideoIPC(): void {
   // that all three managers share. Shown read-only in Settings (the old
   // "Cache Directory" setting was never read by anything).
   ipcMain.handle('video:getCacheDir', async (): Promise<string> => path.join(app.getPath('temp'), 'stream-manager'))
+
+  // The copy of ffmpeg and ffprobe the Windows portable build keeps in the
+  // data folder (STR-58), shown in Settings beside the cache. Null in a
+  // build that keeps none.
+  ipcMain.handle('video:getHelperCopy', async (): Promise<HelperCopyState | null> => getHelperCopyState())
 
   ipcMain.handle('video:getAudioCacheSize', async () => {
     return audioCacheManager.getTotalSize() + thumbnailCacheManager.getTotalSize() + waveformCacheManager.getTotalSize()

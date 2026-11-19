@@ -40,6 +40,12 @@
 36. CONV-27
 37. CONV-29
 38. THU-48
+39. THU-51
+40. THU-50
+41. THU-49
+42. THU-52
+43. STR-59
+44. CONV-30
 
 ## Next up
 
@@ -202,9 +208,19 @@
   Cause found 2026-11-18 from a capture of the flow done by hand (.claude/perf/attach-record.mjs and capture-report.mjs, kept out of git): in the portable build every start of ffprobe or ffmpeg holds the main process for 0.7 to 1.8 s. The first visit to a stream probes every local file in its folder, screenshots and thumbnails included (ten and eleven starts on two streams counted 2026-11-19, about 0.8 s each, back to back), and launch costs six ffmpeg starts. The starts took 8.1 s of the 31 s recorded; PowerShell starts in the same run took under 50 ms each.
   Why the portable build: it unpacks itself into a new folder under %TEMP% at every launch and runs its ffprobe.exe (60 MB) from there. From a bare script on the development machine (Defender off, Malwarebytes on), a copy of ffprobe.exe under %TEMP% takes 360 ms to start, every time; a fresh copy in the repo folder takes 97 ms once and 5 ms after. A start is a blocking call in Node, so the main process and the window with it wait it out. Driven runs missed it at first because they used dist/win-unpacked, where the same starts cost 30 to 70 ms. This is the cause APP-56 was after. Windows releases are the same portable type; how the security software on other machines treats %TEMP% is not known, and the 2.7.1 release exe has not been measured.
   What probes on a visit, found 2026-11-19: an accident. The Converter page, mounted and hidden, subscribes to the shared hydration cache to probe a file once its download lands (ConverterPage, the subscribeHydration effect). The cache also reports a path the first time its status is learned, so the first time the files grid learns that a stream's files are local, the Converter page probes each of them, images included, and keeps audio tracks nobody asked for. The scan itself already probes on evidence only: no stored entry, a changed modified time, or an earlier failed probe (refreshVideoMaps).
-  Where a start is cheap, measured the same day with throwaway copies of ffprobe.exe: 390 ms at every start under %TEMP%, a fixed folder name included; about 50 ms once and 7 ms after under %LOCALAPPDATA% and %APPDATA%. The portable type always unpacks under %TEMP% and removes the folder on exit (portable.nsi), so no build setting moves it.
-  The visit part built 2026-11-19, awaiting review: the Converter page's listener acts only on a file in its own list that it last saw offloaded, and the scan's change test compares the file size beside the modified time. Counted on the portable build before and after, same streams (.claude/perf/spawn-count.mjs): 27 ffprobe starts holding the main process 21 s over three streams before, none after. What a visit still starts: six or seven PowerShell local-status checks at about 35 ms each.
-  Still open, none built: every other helper start stays slow in the portable build. Launch holds the main process about 11 s (six ffmpeg starts and one blocking PowerShell call between 8 and 17 s after launch, the window usable at 18 s), and opening a video in the Player, adding a file to the Converter or starting a conversion costs 0.8 s or more per start. Options: (a) start helper processes from a worker so that the main process never waits on a start, on any machine; the largest, since every ffmpeg call site reads progress from the process and kills it directly; (d) the app keeps ffprobe.exe and ffmpeg.exe (189 MB) in its own data folder, copied once per version, and starts them from there (the paths are set in one place, ffmpegService). Dropped: launching dist/win-unpacked from the Dist button, since the dist should behave like the release.
+  Where a start is cheap, measured the same day with copies of ffprobe.exe started from a bare script: 350 to 390 ms at every start anywhere under %TEMP% and anywhere inside the app's own data folder (%APPDATA%\stream-manager, which is also the Chromium profile), whichever program made the copy; about 50 ms once and 7 ms after from a separate folder under %LOCALAPPDATA% or %APPDATA%. Started by the app's own exe, a slow copy costs double and a fast one the same 5 ms. The portable type always unpacks under %TEMP% and removes the folder on exit (portable.nsi), so no build setting moves it.
+  The visit part built and verified 2026-11-19: the Converter page's listener acts only on a file in its own list that it last saw offloaded, and the scan's change test compares the file size beside the modified time. Counted on the portable build before and after, same streams (.claude/perf/spawn-count.mjs): 27 ffprobe starts holding the main process 21 s over three streams before, none after. What a visit still starts: six or seven PowerShell local-status checks at about 35 ms each.
+  The helper copy built 2026-11-19, awaiting review: the Windows portable build keeps a copy of ffprobe.exe and ffmpeg.exe (189 MB) in %LOCALAPPDATA%\stream-manager\ffmpeg and starts them from there (services/helperBinaries). The copy is made when it is missing or differs in size from the bundled file and is run once at launch before anything depends on it; the bundled files are the fallback. Settings names the folder and its size in the Cache section. Counted on the portable build, three launches each way: the window is usable 11 s after launch against 18 s, the encoder tests start in 7 to 21 ms against 0.85 s or more, and a probe starts in 6 ms. A first build that kept the copy inside the data folder gained nothing.
+  Still open: the relay listener's start holds the main process 2.1 s at every launch even from the copy (the same exe starts in 6 ms with other arguments; cause not found), the sync-root check at launch is a blocking PowerShell call of 0.55 s, and other machines are not measured. Starting helper processes from a worker is APP-63.
+
+- **STR-59** [impact:3]
+  When there's multiple options for a game for twitch's category, we should offer those options to the user instead of just picking the first one. In fact, we should probably try to replicate the picker that Twitch uses. For the game called "Unloop" there's multiple different games with that same title. SM seemed to choose the wrong one in my case. It always offered the 2017 one instead of the 2025 one, and putting "VR" or "2025" did not pick the correct one (I got the "no match" warning banner for both of those).
+
+- **STR-60** [bug] [ui] [impact:1]
+  Text highlighted in the description stays highlighted after a click outside the field takes focus away from it. A highlight belongs to a field that is being worked in, so it should clear when the description loses focus. Seen 2026-11-19; check whether the selection restore added for STR-56 plays a part.
+
+- **STR-61** [bug] [ui] [impact:1]
+  The description's line spacing differs by about 1 px between stream items that share the same boilerplate text, visible when jumping from one item to the next. Seen 2026-11-19. Very minor.
 
 ### Player
 
@@ -335,6 +351,35 @@
 - **THU-48** [impact:2]
   Add option to switch to rendering bounding box wrapped to clipping mask for groups. This means that the bounding (selection) box would use a layer's clipping mask as the bounds of the layer instead of the whole layer. This would help users size and position layers based on how they render visually instead of what the layer physically contains. After the option is added the clip-wrapped version should be the default.
 
+- **THU-49** [bug] [impact:2]
+  The arrow shape in the thumbnail editor doesn't seem to be able to be resized correctly from all handles. It seems to be different based on the rotation of the shape as well. The right and bottom handles seem to resize correctly only when shift is held (ratio unlock), but all handles seem to resize from the wrong origin otherwise and some handles don't resize in the correct direction at all.
+
+- **THU-50** [bug] [impact:2]
+  Got a front-end crash while editing a thumbnail. When the crash happened, I had just copied an arrow shape, moved it, then went to select the original arrow shape, then the crash happened.
+
+  ```
+  index.js:65 Error: Minified React error #185; visit https://reactjs.org/docs/error-decoder.html?invariant=185 for the full message or use the non-minified dev environment for full errors and additional helpful warnings.
+      at gi (react-dom.production.min.js:265:249)
+      at ii (react-dom.production.min.js:174:441)
+      at ThumbnailPage.tsx:7133:5
+      at ThumbnailPage.tsx:7145:5
+      at Qj (react-dom.production.min.js:243:332)
+      at kk (react-dom.production.min.js:260:147)
+      at ik (react-dom.production.min.js:259:446)
+      at hk (react-dom.production.min.js:258:431)
+      at Wk (react-dom.production.min.js:282:96)
+      at Pk (react-dom.production.min.js:280:398)
+  (anonymous)	@	index.js:65
+  ```
+
+  Was not able to replicate by taking the same steps, so the error was probably something else.
+
+- **THU-51** [bug] [impact:3]
+  Middle clicking in the thumbnail editor to pan seems to sometimes move items underneath the cursor at the time. This seems to be a timing issue. Middle click should never move items. It should also not deselect anything, which it is also doing.
+
+- **THU-52** [impact:3]
+  When multiple items with the same property options are selected, we should allow the properties panel to show mixed values (maybe by leterally saying "mixed" or "???" in the inputs), and allow the user to set the values on those selected items all at the same time.
+
 ### Converter
 
 - **CONV-3** [perf] [investigate]
@@ -379,6 +424,9 @@
 
 - **CONV-29** [impact:1]
   Converter queue needs a clear all button. This will need to ask for confirmation.
+
+- **CONV-30** [impact:1]
+  Converter needs to show active state when anything is in the queue, it can say simple "[N] Items queued" in the nav button subtitle when nothing has been started or finished.
 
 ### Combine
 
@@ -618,6 +666,16 @@
 - **APP-61** [bug] [perf] [impact:2]
   The cache limit pass freezes the whole app for about 1.3 s. It walks every cached file with synchronous calls in the main process (21,145 files in the thumbnail cache on the development machine; 3.5 GB in all under a 10 GB limit, so nothing is removed), a minute after every launch and five seconds after anything new is cached: a row thumbnail, a video's keystone frame, a finished player strip, a waveform, an extracted audio track. Found 2026-11-18 with a CPU profile of the main process: one unbroken stretch of 1.3 to 1.4 s inside enforceCacheLimit in every run, 1.2 s of it the per-file stat of the strip folders.
   Fix shape: walk without blocking (asynchronous calls, a few at a time), and record a strip's size in its meta.json when it is finalized so that a pass reads one file per strip instead of 300.
+
+- **APP-62** [ui] [impact:3]
+  Escape sweep: the Escape key is missing or inconsistent in several places. Known cases:
+    a. Streams sidebar: Escape in the description field should blur it, which confirms any changes, when no AI suggestion is on offer.
+    b. Thumbnail editor, Player and Launcher: with nothing focused or selected, Escape should close the session.
+    c. Streams page: with a value in the search field, the sidebar closed and nothing focused, Escape should clear the search.
+    d. The "Close sidebar" button, and every other button that does what Escape does after this pass, needs the shortcut hint in its tooltip.
+
+- **APP-63** [perf] [maybe] [impact:4]
+  Start helper processes (ffprobe, ffmpeg, PowerShell) from a worker so that the main process never waits on a process start, on any machine. Background in STR-58: a start is a blocking call, and where security software scans an executable at every start it holds the whole app (0.7 to 1.8 s per start in the portable build on the development machine). About 28 call sites in 7 files; the ffmpeg ones read progress from the process and kill it directly, so each needs a relay through the worker. Not yet proven: that starting a process from a worker works in Electron's main process. Only worth doing if starts are still slow somewhere once the helper copy from STR-58 is in.
 
 ### Onboarding & Setup
 

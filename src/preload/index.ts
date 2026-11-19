@@ -30,6 +30,9 @@ contextBridge.exposeInMainWorld('api', {
   getCacheDir: () =>
     ipcRenderer.invoke('video:getCacheDir'),
 
+  getHelperCopy: () =>
+    ipcRenderer.invoke('video:getHelperCopy'),
+
   getThumbnailCache: (filePath: string) =>
     ipcRenderer.invoke('video:getThumbnailCache', filePath),
 

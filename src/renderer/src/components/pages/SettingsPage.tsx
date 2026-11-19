@@ -222,10 +222,14 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
 
   const [cacheDir, setCacheDir] = useState<string>('')
   const [logsDir, setLogsDir] = useState<string>('')
+  // The copy of ffmpeg and ffprobe the Windows portable build keeps in its
+  // data folder (STR-58). Null in a build that keeps none: nothing is shown.
+  const [helperCopy, setHelperCopy] = useState<{ dir: string; size: number; error?: string } | null>(null)
   useEffect(() => {
     window.api.getAudioCacheSize().then(setCacheSize)
     window.api.getCacheDir().then(setCacheDir).catch(() => {})
     window.api.getLogsDir().then(setLogsDir).catch(() => {})
+    window.api.getHelperCopy().then(setHelperCopy).catch(() => {})
   }, [])
 
   useEffect(() => {
@@ -882,6 +886,35 @@ export function SettingsPage({ onOpenOnboarding, onDirtyChange, onNavigate, pend
               <AlertTriangle size={12} className="shrink-0 mt-0.5" />
               <span className="break-all">{cacheError}</span>
             </p>
+          )}
+          {/* Not cache, but the other thing the app keeps on the PC, so it
+              is said here: the portable build's copy of its video tools. */}
+          {helperCopy && (
+            <div className="flex flex-col gap-1">
+              <span className="text-sm font-medium text-gray-300">ffmpeg copy</span>
+              <p className="text-xs text-gray-400 leading-relaxed">
+                {helperCopy.error
+                  ? 'Stream Manager keeps a copy of ffmpeg and ffprobe in the folder below so that they start quickly.'
+                  : `Stream Manager keeps a copy of ffmpeg and ffprobe (${formatBytes(helperCopy.size)}) in the folder below so that they start quickly. It is separate from the cache and is replaced when the app updates.`}
+              </p>
+              <div className="flex items-center gap-2 min-w-0">
+                <Tooltip content="Open the folder in Explorer" triggerClassName="flex min-w-0">
+                  <button
+                    type="button"
+                    onClick={() => window.api.openInExplorer(helperCopy.dir)}
+                    className="text-xs font-mono text-gray-400 hover:text-gray-300 transition-colors truncate text-left"
+                  >
+                    {helperCopy.dir}
+                  </button>
+                </Tooltip>
+              </div>
+              {helperCopy.error && (
+                <p className="flex items-start gap-1.5 text-xs text-red-400">
+                  <AlertTriangle size={12} className="shrink-0 mt-0.5" />
+                  <span className="break-all">The copy could not be used this launch, so ffmpeg runs from the app's temporary folder and may start slowly: {helperCopy.error}</span>
+                </p>
+              )}
+            </div>
           )}
         </Section>
 

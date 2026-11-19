@@ -44,6 +44,10 @@ declare global {
       clearAudioCache(): Promise<{ failed: string[]; remaining: number }>
       getAudioCacheSize(): Promise<number>
       getCacheDir(): Promise<string>
+      /** The copy of ffmpeg and ffprobe the Windows portable build keeps in
+       *  its data folder; null in a build that keeps none. `error` set =
+       *  the copy is not in use and the bundled files run instead. */
+      getHelperCopy(): Promise<{ dir: string; size: number; error?: string } | null>
       getThumbnailCache(filePath: string): Promise<{ timecodes: number[]; frameUrls: string[] } | null>
       saveThumbnailFrame(filePath: string, index: number, dataUrl: string): Promise<void>
       finalizeThumbnailCache(filePath: string, timecodes: number[]): Promise<void>

@@ -6,6 +6,7 @@ import { app } from 'electron'
 import path from 'path'
 import { unlinkWithRetry } from './unlinkWithRetry'
 import { trackChild, UNTIL_EXIT, type ChildOwner } from './ffmpegChildren'
+import { resolveHelperPaths } from './helperBinaries'
 
 // In a packaged build ffmpeg-static and ffprobe-static resolve to paths inside
 // app.asar/. asarUnpack copies the binaries out to app.asar.unpacked/, but the
@@ -15,11 +16,18 @@ function fixAsarPath(p: string): string {
   return p.replace(/app\.asar([/\\])/, 'app.asar.unpacked$1')
 }
 
-/** Absolute path of the bundled ffmpeg with the asar fix applied, or null
- *  when ffmpeg-static resolved nothing. The one place the fix is applied;
- *  the combine handler and the relay manager spawn from this. */
-export const ffmpegBin: string | null = ffmpegStatic ? fixAsarPath(ffmpegStatic) : null
-const ffprobeBin = fixAsarPath(ffprobeStatic.path)
+// The bundled files with the asar fix applied, or, in the Windows portable
+// build, the copies kept in the data folder (see helperBinaries).
+const helpers = resolveHelperPaths({
+  ffmpeg: ffmpegStatic ? fixAsarPath(ffmpegStatic) : null,
+  ffprobe: fixAsarPath(ffprobeStatic.path),
+})
+
+/** Absolute path of the ffmpeg to start, or null when ffmpeg-static
+ *  resolved nothing. The one place the path is decided; the combine handler
+ *  and the relay manager spawn from this. */
+export const ffmpegBin: string | null = helpers.ffmpeg
+const ffprobeBin = helpers.ffprobe
 
 /** `ffmpegBin`, or a thrown Error for callers that cannot proceed without it. */
 export function requireFfmpegBin(): string {
