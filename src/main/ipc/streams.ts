@@ -792,9 +792,11 @@ async function refreshVideoMaps(
     const isLocal = localFlags[i]
 
     if (isLocal) {
-      // Re-probe if missing, mtime changed, or the cached entry is a stat-only fallback
-      // (no duration) from a previous probe failure — gives it a chance to upgrade on retry.
-      if (!existing || existing.mtime !== stat.mtimeMs || existing.duration === undefined) {
+      // Re-probe if missing, mtime or size changed, or the cached entry is a stat-only fallback
+      // (no duration) from a previous probe failure, which gives it a chance to upgrade on retry.
+      // Size is compared too so a file rewritten by a tool that restores the
+      // modified time is still noticed (STR-58).
+      if (!existing || existing.mtime !== stat.mtimeMs || existing.size !== stat.size || existing.duration === undefined) {
         toProbe.push({ p, idx: i })
       }
     } else if (!existing) {

@@ -546,9 +546,22 @@ export function ConverterPage({ pending, onNavigateToStream }: { pending?: Pendi
   // hydration cache so a download from any pipeline counts (the converter's
   // own downloads and a pin from the streams page report on different
   // channels; the cache hears both, see COMB-3).
+  //
+  // Only for a file this page is waiting on: in the ready list and last
+  // seen offloaded. The cache also reports every file whose state it learns
+  // for the first time, so without this test each video the Streams page
+  // showed was probed here and the answer thrown away, one ffprobe start
+  // per video on every first visit to a stream (STR-58). The listener
+  // subscribes once, so it reads the current list through refs.
+  const queuedFilesRef = useRef(queuedFiles)
+  queuedFilesRef.current = queuedFiles
+  const localByPathRef = useRef(localByPath)
+  localByPathRef.current = localByPath
   useEffect(() => {
     const off = subscribeHydration((filePath, isLocal) => {
       if (!isLocal) return
+      if (localByPathRef.current[filePath] !== false) return
+      if (!queuedFilesRef.current.some(f => f.path === filePath)) return
       setLocalByPath(prev => (prev[filePath] === true ? prev : { ...prev, [filePath]: true }))
       setHydratingReadyPaths(prev => {
         if (!prev.has(filePath)) return prev
