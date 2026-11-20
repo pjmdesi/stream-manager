@@ -440,15 +440,35 @@ class RelayOrchestrator extends EventEmitter {
         await transitionBroadcast(broadcastId, 'complete', clientId, clientSecret)
         this.emit('lifecycle', { stage: 'completed', broadcastId, broadcastTitle })
       } catch (e: any) {
-        // Non-fatal — enableAutoStop is the safety net. Log the message so
-        // the user can see what happened, but the broadcast will still
-        // finalize within ~60s on YouTube's side.
-        this.emit('lifecycle', {
-          stage: 'error',
-          broadcastId,
-          broadcastTitle,
-          error: `Couldn't finalize broadcast cleanly (YouTube will auto-finalize within ~60s): ${e?.message ?? e}`,
-        })
+        // This call is a safety net: its job is that a broadcast does not
+        // go on presenting as live once the stream is over. A refusal is
+        // a failure only while the broadcast is still live. When it was
+        // ended first (the End stream button in YouTube Studio, or
+        // YouTube's own auto-stop), YouTube refuses with "Invalid
+        // transition", and that is the session completing normally: no
+        // error, and the post-stream flow runs as after any stream
+        // (LIVE-4). So ask what state the broadcast is in before
+        // reporting anything.
+        let stillLive = true
+        try {
+          const { clientId, clientSecret } = this.getCreds()
+          const status = await getBroadcastLifeCycleStatus(broadcastId, clientId, clientSecret)
+          stillLive = status === 'live' || status === 'liveStarting'
+        } catch {
+          // Could not ask: unverified, so report the refusal.
+        }
+        if (stillLive) {
+          // enableAutoStop still finalizes it within about a minute on
+          // YouTube's side; the message says so.
+          this.emit('lifecycle', {
+            stage: 'error',
+            broadcastId,
+            broadcastTitle,
+            error: `Couldn't finalize broadcast cleanly (YouTube will auto-finalize within ~60s): ${e?.message ?? e}`,
+          })
+        } else {
+          this.emit('lifecycle', { stage: 'completed', broadcastId, broadcastTitle })
+        }
       }
       this.liveBroadcastId = null
       this.liveBroadcastTitle = null

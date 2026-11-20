@@ -1004,7 +1004,11 @@ export async function unbindBroadcast(
  *      receiving data); if called too soon after bind, fails with an error
  *      mentioning stream status. Caller should retry with a delay.
  *    - 'complete' can be called from 'live' (normal end-of-stream) or
- *      'testing'; idempotent if already 'complete'. */
+ *      'testing'. It is NOT idempotent: a broadcast that has already
+ *      ended is refused with "Invalid transition" (seen 2026-11-19, a
+ *      stream ended from YouTube Studio; LIVE-4), so a caller that may
+ *      arrive late reads the broadcast's status before calling a refusal
+ *      a failure. */
 export async function transitionBroadcast(
   broadcastId: string,
   broadcastStatus: 'testing' | 'live' | 'complete',
