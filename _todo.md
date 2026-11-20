@@ -49,6 +49,8 @@
 
 ## Next up
 
+1. LIVE-5
+
 ## Improvement ideas
 
 ### Streams page
@@ -528,7 +530,12 @@
   Cause: thirty seconds after the stream stops, SM asks YouTube to end the broadcast it took live (relayOrchestrator, the grace timer). That request is a safety net, so that a broadcast does not go on presenting as live once the stream is over. When the broadcast was ended first, YouTube refuses the request with "Invalid transition" (its reference documents "Redundant transition" for that case), and SM reported the refusal as an error.
   Consequence while it lasted: the error stage took the place of completed, so the post-stream Twitch update or prompt did not run for that stream (StreamsPage listens for completed and cancels on error), and the red line stayed in the widget until the next session.
   Built 2026-11-19, awaiting review: on a refusal SM reads the broadcast's status and reports an error only while YouTube still has it live (or the status cannot be read); otherwise the session completes as after any stream.
-  Still to verify, separate from the fix: SM reads and writes enableMonitorStream directly under contentDetails, while YouTube's transition reference names it contentDetails.monitorStream.enableMonitorStream. If so, SM-created broadcasts keep the monitor stage on and every go-live takes the testing step. A relay log (appLogs) of lifecycle events and refused requests would let the next case be read back.
+  Found on the way, confirmed in YouTube's reference 2026-11-19, not fixed: SM reads and writes enableMonitorStream directly under contentDetails, but the property is contentDetails.monitorStream.enableMonitorStream. So SM never turns the monitor stage off on the broadcasts it creates and never reads it back, and every go-live takes the testing step and its two-second wait. A relay log (appLogs) of lifecycle events and refused requests would let the next case be read back.
+
+- **LIVE-5** [impact:2]
+  YouTube has its own Auto-start and Auto-stop switches per broadcast, and SM sets them without saying so: every broadcast SM creates gets Auto-start off and Auto-stop on (createBroadcast), and nothing in SM shows or changes them afterwards. Raised 2026-11-19, when the Auto-stop switch was found on in YouTube Studio with no memory of setting it.
+  What they do, from YouTube's reference: Auto-start takes the broadcast live when video arrives on its stream; Auto-stop ends it about a minute after video stops. They overlap with the relay's own go-live and its end request thirty seconds after the stream stops; binding the picked broadcast to the stream and the post-stream Twitch step have no YouTube counterpart. Both can be set through the API on an existing broadcast (liveBroadcasts.update; Auto-start only before the stream starts), and SM already reads them at go-live without using them.
+  Decided 2026-11-19: SM keeps starting and ending the broadcast, Auto-stop stays on as the backstop for when SM is not running, and the relay settings say that SM sets it. Handing start and end to YouTube (both switches on, SM only binds and watches) was considered and dropped. Open for the build: whether SM shows the two switches and re-applies Auto-stop when a broadcast is picked, and the "YouTube will auto-finalize" wording in the finalize error, which is wrong while Auto-stop is off.
 
 ### App-wide & foundation
 
